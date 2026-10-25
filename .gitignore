@@ -1,0 +1,34 @@
+node_modules/
+dist/
+dist-server/
+.secrets/
+.env
+data/
+coverage/
+*.log
+.DS_Store
+playwright-report/
+test-results/
+artifacts/
+
+# Native iOS build products and personal signing state
+ios/.build/
+ios/.artifacts/
+**/xcuserdata/
+*.xcuserstate
+*.ipa
+*.xcarchive/
+*.mobileprovision
+*.p12
+*.p8
+*.pem
+*.key
+*.sqlite*
+*.db*
+bilight-backup*/
+.env.*
+!*.example
+
+# Internal acceptance notes may contain personal viewing and device details.
+docs/acceptance.md
+ios/ACCEPTANCE.md

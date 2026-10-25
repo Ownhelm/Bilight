@@ -1,0 +1,16 @@
+.git
+.secrets
+.env*
+data
+node_modules
+dist
+dist-server
+*.log
+docs/*
+!docs/licenses/
+!docs/licenses/**
+test-results
+playwright-report
+artifacts
+
+ios/

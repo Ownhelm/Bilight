@@ -1,0 +1,21 @@
+name: 问题反馈
+description: 描述可以复现的问题，不要填写账号凭据。
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 使用端
+      options: [iPhone, 电脑端 Docker, 本地开发]
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 操作步骤与实际结果
+      description: 请不要粘贴 Cookie、手机号、验证码或含账号信息的日志／截图。
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期结果

@@ -1,0 +1,24 @@
+name: 检查
+on: [push, pull_request, workflow_dispatch]
+permissions:
+  contents: read
+jobs:
+  web:
+    name: 网页与 API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
+      - run: docker build -t bilight:ci .
+  ios:
+    name: iPhone 编译（不签名）
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: xcodebuild -project ios/Bilight.xcodeproj -scheme Bilight -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/bilight-ios CODE_SIGNING_ALLOWED=NO build
