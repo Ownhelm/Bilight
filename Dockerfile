@@ -7,6 +7,7 @@ COPY tsconfig*.json vite.config.ts index.html ./
 COPY shared ./shared
 COPY server ./server
 COPY src ./src
+COPY branding ./branding
 COPY tests ./tests
 RUN npm run build && npm prune --omit=dev
 

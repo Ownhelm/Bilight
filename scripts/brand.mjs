@@ -45,6 +45,7 @@ for (const path of ['src/App.tsx', 'src/styles.css', '../Promotion/Video/src/fil
 }
 if (!readFileSync(resolve(root, 'README.md'), 'utf8').includes('src="branding/project-mark.svg"')) failures.push('README 未直接引用统一的项目标志');
 if (!readFileSync(resolve(root, 'src/App.tsx'), 'utf8').includes('branding/playback-mark.svg')) failures.push('网页未引用统一的播放标志');
+if (!readFileSync(resolve(root, 'Dockerfile'), 'utf8').includes('COPY branding ./branding')) failures.push('Docker 构建遗漏品牌源目录');
 if (!readFileSync(resolve(root, 'ios/Bilight/Features/SearchView.swift'), 'utf8').includes('Image("PlaybackMark")')) failures.push('iPhone 首页未引用统一的播放标志');
 if (existsSync(promotion) && !write) {
   const recordPath = resolve(promotion, 'Screenshots/brand-assets.json');
