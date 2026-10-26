@@ -98,7 +98,7 @@ docker compose up -d --build
 
 手机端使用 App 内官方登录页，**安装后可以独立使用，不需要电脑或 Docker 保持运行。**
 
-目前需要从源码构建并签名安装，暂未提供 App Store 或 TestFlight 版本；未签名 IPA 不能直接安装。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
+可从[发行版](https://github.com/Ownhelm/Bilight/releases)下载完整源码包和未签名 IPA。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
 
 ## 反馈与参与
 
