@@ -21,6 +21,28 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 它不是一个让人刷得更久的客户端，而是希望让“看完了”重新成为一个自然的结束。
 
+## 界面预览
+
+### iOS
+
+| 首页搜索 | 关注动态 | 我的账号 |
+| :---: | :---: | :---: |
+| <img src="docs/assets/ios-home.png" width="240" alt="iOS 首页搜索"> | <img src="docs/assets/ios-following.png" width="240" alt="iOS 关注动态"> | <img src="docs/assets/ios-account.png" width="240" alt="iOS 我的账号"> |
+
+### 网页端
+
+**首页搜索**
+
+![网页端首页搜索](docs/assets/web-home.png)
+
+**关注视频**
+
+![网页端关注视频](docs/assets/web-following.png)
+
+**UP 主主页**
+
+![网页端 UP 主主页](docs/assets/web-collections.png)
+
 ## 可以做什么
 
 | 功能 | iPhone 客户端 | 安卓客户端 | 电脑客户端 |
@@ -60,7 +82,7 @@ node scripts/setup.mjs
 docker compose up -d --build
 ```
 
-打开 **http://127.0.0.1:3880**，扫码或短信登录已有的 B 站账号。服务只绑定本机地址，不需要额外注册 Bilight 账号。
+打开 `http://127.0.0.1:3880`，扫码或短信登录已有的 B 站账号。服务只绑定本机地址，不需要额外注册 Bilight 账号。
 
 没有 Node.js 时，也可以在仓库目录用一次性容器生成密钥：
 
@@ -79,12 +101,6 @@ docker compose up -d --build
 手机端使用 App 内官方登录页，**安装后可以独立使用，不需要电脑或 Docker 保持运行。**
 
 目前需要从源码构建并签名安装，暂未提供 App Store 或 TestFlight 版本；未签名 IPA 不能直接安装。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
-
-## 隐私
-
-电脑端登录凭据加密保存在本地服务中，iPhone 登录凭据保存在本机，不在两端之间传递。使用已有的 B 站账号即可，不需要注册 Bilight 账号。
-
-观看历史与进度同步到 B 站账号，其他设备播放的记录也可在刷新后查看。同步需要登录和联网；遇到失败会提示，断网后直接关闭 App 可能丢失尚未同步的进度。
 
 ## 反馈与参与
 

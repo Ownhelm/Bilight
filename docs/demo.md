@@ -1,6 +1,6 @@
 # 离线演示与截图
 
-演示账号、关注关系、动态容器和历史进度为 mock；影视飓风、小鹿Lawrence、超Carry的柴西的视频标题、封面、头像与合集快照来自公开页面。没有读取个人账号或对真实截图打码。[公开内容来源与权属](demo-content.md)。代码仓库只保存演示逻辑与 JSON 数据，不捆绑宣发图片。
+演示账号、关注关系、动态容器和历史进度为 mock；影视飓风、小鹿Lawrence、超Carry的柴西的视频标题、封面、头像与合集快照来自公开页面。没有读取个人账号或对真实截图打码。[公开内容来源与权属](demo-content.md)。代码仓库保存演示逻辑、JSON 数据和 README 使用的精选界面截图，不捆绑完整宣发素材。
 
 ## 外部素材
 
@@ -28,4 +28,4 @@ bash ios/scripts/preview.sh
 
 `scripts/demo-public-content.json` 记录公开资料及校验值，`scripts/demo-fixtures.mjs` 组合虚构账号，`node scripts/prepare-demo.mjs` 更新原生 JSON。素材合成脚本位于仓库外 `Promotion/Tools/readme-assets.py`，生成图片始终写入 Promotion。
 
-仅截取模拟器或演示网页，不能包含真实设备列表、桌面、通知和个人信息。代码 README 不嵌入本地宣发图片；完整工作区的总览 README 可展示这些外部截图。
+仅截取模拟器或演示网页，不能包含真实设备列表、桌面、通知和个人信息。代码 README 直接展示 `docs/assets/` 中的六张精选演示截图，不依赖仓库外路径或额外跳转；完整素材仍在 Promotion 中管理。执行 `npm run brand:sync` 同步精选图片，`npm run check:brand` 检查图片和引用是否齐全。
