@@ -194,6 +194,38 @@ test('playback route requests the highest quality by default and preserves an ex
   assert.deepEqual(qualities, [127, 64]);
 });
 
+test('a stalled subtitle route leaves playback available and returns only registered same-origin tracks', async t => {
+  let release!: () => void;
+  const stalled = new Promise<void>(resolve => { release = resolve; });
+  let subtitleStarted = false, subtitleFinished = false;
+  const transport = { request: async (url: string) => {
+    if (url.endsWith('/view')) return { aid: 123, pages: [{ cid: 42, page: 1 }] };
+    if (url.endsWith('/playurl')) return { dash: { duration: 90, video: [{ ...source.video, SegmentBase: source.video!.segmentBase }], audio: [{ ...source.audio, SegmentBase: source.audio!.segmentBase }] } };
+    if (url.endsWith('/v2')) {
+      subtitleStarted = true;
+      await stalled;
+      return { subtitle: { subtitles: [{ id: 1, lan: 'zh-CN', lan_doc: '中文', subtitle_url: 'https://aisubtitle.hdslb.com/track.json' }] } };
+    }
+    throw new Error('Unexpected request');
+  } } as unknown as BiliHttp;
+  const app = await createApp({ auth, gateway: new BiliGateway(transport), key: randomBytes(32), staticDir: '/nonexistent' });
+  t.after(() => app.close());
+  const captions = app.inject({ url: `/api/videos/${bvid}/subtitles?cid=42`, headers: host }).then(response => { subtitleFinished = true; return response; });
+  try {
+    while (!subtitleStarted) await new Promise(resolve => setImmediate(resolve));
+    const start = performance.now();
+    const playable = await app.inject({ url: `/api/videos/${bvid}/playback?cid=42`, headers: host });
+    assert.equal(playable.statusCode, 200); assert.equal(playable.json().quality, 80);
+    assert.ok(performance.now() - start < 200, 'First playback must not wait for subtitle metadata');
+    assert.equal(subtitleFinished, false);
+  } finally { release(); }
+  const response = await captions;
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json()[0].lang, 'zh-CN');
+  assert.match(response.json()[0].url, /^\/api\/media\/[a-f\d-]+\/subtitle\.vtt$/);
+  assert.ok(!response.body.includes('hdslb.com'));
+});
+
 test('detail, playback, comments and danmaku routes reuse one session-scoped detail request without skipping part checks', async t => {
   let details = 0;
   const transport = {
@@ -207,10 +239,10 @@ test('detail, playback, comments and danmaku routes reuse one session-scoped det
   } as unknown as BiliHttp;
   const app = await createApp({ auth, gateway: new BiliGateway(transport), key: randomBytes(32), staticDir: '/nonexistent' }); t.after(() => app.close());
   assert.equal((await app.inject({ url: `/api/videos/${bvid}`, headers: host })).statusCode, 200);
-  const responses = await Promise.all(['playback?cid=42', 'comments', 'danmaku?cid=42'].map(route => app.inject({ url: `/api/videos/${bvid}/${route}`, headers: host })));
-  assert.deepEqual(responses.map(response => response.statusCode), [200, 200, 200]);
+  const responses = await Promise.all(['playback?cid=42', 'comments', 'danmaku?cid=42', 'subtitles?cid=42'].map(route => app.inject({ url: `/api/videos/${bvid}/${route}`, headers: host })));
+  assert.deepEqual(responses.map(response => response.statusCode), [200, 200, 200, 200]);
   assert.equal(details, 1);
-  for (const route of ['playback', 'danmaku']) assert.equal((await app.inject({ url: `/api/videos/${bvid}/${route}?cid=999`, headers: host })).statusCode, 400);
+  for (const route of ['playback', 'danmaku', 'subtitles']) assert.equal((await app.inject({ url: `/api/videos/${bvid}/${route}?cid=999`, headers: host })).statusCode, 400);
   assert.equal(details, 1);
 });
 

@@ -450,10 +450,9 @@ export class BiliGateway {
 
   async playback(bvid: string, cid: number, quality = 127): Promise<PlaybackSource> {
     validBvid(bvid); integer(cid, '分 P 编号'); integer(quality, '画质');
-    const [data, subtitles] = await Promise.all([
-      this.transport.request<RecordValue>(`${API}/x/player/wbi/playurl`, { wbi: true, query: { bvid, cid, qn: quality, fnval: 4048, fnver: 0, fourk: 1 } }),
-      this.subtitles(bvid, cid),
-    ]);
+    // Optional metadata has its own route: a slow subtitle service must not gate the first frame.
+    const data = await this.transport.request<RecordValue>(`${API}/x/player/wbi/playurl`, { wbi: true, query: { bvid, cid, qn: quality, fnval: 4048, fnver: 0, fourk: 1 } });
+    const subtitles: Subtitle[] = [];
     const dash = object(data.dash), videos = array(dash.video).filter(track => /^avc[13]\./i.test(String(track.codecs))), audios = array(dash.audio).filter(track => /^mp4a\./i.test(String(track.codecs)));
     const accepted = Array.isArray(data.accept_quality) ? data.accept_quality : [], labels = Array.isArray(data.accept_description) ? data.accept_description : [];
     const label = (id: number) => clean(labels[accepted.indexOf(id)] ?? array(data.support_formats).find(item => number(item.quality) === id)?.new_description ?? `${id}`, 100);
@@ -479,11 +478,10 @@ export class BiliGateway {
     return { id: number(raw.id), baseUrl, backupUrl: (Array.isArray(raw.backupUrl ?? raw.backup_url) ? raw.backupUrl ?? raw.backup_url : []).map(https).filter(Boolean), mimeType: clean(raw.mimeType ?? raw.mime_type, 100), codecs: clean(raw.codecs, 100), bandwidth: number(raw.bandwidth), ...(raw.width ? { width: number(raw.width) } : {}), ...(raw.height ? { height: number(raw.height) } : {}), ...(raw.frameRate || raw.frame_rate ? { frameRate: clean(raw.frameRate ?? raw.frame_rate, 40) } : {}), segmentBase: { initialization, indexRange } };
   }
 
-  private async subtitles(bvid: string, cid: number): Promise<Subtitle[]> {
-    try {
-      const data = await this.transport.request<RecordValue>(`${API}/x/player/wbi/v2`, { wbi: true, query: { bvid, cid } });
-      return array(object(data.subtitle).subtitles).map(item => ({ id: clean(item.id_str ?? item.id, 100), lang: clean(item.lan, 40), label: clean(item.lan_doc, 100), url: https(item.subtitle_url) })).filter(item => item.url);
-    } catch { return []; } // Subtitle availability is optional and must not prevent video playback.
+  async subtitles(bvid: string, cid: number): Promise<Subtitle[]> {
+    validBvid(bvid); integer(cid, '分 P 编号');
+    const data = await this.transport.request<RecordValue>(`${API}/x/player/wbi/v2`, { wbi: true, query: { bvid, cid } });
+    return array(object(data.subtitle).subtitles).map(item => ({ id: clean(item.id_str ?? item.id, 100), lang: clean(item.lan, 40), label: clean(item.lan_doc, 100), url: https(item.subtitle_url) })).filter(item => item.url);
   }
 
   async danmaku(cid: number): Promise<Danmaku[]> {

@@ -8,13 +8,20 @@ import SwiftUI
     @Environment(\.scenePhase) private var scene
     var body: some Scene {
         WindowGroup {
-            RootView().environmentObject(app).onChange(of: scene) { _, phase in
+            Group {
+                #if DEBUG
+                    if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
+                #else
+                    RootView()
+                #endif
+            }.environmentObject(app).onChange(of: scene) { _, phase in
                 if phase == .background { app.downloads.requestBackgroundTime() }
                 if phase == .active, app.user != nil { app.downloads.resumeInterrupted() }
             }.task {
                 guard !started else { return }
                 started = true
                 #if DEBUG
+                    if InteractionRegression.enabled { app.restoring = false; return }
                     if DemoFixtures.enabled {
                         await DemoFixtures.prepare(app)
                         return

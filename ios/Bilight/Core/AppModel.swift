@@ -21,7 +21,7 @@ import SwiftUI
     var dynamics: [String: DynamicPost] = [:]
     init() {
         #if DEBUG
-            let client = DemoFixtures.enabled ? DemoFixtures.client() : BiliClient()
+            let client = DemoFixtures.enabled || InteractionRegression.enabled ? DemoFixtures.client() : BiliClient()
         #else
             let client = BiliClient()
         #endif

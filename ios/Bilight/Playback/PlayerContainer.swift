@@ -98,7 +98,7 @@ import AVKit
             }
         }
         if fullscreen == nil, !nativeFullscreen, Self.orientation(view.window?.windowScene)?.isLandscape == true {
-            enterFullscreen(rotate: false)
+            enterFullscreen(rotate: false, automatic: true)
         } else {
             refreshOrientationPolicy()
             if fullscreen == nil { deviceOrientationChanged() }
@@ -114,26 +114,33 @@ import AVKit
         if orientation.isPortrait { suppressUntilPortrait = false }
         if orientation.isLandscape {
             deviceWasLandscape = true
-            if fullscreen == nil, !nativeFullscreen, !suppressUntilPortrait { enterFullscreen() }
-        } else if orientation.isPortrait, deviceWasLandscape, fullscreen != nil {
+            if fullscreen == nil, !nativeFullscreen, !suppressUntilPortrait { enterFullscreen(automatic: true) }
+        } else if orientation.isPortrait, deviceWasLandscape, fullscreen?.exitsOnPortrait == true {
             exitFullscreen()
         }
     }
     @objc private func toggleFullscreen() {
         if fullscreen != nil { exitFullscreen() } else { enterFullscreen() }
     }
-    func enterFullscreen(rotate: Bool = true, animated: Bool = false) {
+    func enterFullscreen(rotate: Bool = true, animated: Bool = false, automatic: Bool = false) {
         guard fullscreen == nil, !nativeFullscreen, view.window != nil, presentedViewController == nil,
             !isBeingDismissed
         else { return }
         let target = FullscreenContainer()
+        let currentOrientation = Self.orientation(view.window?.windowScene) ?? .portrait
+        let size = model.player.currentItem?.presentationSize ?? .zero
+        let portraitVideo = size.width > 0 ? size.height > size.width : (model.playback?.video.map { $0.height > $0.width } ?? false)
+        target.preferredOrientation = rotate
+            ? (portraitVideo && !automatic ? .portrait : (currentOrientation.isLandscape ? currentOrientation : .landscapeRight))
+            : currentOrientation
+        target.exitsOnPortrait = automatic || (rotate && !portraitVideo)
         target.modalPresentationStyle = .fullScreen
         target.modalPresentationCapturesStatusBarAppearance = true
         target.onOrientation = { [weak self, weak target] landscape in
             guard let self, let target else { return }
             if landscape {
                 target.hasBeenLandscape = true
-            } else if target.hasBeenLandscape {
+            } else if target.hasBeenLandscape && target.exitsOnPortrait {
                 self.finishExit(from: target)
             }
         }
@@ -161,7 +168,7 @@ import AVKit
             self.restorePlayback()
             self.traceFullscreen(active: true)
             self.scheduleControlsAutoHide()
-            if rotate { self.requestOrientation(.landscape, from: target) }
+            if rotate { self.requestOrientation(target.preferredOrientation.isPortrait ? .portrait : .landscape, from: target) }
         }
     }
     func exitFullscreen() {
@@ -417,10 +424,12 @@ import AVKit
     var onOrientation: ((Bool) -> Void)?
     var onDismiss: (() -> Void)?
     var hasBeenLandscape = false
+    var exitsOnPortrait = false
+    var preferredOrientation: UIInterfaceOrientation = .portrait
     override var prefersStatusBarHidden: Bool { true }
     override var prefersHomeIndicatorAutoHidden: Bool { true }
     override var supportedInterfaceOrientations: UIInterfaceOrientationMask { .allButUpsideDown }
-    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { .landscapeRight }
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation { preferredOrientation }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black

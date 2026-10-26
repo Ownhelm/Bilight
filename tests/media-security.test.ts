@@ -22,6 +22,27 @@ test('expired DASH media rejects a changed rendition instead of attaching new by
   assert.equal(downloads, 1, 'a different encoding must not be downloaded with the old byte ranges');
 });
 
+test('expired CDN alternatives are refreshed together without changing rendition or requested bytes', async () => {
+  const urls: string[] = [];
+  let renewals = 0;
+  const initial = { ...original, video: { ...original.video!, backupUrl: ['https://backup.akamaized.net/video.m4s?token=old'] } };
+  const renewed = { ...initial, video: { ...initial.video, baseUrl: 'https://test.bilivideo.com/video.m4s?token=new', backupUrl: ['https://backup.akamaized.net/video.m4s?token=new'] } };
+  const gateway = { playback: async () => { renewals++; return renewed; } } as unknown as BiliGateway;
+  const media = new MediaRegistry(gateway, (async (url, options) => {
+    urls.push(String(url));
+    assert.equal(new Headers(options?.headers).get('range'), 'bytes=2001-2004');
+    if (!String(url).includes('backup.') || !String(url).includes('token=new')) return new Response(null, { status: 403 });
+    return new Response('data', { status: 206, headers: { 'content-type': 'video/mp4', 'content-range': 'bytes 2001-2004/3000', 'content-length': '4' } });
+  }) as typeof fetch);
+  const mapped = media.playback(initial, 'BV17x411w7KC');
+  const manifest = media.manifest(mapped.manifestUrl!.split('/')[3])!;
+  const id = manifest.match(/<BaseURL>([^<]+)<\/BaseURL>/)![1].split('/').pop()!;
+  assert.equal(await (await media.fetch(id, 'bytes=2001-2004'))!.response.text(), 'data');
+  assert.equal(renewals, 1);
+  assert.ok(urls.some(url => url.includes('backup.') && url.includes('token=new')));
+  assert.ok(!manifest.includes('token='));
+});
+
 test('video and audio proxy routes reject executable upstream content served as HTML', async t => {
   const gateway = {} as BiliGateway;
   const media = new MediaRegistry(gateway, (async () => new Response('<script>window.localOriginExecuted = true</script>', { headers: { 'content-type': 'text/html' } })) as typeof fetch);

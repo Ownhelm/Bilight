@@ -2,12 +2,87 @@ import { randomUUID } from 'node:crypto';
 import type { Playback } from '../shared/types.js';
 import type { BiliGateway, PlaybackSource } from './gateway.js';
 
-type Resource = { url: string; key: string; kind: 'image' | 'video' | 'audio' | 'subtitle'; createdAt: number; renew?: () => Promise<string> };
+type RenewedResource = string | { url: string; backups: string[] };
+type Resource = { url: string; backups: string[]; preferred?: string; key: string; kind: 'image' | 'video' | 'audio' | 'subtitle'; createdAt: number; renew?: () => Promise<RenewedResource> };
 const MEDIA_DOMAINS = ['bilivideo.com', 'bilivideo.cn', 'bilivideo.net', 'akamaized.net'];
 const IMAGE_DOMAINS = ['hdslb.com', 'hdslb.net', 'biliimg.com'];
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15';
 const escapeXml = (value: unknown) => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' }[c]!));
 const rangeValue = (value: string) => /^\d+-\d+$/.test(value) ? value : '';
+const MEDIA_TYPES = new Set(['video/mp4', 'audio/mp4', 'audio/x-m4a', 'video/x-m4v', 'application/mp4', 'application/octet-stream']);
+const RANGE_CHUNK = 1024 * 1024;
+
+function usableCandidate(response: Response, range?: string): boolean {
+  if (response.status === 416) return true;
+  if (!MEDIA_TYPES.has((response.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase())) return false;
+  if (!range) return true;
+  const actual = /^bytes (\d+)-(\d+)\/(\d+)$/.exec(response.headers.get('content-range') ?? '');
+  if (response.status !== 206 || !actual) return false;
+  const [start, end, total] = actual.slice(1).map(Number), [from, to] = range.slice(6).split('-');
+  if (![start, end, total].every(Number.isSafeInteger) || start > end || end >= total) return false;
+  const wantedStart = from ? Number(from) : Math.max(0, total - Number(to));
+  const wantedEnd = from && to ? Math.min(Number(to), total - 1) : total - 1;
+  const length = response.headers.get('content-length');
+  return start === wantedStart && end === wantedEnd && (!length || Number(length) === end - start + 1);
+}
+
+function parallelRangeResponse(first: Response, start: number, end: number, total: number, readRange: (range: string, signal: AbortSignal) => Promise<Response>): Response {
+  const etag = first.headers.get('etag')!, type = first.headers.get('content-type');
+  const cancellation = new AbortController(), queue = new Map<number, Promise<Uint8Array>>();
+  const count = Math.ceil((end - start + 1) / RANGE_CHUNK);
+  let next = 0, scheduled = 0;
+  const invalid = () => Object.assign(new Error('视频分段的文件标识、长度或字节范围发生变化，请重新加载。'), { status: 409, code: 'MEDIA_CHANGED' });
+  async function chunk(index: number): Promise<Uint8Array> {
+    const from = start + index * RANGE_CHUNK, to = Math.min(end, from + RANGE_CHUNK - 1), range = `bytes=${from}-${to}`;
+    const response = index === 0 ? first : await readRange(range, cancellation.signal);
+    if (cancellation.signal.aborted) { await response.body?.cancel(); throw cancellation.signal.reason; }
+    if (!usableCandidate(response, range) || response.headers.get('etag') !== etag || response.headers.get('content-type') !== type || response.headers.get('content-range') !== `bytes ${from}-${to}/${total}`) {
+      await response.body?.cancel(); throw invalid();
+    }
+    const reader = response.body?.getReader();
+    if (!reader) throw invalid();
+    const bytes = new Uint8Array(to - from + 1);
+    const abort = () => { void reader.cancel(cancellation.signal.reason).catch(() => {}); };
+    cancellation.signal.addEventListener('abort', abort, { once: true });
+    let offset = 0;
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (offset + value.byteLength > bytes.byteLength) throw invalid();
+        bytes.set(value, offset); offset += value.byteLength;
+      }
+      if (cancellation.signal.aborted) throw cancellation.signal.reason;
+      if (offset !== bytes.byteLength) throw invalid();
+      return bytes;
+    } catch (error) { await reader.cancel().catch(() => {}); throw error; }
+    finally { cancellation.signal.removeEventListener('abort', abort); reader.releaseLock(); }
+  }
+  function fill() {
+    // At most three 1 MiB ranges in flight, plus one chunk in the consumer's stream queue.
+    while (scheduled < count && queue.size < 3 && !cancellation.signal.aborted) {
+      const index = scheduled++;
+      const pending = chunk(index).catch(error => { cancellation.abort(error); throw error; });
+      pending.catch(() => {}); queue.set(index, pending);
+    }
+  }
+  const body = new ReadableStream<Uint8Array>({
+    start() { fill(); },
+    async pull(controller) {
+      try {
+        if (cancellation.signal.aborted) throw cancellation.signal.reason;
+        const bytes = await queue.get(next)!;
+        queue.delete(next++); controller.enqueue(bytes);
+        if (next === count) controller.close(); else fill();
+      } catch (error) { cancellation.abort(error); controller.error(error); }
+    },
+    cancel(reason) { cancellation.abort(reason); },
+  });
+  const headers = new Headers(first.headers);
+  headers.set('content-range', `bytes ${start}-${end}/${total}`);
+  headers.set('content-length', String(end - start + 1));
+  return new Response(body, { status: 206, headers });
+}
 
 export function validateMediaUrl(value: string, kind: Resource['kind']): URL {
   const url = new URL(value.startsWith('//') ? `https:${value}` : value);
@@ -22,19 +97,20 @@ export class MediaRegistry {
   private resources = new Map<string, Resource>();
   private keys = new Map<string, string>();
   private manifests = new Map<string, { source: PlaybackSource; expiresAt: number }>();
-  private renewals = new Map<string, Promise<string>>();
+  private renewals = new Map<string, Promise<RenewedResource>>();
   constructor(private gateway: BiliGateway, private fetcher: typeof fetch = fetch) {}
   clear(): void { this.resources.clear(); this.keys.clear(); this.manifests.clear(); this.renewals.clear(); }
 
-  register(url: string, kind: Resource['kind'], renew?: () => Promise<string>): string {
+  register(url: string, kind: Resource['kind'], renew?: () => Promise<RenewedResource>, backups: string[] = []): string {
     const normalized = validateMediaUrl(url, kind).href;
+    const alternatives = [...new Set(backups.flatMap(value => { try { return [validateMediaUrl(value, kind).href]; } catch { return []; } }))].filter(value => value !== normalized).slice(0, 2);
     const key = `${kind}:${normalized}`;
     const previous = this.keys.get(key);
     const existing = previous ? this.resources.get(previous) : undefined;
     if (existing && Date.now() - existing.createdAt <= 86400000) return `/api/media/${previous}`;
     if (previous) { this.keys.delete(key); this.resources.delete(previous); }
     const id = randomUUID();
-    this.resources.set(id, { url: normalized, key, kind, createdAt: Date.now(), renew });
+    this.resources.set(id, { url: normalized, backups: alternatives, key, kind, createdAt: Date.now(), renew });
     this.keys.set(key, id);
     while (this.resources.size > 10000) {
       const oldest = this.resources.keys().next().value!;
@@ -57,12 +133,12 @@ export class MediaRegistry {
       const original = source[kind], renewed = (await latest())[kind];
       const signature = (track: NonNullable<typeof original>) => JSON.stringify([track.id, track.mimeType, track.codecs, track.width, track.height, track.segmentBase]);
       if (!original || !renewed || signature(original) !== signature(renewed) || new URL(original.baseUrl).pathname !== new URL(renewed.baseUrl).pathname) throw changedStream();
-      return renewed.baseUrl;
+      return { url: renewed.baseUrl, backups: renewed.backupUrl ?? [] };
     };
     const mapped: Playback = { cid: source.cid, quality: source.quality, qualities: source.qualities, subtitles: source.subtitles.map(sub => ({ ...sub, url: `${this.register(sub.url, 'subtitle')}/subtitle.vtt` })) };
     if (source.video) {
-      const video = { ...source.video, baseUrl: this.register(source.video.baseUrl, 'video', () => renewTrack('video')) };
-      const audio = source.audio ? { ...source.audio, baseUrl: this.register(source.audio.baseUrl, 'audio', () => renewTrack('audio')) } : undefined;
+      const video = { ...source.video, baseUrl: this.register(source.video.baseUrl, 'video', () => renewTrack('video'), source.video.backupUrl) };
+      const audio = source.audio ? { ...source.audio, baseUrl: this.register(source.audio.baseUrl, 'audio', () => renewTrack('audio'), source.audio.backupUrl) } : undefined;
       const id = randomUUID();
       this.manifests.set(id, { source: { ...source, video, audio }, expiresAt: Date.now() + 86400000 });
       for (const [key, manifest] of this.manifests) if (manifest.expiresAt < Date.now()) this.manifests.delete(key);
@@ -96,12 +172,14 @@ export class MediaRegistry {
     const resource = this.resources.get(id);
     if (!resource || Date.now() - resource.createdAt > 86400000) return undefined;
     if (range && !/^bytes=\d*-\d*$/.test(range)) throw Object.assign(new Error('不支持的播放范围。'), { status: 416, code: 'INVALID_RANGE' });
-    const download = async () => {
-      let url = validateMediaUrl(resource.url, resource.kind).href;
+    const responseUrls = new WeakMap<Response, string>();
+    const downloadFrom = async (value: string, cancellation?: AbortSignal, byteRange = range) => {
+      let url = validateMediaUrl(value, resource.kind).href;
       for (let redirects = 0; redirects < 4; redirects++) {
         const timeout = AbortSignal.timeout(60000);
-        const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
-        const response = await this.fetcher(url, { method: head ? 'HEAD' : 'GET', headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/', 'Accept-Encoding': 'identity', ...(range ? { Range: range } : {}) }, redirect: 'manual', signal: requestSignal });
+        const signals = [timeout, ...(signal ? [signal] : []), ...(cancellation ? [cancellation] : [])];
+        const requestSignal = signals.length === 1 ? timeout : AbortSignal.any(signals);
+        const response = await this.fetcher(url, { method: head ? 'HEAD' : 'GET', headers: { 'User-Agent': UA, Referer: 'https://www.bilibili.com/', 'Accept-Encoding': 'identity', ...(byteRange ? { Range: byteRange } : {}) }, redirect: 'manual', signal: requestSignal });
         if ([301, 302, 303, 307, 308].includes(response.status)) {
           const location = response.headers.get('location');
           await response.body?.cancel();
@@ -109,11 +187,67 @@ export class MediaRegistry {
           url = validateMediaUrl(new URL(location, url).href, resource.kind).href;
           continue;
         }
-        return response;
+        responseUrls.set(response, url); return response;
       }
       throw new Error('媒体跳转次数过多');
     };
-    let response = await download();
+    const download = async (byteRange = range) => {
+      if (!resource.backups.length) return downloadFrom(resource.url, undefined, byteRange);
+      if (resource.preferred) {
+        try {
+          const response = await downloadFrom(resource.preferred, undefined, byteRange);
+          if (response.ok && usableCandidate(response, byteRange)) return response;
+          await response.body?.cancel();
+        } catch (error) { if (signal?.aborted) throw error; }
+        resource.preferred = undefined;
+      }
+      // Race only the first response headers, then stream the winning body with backpressure.
+      // All candidates are platform-supplied URLs for this exact rendition; no bytes are spliced.
+      const candidates = [resource.url, ...resource.backups], controllers = candidates.map(() => new AbortController());
+      const attempts = candidates.map(async (url, index) => {
+        const response = await downloadFrom(url, controllers[index].signal, byteRange);
+        if (!response.ok) { await response.body?.cancel(); throw response; }
+        if (!usableCandidate(response, byteRange)) {
+          await response.body?.cancel();
+          throw Object.assign(new Error('媒体返回了不匹配的格式或字节范围。'), { status: 502, code: 'INVALID_MEDIA' });
+        }
+        return { response, index };
+      });
+      try {
+        const winner = await Promise.any(attempts);
+        resource.preferred = candidates[winner.index];
+        controllers.forEach((controller, index) => { if (index !== winner.index) controller.abort(); });
+        return winner.response;
+      } catch (error) {
+        controllers.forEach(controller => controller.abort());
+        if (signal?.aborted) throw signal.reason;
+        const failures: unknown[] = error instanceof AggregateError ? error.errors : [error];
+        const expired = failures.find(value => value instanceof Response && [401, 403, 410].includes(value.status));
+        if (expired instanceof Response) return expired;
+        const failure = failures[0];
+        if (failure instanceof Response) return failure;
+        throw failure;
+      }
+    };
+    const closedRange = /^bytes=(\d+)-(\d+)$/.exec(range ?? '')?.slice(1).map(Number);
+    // A shared Akamai edge can alternate storage-specific ETags for one file. Keep its fast
+    // small reads, but combine ranges only from a direct platform mirror with stable validators.
+    const directMirror = () => [resource.url, ...resource.backups].find(value => !/(^|\.)akamaized\.net$/.test(new URL(value).hostname));
+    let mirror = directMirror();
+    let split = !head && !!mirror && (resource.kind === 'video' || resource.kind === 'audio') && closedRange?.every(Number.isSafeInteger) && closedRange[1] - closedRange[0] + 1 > 2 * RANGE_CHUNK;
+    let firstRange = split ? `bytes=${closedRange![0]}-${closedRange![0] + RANGE_CHUNK - 1}` : range;
+    const downloadFirst = async () => {
+      if (split) {
+        try {
+          const response = await downloadFrom(mirror!, undefined, firstRange);
+          if (response.ok && usableCandidate(response, firstRange)) return response;
+          await response.body?.cancel();
+        } catch (error) { if (signal?.aborted) throw error; }
+        split = false; firstRange = range;
+      }
+      return download(firstRange);
+    };
+    let response = await downloadFirst();
     if ([401, 403, 410].includes(response.status) && resource.renew) {
       await response.body?.cancel();
       let pending = this.renewals.get(id);
@@ -121,8 +255,25 @@ export class MediaRegistry {
         pending = resource.renew().finally(() => this.renewals.delete(id));
         this.renewals.set(id, pending);
       }
-      resource.url = validateMediaUrl(await pending, resource.kind).href;
-      response = await download();
+      const renewed = await pending;
+      resource.url = validateMediaUrl(typeof renewed === 'string' ? renewed : renewed.url, resource.kind).href;
+      resource.backups = typeof renewed === 'string' ? [] : renewed.backups.flatMap(value => { try { return [validateMediaUrl(value, resource.kind).href]; } catch { return []; } }).filter(value => value !== resource.url).slice(0, 2);
+      resource.preferred = undefined;
+      mirror = directMirror();
+      if (split && !mirror) { split = false; firstRange = range; }
+      response = await downloadFirst();
+    }
+    if (split && response.ok) {
+      const etag = response.headers.get('etag');
+      if (!usableCandidate(response, firstRange)) { await response.body?.cancel(); throw Object.assign(new Error('媒体返回了不匹配的字节范围。'), { status: 502, code: 'INVALID_MEDIA' }); }
+      if (!etag || !/^"[^"\r\n]*"$/.test(etag)) {
+        // Combining separate responses requires the same strong validator (RFC 9110 15.3.7.3).
+        await response.body?.cancel(); response = await download(range);
+      } else {
+        const total = Number(response.headers.get('content-range')!.split('/')[1]);
+        const url = responseUrls.get(response)!, end = Math.min(closedRange![1], total - 1);
+        response = parallelRangeResponse(response, closedRange![0], end, total, (part, signal) => downloadFrom(url, signal, part));
+      }
     }
     return { response, kind: resource.kind };
   }

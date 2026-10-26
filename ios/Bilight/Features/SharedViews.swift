@@ -16,6 +16,10 @@ actor ImageRepository {
     }
     func image(_ url: URL) async throws -> UIImage {
         #if DEBUG
+            if InteractionRegression.enabled {
+                guard url.host == InteractionRegression.imageURL.host, url.path == InteractionRegression.imageURL.path else { throw BiliFailure.invalid }
+                return await InteractionRegression.image
+            }
             if DemoFixtures.enabled {
                 guard let image = DemoFixtures.image(url) else { throw BiliFailure.invalid }
                 return image
@@ -56,7 +60,7 @@ struct RemoteImage: View {
                     Color.biliMuted.opacity(0.35)
                 ).font(.system(size: avatar ? 18 : 28, weight: .light))
             }
-        }.clipped().task(id: url) {
+        }.clipped().contentShape(Rectangle()).task(id: url) {
             image = nil
             if let url { image = try? await ImageRepository.shared.image(url) }
         }.accessibilityHidden(true)

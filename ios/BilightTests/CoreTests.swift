@@ -32,6 +32,61 @@ final class MockProtocol: URLProtocol {
     override func stopLoading() {}
 }
 final class CoreTests: XCTestCase {
+    @MainActor func testPortraitVideoManualFullscreenSurvivesLandscapeAndPortrait() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let model = PlayerModel()
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let asset = AVURLAsset(url: url), composition = AVMutableComposition()
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let source = try XCTUnwrap(tracks.first)
+        let track = try XCTUnwrap(composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid))
+        try track.insertTimeRange(CMTimeRange(start: .zero, duration: CMTime(seconds: 4, preferredTimescale: 600)), of: source, at: .zero)
+        track.preferredTransform = CGAffineTransform(a: 0, b: 1, c: -1, d: 0, tx: 2160, ty: 0)
+        let item = AVPlayerItem(asset: composition)
+        model.player.replaceCurrentItem(with: item)
+        let controller = AVPlayerViewController(); controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model), window = UIWindow(windowScene: scene)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { host.shutdown(); model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        let ready = Date().addingTimeInterval(5)
+        while item.presentationSize.height <= item.presentationSize.width && Date() < ready { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertGreaterThan(item.presentationSize.height, item.presentationSize.width)
+        host.enterFullscreen()
+        try await Task.sleep(for: .milliseconds(200))
+        let fullscreen = try XCTUnwrap(host.presentedViewController)
+        XCTAssertEqual(fullscreen.preferredInterfaceOrientationForPresentation, .portrait, "A portrait video must enter portrait fullscreen")
+        for orientation: UIInterfaceOrientationMask in [.landscapeRight, .portrait, .landscapeLeft, .portrait] {
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: orientation)) { _ in }
+            try await Task.sleep(for: .milliseconds(250))
+            XCTAssertTrue(model.isFullscreen, "Manual fullscreen must survive rotation back to portrait")
+            XCTAssertTrue(host.presentedViewController === fullscreen)
+            XCTAssertTrue(model.player.currentItem === item)
+        }
+        host.exitFullscreen()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(model.isFullscreen)
+        XCTAssertTrue(controller.parent === host)
+    }
+    @MainActor func testLandscapeFullscreenStillExitsOnReturningToPortrait() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, model = PlayerModel(), controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model), window = UIWindow(windowScene: scene)
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { host.shutdown(); model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        for automatic in [false, true] {
+            host.enterFullscreen(automatic: automatic)
+            let landscape = Date().addingTimeInterval(2)
+            while PlayerContainer.orientation(scene)?.isLandscape != true && Date() < landscape { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertTrue(model.isFullscreen)
+            scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { _ in }
+            let portrait = Date().addingTimeInterval(2)
+            while model.isFullscreen && Date() < portrait { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertFalse(model.isFullscreen, "Existing landscape-video and automatic rotation behavior must remain intact")
+            try await Task.sleep(for: .milliseconds(100))
+        }
+    }
     private final class PlaybackEvents: @unchecked Sendable {
         private let lock = NSLock()
         private var pauses = 0, waits = 0

@@ -46,23 +46,47 @@ struct Danmaku: Equatable {
     private var fontSize: CGFloat = 20
     private var lastTime = Double.nan
     private var lastSize = CGSize.zero
-    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20, opacity: CGFloat = 1) {
+    private weak var safeAreaSource: UIView?
+    private var safeAreaConstraints: [NSLayoutConstraint] = []
+    func constrainToSafeArea(of source: UIView) {
+        NSLayoutConstraint.deactivate(safeAreaConstraints)
+        safeAreaSource = source
+        let safe = source.safeAreaLayoutGuide
+        safeAreaConstraints = [
+            leadingAnchor.constraint(equalTo: safe.leadingAnchor),
+            trailingAnchor.constraint(equalTo: safe.trailingAnchor),
+            topAnchor.constraint(equalTo: safe.topAnchor),
+            bottomAnchor.constraint(equalTo: safe.bottomAnchor),
+        ]
+        updateSafeAreaConstraints()
+    }
+    private func updateSafeAreaConstraints() {
+        // AVKit supplies its content overlay before inserting it into the player hierarchy.
+        // Cross-view constraints become valid only after both views share a window.
+        if let window, safeAreaSource?.window === window { NSLayoutConstraint.activate(safeAreaConstraints) }
+        else { NSLayoutConstraint.deactivate(safeAreaConstraints) }
+    }
+    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20) {
         self.player = player
         let fontSize = min(24, max(16, fontSize))
         if self.fontSize != fontSize { self.fontSize = fontSize; clear() }
-        alpha = min(1, max(0.5, opacity))
+        alpha = 1
         if self.revision != revision { self.revision = revision; self.items = items; lastTime = .nan; clear() }
         isHidden = !enabled
         if enabled && window != nil { start() } else { stop() }
     }
     override func didMoveToWindow() {
         super.didMoveToWindow()
+        updateSafeAreaConstraints()
         if window != nil && !isHidden { start() } else { stop() }
     }
     private func start() {
         guard link == nil, !items.isEmpty else { return }
         let link = CADisplayLink(target: WeakTarget(self), selector: #selector(WeakTarget.tick))
-        link.preferredFrameRateRange = CAFrameRateRange(minimum: 15, maximum: 30, preferred: 30)
+        // A 30 Hz cap holds every other frame on 60 Hz displays (three of four on ProMotion).
+        // Match the current screen; iOS may still lower the rate for power or thermal limits.
+        let maximum = Float(max(60, window?.windowScene?.screen.maximumFramesPerSecond ?? 60))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: maximum, preferred: maximum)
         link.add(to: .main, forMode: .common); self.link = link
     }
     private func clear() { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; lastTime = .nan; lastSize = .zero }
@@ -84,6 +108,7 @@ struct Danmaku: Equatable {
         for id in Array(labels.keys) where !ids.contains(id) { labels.removeValue(forKey: id)?.removeFromSuperview() }
         var occupied = Set<Int>()
         let lanes = max(1, min(7, Int(bounds.height / 32) - 1))
+        let scale = max(1, window?.windowScene?.screen.scale ?? traitCollection.displayScale)
         for item in visible {
             let lane = item.id % lanes
             // Bound density in each lane instead of stacking unreadable text.
@@ -93,15 +118,17 @@ struct Danmaku: Equatable {
             if let existing = labels[item.id] { label = existing }
             else {
                 label = UILabel(); label.font = .systemFont(ofSize: fontSize, weight: .semibold)
-                let color = UIColor(red: CGFloat((item.color >> 16) & 255)/255, green: CGFloat((item.color >> 8) & 255)/255, blue: CGFloat(item.color & 255)/255, alpha: 1)
-                label.attributedText = NSAttributedString(string: item.text, attributes: [.foregroundColor: color, .strokeColor: UIColor.black.withAlphaComponent(0.8), .strokeWidth: -2])
+                label.contentScaleFactor = scale
+                // Keep identical contrast over every scene, including upstream colored comments.
+                label.attributedText = NSAttributedString(string: item.text, attributes: [.font: label.font as Any, .foregroundColor: UIColor.white, .strokeColor: UIColor.black, .strokeWidth: -2])
                 label.sizeToFit(); addSubview(label); labels[item.id] = label
             }
             let elapsed = time - item.time
             let fixed = item.mode == 4 || item.mode == 5
             let x = fixed ? (bounds.width-label.bounds.width)/2 : item.mode == 6 ? -label.bounds.width+(bounds.width+label.bounds.width)*elapsed/8 : bounds.width-(bounds.width+label.bounds.width)*elapsed/8
             let y = item.mode == 4 ? bounds.height-CGFloat(lane+1)*30-25 : 12+CGFloat(lane)*30
-            label.frame.origin = CGPoint(x: x, y: max(5, y))
+            // Keep cached glyphs on physical pixels so movement doesn't soften the stroked edges.
+            label.frame.origin = CGPoint(x: (x * scale).rounded() / scale, y: (max(5, y) * scale).rounded() / scale)
         }
     }
     @MainActor private final class WeakTarget: NSObject {

@@ -34,9 +34,11 @@
 		739083D2D6DD4FAC1ED986FD /* SegmentRelayTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C960B4B107BA784621012F63 /* SegmentRelayTests.swift */; };
 		77EAB7C1A2D7873D1DE3E307 /* DemoTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63BD22A237F68F9FBB51519E /* DemoTests.swift */; };
 		7F30D3D740A151198C933C56 /* ResponsiveLayoutTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D06A7488B97B9633DE68B98 /* ResponsiveLayoutTests.swift */; };
+		7F519BD5EC3832008E787107 /* InteractionRegression.swift in Sources */ = {isa = PBXBuildFile; fileRef = BBFB023A442C9817DC629564 /* InteractionRegression.swift */; };
 		85AEDC549AE33639E108705D /* SegmentIndex.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FD171E19A5421001CE4AB0B /* SegmentIndex.swift */; };
 		911188A64D9D0385CEF5E37B /* VideoSupportModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 589CE5BE55BCCE75FF63096D /* VideoSupportModel.swift */; };
 		91CDA6342A1762BCB908FAF9 /* MediaLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = EAB4B8B37FAC3AEB6AB909EB /* MediaLoader.swift */; };
+		95F2CE4C81CE229F3D408387 /* DynamicInteractionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9C9BFD0C1AB70AD32460A4CB /* DynamicInteractionTests.swift */; };
 		9B9F18F2AB04810EA8F51DEB /* DynamicDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78EA8EB17A3F6B17D1FFD03C /* DynamicDetailView.swift */; };
 		AE1774B3AF1F8DD07128E126 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFD9FBDC3C99924B5AE04122 /* LoginView.swift */; };
 		AE755ED6B6850BBAE2D487CA /* DynamicPost.swift in Sources */ = {isa = PBXBuildFile; fileRef = D601E32D57FFB4E456DC814A /* DynamicPost.swift */; };
@@ -60,6 +62,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		0912894A12708157219D155E /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 35659CAC76EC7C89BB9458E3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A0D157D951681CD06937E97C;
+			remoteInfo = Bilight;
+		};
 		F03047E72210E336C49C6EBC /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 35659CAC76EC7C89BB9458E3 /* Project object */;
@@ -94,6 +103,7 @@
 		63098670CA3A7A7C29FFA12A /* fixtures.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = fixtures.json; sourceTree = "<group>"; };
 		63BD22A237F68F9FBB51519E /* DemoTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoTests.swift; sourceTree = "<group>"; };
 		6563291590D36BE5EE92FF95 /* DownloadStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DownloadStore.swift; sourceTree = "<group>"; };
+		695428B87CB9F78680655680 /* BilightUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = BilightUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		6D06A7488B97B9633DE68B98 /* ResponsiveLayoutTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ResponsiveLayoutTests.swift; sourceTree = "<group>"; };
 		6D483C3D9EA28A9D57F65E67 /* VideoSupportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoSupportTests.swift; sourceTree = "<group>"; };
 		756AD4D0B8FCA285E138A6B9 /* AccountModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AccountModels.swift; sourceTree = "<group>"; };
@@ -104,6 +114,7 @@
 		82466279175A05885F6609E7 /* LiveSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LiveSmokeTests.swift; sourceTree = "<group>"; };
 		8D0CD746AE090EEC08ACC55E /* VideoActionControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoActionControls.swift; sourceTree = "<group>"; };
 		9AFCF2E24F58729847FC5E49 /* VideoInformationSection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VideoInformationSection.swift; sourceTree = "<group>"; };
+		9C9BFD0C1AB70AD32460A4CB /* DynamicInteractionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicInteractionTests.swift; sourceTree = "<group>"; };
 		A2E51FCE43E54D9F6F34A0FD /* FollowingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FollowingView.swift; sourceTree = "<group>"; };
 		A5543F369886A2EB7095A43E /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A586957D19C6D1463352C2F7 /* DanmakuOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DanmakuOverlay.swift; sourceTree = "<group>"; };
@@ -113,6 +124,7 @@
 		B199F360421AFF22D3DB4A07 /* CreatorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CreatorView.swift; sourceTree = "<group>"; };
 		B27C261A19105DE3EAB761D4 /* PlayerContainer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlayerContainer.swift; sourceTree = "<group>"; };
 		B5D8ADD5BB8E8879807F2579 /* DynamicTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DynamicTests.swift; sourceTree = "<group>"; };
+		BBFB023A442C9817DC629564 /* InteractionRegression.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InteractionRegression.swift; sourceTree = "<group>"; };
 		BC69B5BB44B321D297CDD1CF /* FavoritesView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FavoritesView.swift; sourceTree = "<group>"; };
 		C4F1B3C41AF441C84D63DB21 /* CoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CoreTests.swift; sourceTree = "<group>"; };
 		C528EBB76618A9D7F072D6DE /* BiliClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BiliClient.swift; sourceTree = "<group>"; };
@@ -175,11 +187,20 @@
 			path = Fixtures;
 			sourceTree = "<group>";
 		};
+		8281C648B170DD59A6C82BA9 /* BilightUITests */ = {
+			isa = PBXGroup;
+			children = (
+				9C9BFD0C1AB70AD32460A4CB /* DynamicInteractionTests.swift */,
+			);
+			path = BilightUITests;
+			sourceTree = "<group>";
+		};
 		AF455EB31DC21F50869C48FE /* Products */ = {
 			isa = PBXGroup;
 			children = (
 				4C91A137491B6BCA47D852CA /* Bilight.app */,
 				D49906D1C6DA9C30E33866AD /* BilightTests.xctest */,
+				695428B87CB9F78680655680 /* BilightUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -189,6 +210,7 @@
 			children = (
 				50FD649F9C041DDEF1F78636 /* Bilight */,
 				FEE1895ED2C4C001512C915F /* BilightTests */,
+				8281C648B170DD59A6C82BA9 /* BilightUITests */,
 				AF455EB31DC21F50869C48FE /* Products */,
 			);
 			sourceTree = "<group>";
@@ -198,6 +220,7 @@
 			children = (
 				07AC920030CA7E07B0FEFD8B /* DemoFixtures.swift */,
 				63098670CA3A7A7C29FFA12A /* fixtures.json */,
+				BBFB023A442C9817DC629564 /* InteractionRegression.swift */,
 			);
 			path = Demo;
 			sourceTree = "<group>";
@@ -299,6 +322,24 @@
 			productReference = 4C91A137491B6BCA47D852CA /* Bilight.app */;
 			productType = "com.apple.product-type.application";
 		};
+		FBCC47E9B943C580A749F813 /* BilightUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B7F0D567E0F369C1AB0B8B8C /* Build configuration list for PBXNativeTarget "BilightUITests" */;
+			buildPhases = (
+				FF67E523D8F0A1AE01969BF1 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				6989BFC7B105AC0BF78FD1CA /* PBXTargetDependency */,
+			);
+			name = BilightUITests;
+			packageProductDependencies = (
+			);
+			productName = BilightUITests;
+			productReference = 695428B87CB9F78680655680 /* BilightUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -315,6 +356,11 @@
 					A0D157D951681CD06937E97C = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Automatic;
+					};
+					FBCC47E9B943C580A749F813 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Automatic;
+						TestTargetID = A0D157D951681CD06937E97C;
 					};
 				};
 			};
@@ -334,6 +380,7 @@
 			targets = (
 				A0D157D951681CD06937E97C /* Bilight */,
 				19A6AC1176CC6120341E8FFC /* BilightTests */,
+				FBCC47E9B943C580A749F813 /* BilightUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -399,6 +446,7 @@
 				EB8DAD96AF9CC8C367B36748 /* FavoritesView.swift in Sources */,
 				F891D0AF0F78B3B15C2C457A /* FollowingView.swift in Sources */,
 				FF16FF3C1262E9E614762451 /* HistoryView.swift in Sources */,
+				7F519BD5EC3832008E787107 /* InteractionRegression.swift in Sources */,
 				4CAEAB4428F2785C9B531724 /* KeychainVault.swift in Sources */,
 				AE1774B3AF1F8DD07128E126 /* LoginView.swift in Sources */,
 				91CDA6342A1762BCB908FAF9 /* MediaLoader.swift in Sources */,
@@ -420,9 +468,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FF67E523D8F0A1AE01969BF1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				95F2CE4C81CE229F3D408387 /* DynamicInteractionTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		6989BFC7B105AC0BF78FD1CA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A0D157D951681CD06937E97C /* Bilight */;
+			targetProxy = 0912894A12708157219D155E /* PBXContainerItemProxy */;
+		};
 		D12F6968B96945715D1F6751 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = A0D157D951681CD06937E97C /* Bilight */;
@@ -527,6 +588,23 @@
 			};
 			name = Release;
 		};
+		42C7A46FB76B1D18D6062018 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.bilight.BilightUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Bilight;
+			};
+			name = Release;
+		};
 		4985029BF6661C879BB3E31B /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -545,6 +623,23 @@
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Release;
+		};
+		6A109AF35303CD0C1F465D66 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = app.bilight.BilightUITests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = Bilight;
+			};
+			name = Debug;
 		};
 		83525889F26A17477A185413 /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -647,6 +742,15 @@
 			buildConfigurations = (
 				C47EBA65FECF65C33ED0FF14 /* Debug */,
 				1B2C32CFB9D095217ECD09C9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B7F0D567E0F369C1AB0B8B8C /* Build configuration list for PBXNativeTarget "BilightUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6A109AF35303CD0C1F465D66 /* Debug */,
+				42C7A46FB76B1D18D6062018 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

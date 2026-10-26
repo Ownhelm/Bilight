@@ -20,6 +20,7 @@ targets:
     info:
       path: Bilight/Info.plist
       properties:
+        CADisableMinimumFrameDurationOnPhone: true
         CFBundleDisplayName: Bilight
         CFBundleShortVersionString: '0.1.0'
         CFBundleVersion: '1'
@@ -50,7 +51,23 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
     dependencies:
       - target: Bilight
+  BilightUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [BilightUITests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: Bilight
 schemes:
+  BilightInteractionTests:
+    build:
+      targets:
+        Bilight: all
+        BilightUITests: [test]
+    test:
+      targets: [BilightUITests]
   Bilight:
     build:
       targets:

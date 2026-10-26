@@ -31,7 +31,6 @@ final class PlaybackPreferences {
     @Published var rate: Float = 1
     @Published var danmakuEnabled = false
     @Published var danmakuFontSize: CGFloat = 20
-    @Published var danmakuOpacity: CGFloat = 1
     @Published var danmakuItems: [Danmaku] = []
     @Published var danmakuRevision = UUID()
     @Published var danmakuError: String?

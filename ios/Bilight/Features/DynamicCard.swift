@@ -45,9 +45,15 @@ struct DynamicCard: View {
             if !post.title.isEmpty { Text(post.title).font(.headline).textSelection(.enabled) }
             if !post.text.isEmpty {
                 Text(post.text).font(.system(size: 15)).lineSpacing(5).lineLimit(detail || expanded ? nil : 6)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                    .accessibilityIdentifier("dynamic-body-\(post.id)")
                 if !detail && (post.text.count > 120 || post.text.filter({ $0 == "\n" }).count > 4) {
-                    Button(expanded ? "收起" : "展开") { expanded.toggle() }.font(.system(size: 14)).tint(Color.biliBlue)
+                    Button { expanded.toggle() } label: {
+                        Text(expanded ? "收起" : "展开").font(.system(size: 14))
+                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }.tint(Color.biliBlue)
                 }
             }
             content

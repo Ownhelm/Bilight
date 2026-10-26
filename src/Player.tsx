@@ -3,18 +3,22 @@ import type Artplayer from 'artplayer';
 import type { Result as DanmakuPlugin, Danmu } from 'artplayer-plugin-danmuku';
 import type { MediaPlayerClass } from 'dashjs';
 import { ChatCircleDots, SpinnerGap } from '@phosphor-icons/react';
-import type { Danmaku, Playback, WatchProgress } from '../shared/types';
+import type { Danmaku, Playback, Subtitle, WatchProgress } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { Failure, Loading, useResource } from './components';
 import { defaultSubtitle, installProgressShortcuts, playbackPosition, qualitySetting, switchPlaybackSource, type PlaybackPosition } from './playback';
 import { observeWatchProgress } from './watchHistory';
 import { playbackPreferences } from './playbackPreferences';
 
+// Called when entering the video route, so module download/parse overlaps detail and source requests.
+export function preloadPlayer() { return Promise.all([import('artplayer'), import('dashjs')]); }
+
 export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { bvid: string; cid: number; poster: string; startTime?: number; accountMid?: number }) {
   const [quality, setQuality] = useState<number | undefined>();
   const [selectedPlayback, setSelectedPlayback] = useState<Playback | null>(null);
   const [qualityBusy, setQualityBusy] = useState(false);
   const [refresh, setRefresh] = useState(0);
+  const [subtitleRefresh, setSubtitleRefresh] = useState(0);
   const [speed, setSpeed] = useState(1);
   const [subtitle, setSubtitle] = useState<string | null>(null);
   const [danmaku, setDanmaku] = useState(() => playbackPreferences.danmaku);
@@ -40,9 +44,11 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
   // Read once per source/retry, so choosing a quality never recreates the player.
   const initialUrl = useMemo(() => `/api/videos/${bvid}/playback?cid=${cid}&quality=${playbackPreferences.quality}`, [bvid, cid, refresh]);
   const initial = useResource<Playback>(initialUrl, refresh);
+  const captions = useResource<Subtitle[]>(`/api/videos/${bvid}/subtitles?cid=${cid}`, subtitleRefresh + refresh);
   const { error, loading } = initial;
   const data = selectedPlayback ?? initial.data;
-  const subtitleId = subtitle ?? defaultSubtitle(data?.subtitles ?? []);
+  const subtitles = captions.data ?? data?.subtitles ?? [];
+  const subtitleId = subtitle ?? defaultSubtitle(subtitles);
   const wantedSubtitle = useRef(subtitleId); wantedSubtitle.current = subtitleId;
   selectQuality.current = async nextQuality => {
     const label = () => data?.qualities.find(item => item.id === data.quality)?.label ?? '';
@@ -85,7 +91,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     setPlayerError(''); setReady(false);
     async function create() {
       try {
-        const [{ default: Artplayer }, dashModule] = await Promise.all([import('artplayer'), source!.manifestUrl ? import('dashjs') : Promise.resolve(null)]);
+        const [{ default: Artplayer }, dashModule] = await preloadPlayer();
         let dashjs = dashModule;
         if (cancelled || !mount.current) return;
         const url = source!.manifestUrl || source!.mp4Url;
@@ -183,13 +189,13 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
   useEffect(() => {
     const player = playerRef.current;
     if (!created || !player || !data) return;
-    const selected = data.subtitles.find(item => item.id === subtitleId);
+    const selected = subtitles.find(item => item.id === subtitleId);
     if (!selected) { player.subtitle.show = false; return; }
     let cancelled = false;
     // Fetch subtitles as soon as the player exists, without waiting for video canplay.
     player.subtitle.switch(selected.url, { type: 'vtt', escape: true }).then(() => { if (playerRef.current === player) player.subtitle.show = Boolean(wantedSubtitle.current); }).catch(error => { if (!cancelled) setPlayerError(`字幕加载失败：${errorMessage(error)}`); });
     return () => { cancelled = true; };
-  }, [subtitleId, created, data]);
+  }, [subtitleId, created, subtitles]);
   useEffect(() => {
     const player = playerRef.current;
     if (!created || !player) return;
@@ -209,13 +215,14 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     }).catch(error => { if (!controller.signal.aborted && playerRef.current === player && !isAbort(error)) setPlayerError(`弹幕加载失败：${errorMessage(error)}`); }).finally(() => { if (!controller.signal.aborted) setDanmakuBusy(false); });
     return () => controller.abort();
   }, [danmaku, created, bvid, cid]);
-  return <section className="player-section" aria-label="视频播放器" aria-keyshortcuts="ArrowLeft ArrowRight">
+  return <section className="player-section" aria-label="视频播放器" aria-keyshortcuts="ArrowLeft ArrowRight" aria-busy={!ready && !error && !playerError}>
     <div className="player-shell">{loading ? <Loading text="正在准备视频" /> : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} /> : <div className="art-player" ref={mount} />}</div>
     {historyError && <p className="history-save-error" role="status">{historyError}<button className="text-button" onClick={() => retryHistory.current?.()}>重试同步</button></p>}
+    {captions.error && <p className="history-save-error" role="status">字幕加载失败：{errorMessage(captions.error)}<button className="text-button" onClick={() => setSubtitleRefresh(value => value + 1)}>重试字幕</button></p>}
     <div className="playback-toolbar"><div className="playback-options">
       <label><span>清晰度</span><select aria-label="清晰度" value={quality ?? data?.quality ?? ''} disabled={!data || !created || loading} onChange={event => { void selectQuality.current(Number(event.target.value)); }}>{data?.qualities.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
       <label><span>倍速</span><select aria-label="播放速度" value={speed} onChange={event => setSpeed(Number(event.target.value))}>{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(value => <option key={value} value={value}>{value === 1 ? '正常' : `${value}×`}</option>)}</select></label>
-      {Boolean(data?.subtitles.length) && <label><span>字幕</span><select aria-label="字幕" value={subtitleId} onChange={event => setSubtitle(event.target.value)}><option value="">关闭</option>{data?.subtitles.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
+      {Boolean(subtitles.length) && <label><span>字幕</span><select aria-label="字幕" value={subtitleId} onChange={event => setSubtitle(event.target.value)}><option value="">关闭</option>{subtitles.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
     </div><button className={`danmaku-toggle${danmaku ? ' active' : ''}`} aria-pressed={danmaku} onClick={() => changeDanmaku(!danmaku)} disabled={!created}>{danmakuBusy ? <SpinnerGap className="spin" size={18} /> : <ChatCircleDots size={18} />}<span>弹幕{danmaku ? '开' : '关'}</span><span className="toggle-track" aria-hidden="true"><span /></span></button></div>
     {playerError && <div className="playback-error" role="alert"><span>{playerError}</span><button className="text-button" onClick={() => setRefresh(value => value + 1)}>重新加载</button></div>}
   </section>;

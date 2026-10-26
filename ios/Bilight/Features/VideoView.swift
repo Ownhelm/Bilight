@@ -37,7 +37,8 @@ struct NativePlayer: UIViewControllerRepresentable {
             danmaku.clipsToBounds = true
             danmaku.translatesAutoresizingMaskIntoConstraints = false
             overlay.insertSubview(danmaku, at: 0)
-            NSLayoutConstraint.activate([danmaku.leadingAnchor.constraint(equalTo: overlay.leadingAnchor), danmaku.trailingAnchor.constraint(equalTo: overlay.trailingAnchor), danmaku.topAnchor.constraint(equalTo: overlay.topAnchor), danmaku.bottomAnchor.constraint(equalTo: overlay.bottomAnchor)])
+            // AVKit's contentOverlayView reports zero insets; use the actual player root's safe area.
+            danmaku.constrainToSafeArea(of: controller.view)
             overlay.addSubview(label)
             NSLayoutConstraint.activate([
                 label.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
@@ -100,7 +101,7 @@ struct NativePlayer: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ container: PlayerContainer, context: Context) {
         let controller = container.controller
-        (controller.contentOverlayView?.viewWithTag(1744) as? DanmakuOverlay)?.update(player: model.player, items: model.danmakuItems, enabled: model.danmakuEnabled, revision: model.danmakuRevision, fontSize: model.danmakuFontSize, opacity: model.danmakuOpacity)
+        (controller.contentOverlayView?.viewWithTag(1744) as? DanmakuOverlay)?.update(player: model.player, items: model.danmakuItems, enabled: model.danmakuEnabled, revision: model.danmakuRevision, fontSize: model.danmakuFontSize)
         let label = controller.contentOverlayView?.viewWithTag(1742) as? UILabel
         label?.text = model.subtitleText
         label?.isHidden = model.subtitleText.isEmpty
@@ -143,11 +144,6 @@ struct NativePlayer: UIViewControllerRepresentable {
                 controls.append(UIMenu(title: "字号", children: sizes.map { label, size in
                     UIAction(title: label, state: model.danmakuFontSize == size ? .on : .off) { _ in
                         model.danmakuFontSize = size
-                    }
-                }))
-                controls.append(UIMenu(title: "不透明度", children: [CGFloat(0.5), 0.75, 1].map { opacity in
-                    UIAction(title: "\(Int(opacity * 100))%", state: model.danmakuOpacity == opacity ? .on : .off) { _ in
-                        model.danmakuOpacity = opacity
                     }
                 }))
             }

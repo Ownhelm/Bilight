@@ -186,6 +186,12 @@ export async function createApp(options: AppOptions) {
     if (!detail.parts.some(part => part.cid === cid)) throw fail('INVALID_PART', '该分 P 不属于当前视频。');
     return gateway.danmaku(cid);
   });
+  app.get<{ Params: { bvid: string }; Querystring: { cid?: string } }>('/api/videos/:bvid/subtitles', async request => {
+    const bvid = bvidOf(request.params.bvid), detail = await gateway.video(bvid);
+    const cid = number(request.query.cid, detail.parts[0]?.cid ?? 0);
+    if (!detail.parts.some(part => part.cid === cid)) throw fail('INVALID_PART', '该分 P 不属于当前视频。');
+    return (await gateway.subtitles(bvid, cid)).map(subtitle => ({ ...subtitle, url: `${media.register(subtitle.url, 'subtitle')}/subtitle.vtt` }));
+  });
   app.get<{ Params: { bvid: string }; Querystring: { page?: string; cursor?: string } }>('/api/videos/:bvid/comments', async request => {
     const detail = await gateway.video(bvidOf(request.params.bvid));
     const result = await gateway.comments(detail.aid, Math.min(1000, number(request.query.page)), text(request.query.cursor, 4096) || undefined);

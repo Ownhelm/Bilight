@@ -507,7 +507,23 @@ test('replacing the session jar invalidates cached and pending details, includin
   assert.equal((await gateway.video(BV1)).aid, 3); assert.equal(calls.length, 3);
 });
 
-test('playback starts subtitles alongside playurl and defaults to the highest offered AVC quality', async () => {
+test('slow optional subtitle metadata cannot hold the playable source behind its timeout', async () => {
+  const captions = deferred<unknown>();
+  const { gateway } = fixture(({ url }) => url.endsWith('/playurl')
+    ? { dash: { duration: 60, video: [track(120, 'avc1.640033')], audio: [track(30280, 'mp4a.40.2')] } }
+    : captions.promise);
+  let ready = false;
+  const started = performance.now();
+  const pending = gateway.playback(BV1, 5).then(value => { ready = true; return value; });
+  try {
+    await new Promise(resolve => setTimeout(resolve, 50));
+    console.log(`[web startup] playable source ready in 50ms while subtitles stalled: ${ready}`);
+    assert.equal(ready, true, 'A slow subtitle request must not block first video playback');
+  } finally { captions.resolve({ subtitle: { subtitles: [] } }); await pending; }
+  assert.ok(performance.now() - started < 500);
+});
+
+test('playback requests only media and defaults to the highest offered AVC quality', async () => {
   const release = deferred<void>();
   const { gateway, calls } = fixture(async ({ url }) => {
     if (!url.endsWith('/playurl')) return {};
@@ -516,7 +532,7 @@ test('playback starts subtitles alongside playurl and defaults to the highest of
   });
   const pending = gateway.playback(BV1, 5);
   try {
-    assert.deepEqual(calls.map(call => call.url.split('/').pop()), ['playurl', 'v2']);
+    assert.deepEqual(calls.map(call => call.url.split('/').pop()), ['playurl']);
     assert.equal(calls[0].options.query?.qn, 127);
   } finally { release.resolve(); }
   const result = await pending;
@@ -531,7 +547,16 @@ test('playback selects AVC and AAC, keeps byte ranges and derives only offered A
   assert.equal(result.video?.codecs, 'avc1.640032'); assert.equal(result.audio?.codecs, 'mp4a.40.2');
   assert.equal(result.duration, 61); assert.deepEqual(result.video?.segmentBase, { initialization: '0-999', indexRange: '1000-2000' });
   assert.deepEqual(result.qualities, [{ id: 80, label: '1080P' }, { id: 64, label: '720P' }]);
-  assert.equal(result.subtitles[0].url, 'https://aisubtitle.hdslb.com/file.json'); assert.equal(result.segments, undefined);
+  assert.deepEqual(result.subtitles, []); assert.equal(result.segments, undefined);
+  assert.equal((await gateway.subtitles(BV1, 5))[0].url, 'https://aisubtitle.hdslb.com/file.json');
+});
+
+test('subtitle metadata keeps an actual failure visible without affecting available playback', async () => {
+  const { gateway } = fixture(({ url }) => url.endsWith('/playurl')
+    ? { dash: { duration: 60, video: [track(80, 'avc1.640032')], audio: [] } }
+    : Promise.reject(new BiliError('SUBTITLE_UNAVAILABLE', 'Subtitle service failed')));
+  await assert.rejects(gateway.subtitles(BV1, 5), { code: 'SUBTITLE_UNAVAILABLE' });
+  assert.equal((await gateway.playback(BV1, 5)).video?.id, 80);
 });
 
 test('a saved quality falls down the offered AVC ladder and returns to 4K when available', async () => {

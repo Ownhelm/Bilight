@@ -5,7 +5,7 @@ import type { AuthState, Comment, CreatorSummary, Page, SearchPage, VideoDetail,
 import { api, errorMessage, isAbort } from './api';
 import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, SearchBox, useResource, VideoGrid } from './components';
 import { Login } from './Login';
-import { VideoPlayer } from './Player';
+import { preloadPlayer, VideoPlayer } from './Player';
 import { TripleActions } from './TripleActions';
 import { HistoryMenu, HistoryPage } from './History';
 import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollections';
@@ -169,6 +169,7 @@ function Creator() {
 }
 
 function Video({ auth, authGeneration, onLogin }: { auth: AuthState | null; authGeneration: number; onLogin: () => void }) {
+  useEffect(() => { void preloadPlayer().catch(() => {}); }, []);
   const { bvid } = useParams(); const [params, setParams] = useSearchParams(); const [refresh, setRefresh] = useState(0);
   const { data, error, loading } = useResource<VideoDetail>(`/api/videos/${encodeURIComponent(bvid ?? '')}`, refresh);
   const requestedPart = positivePage(params.get('p')); const part = data?.parts.find(item => item.page === requestedPart) ?? data?.parts[0];
