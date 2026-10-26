@@ -5,9 +5,8 @@
 <p align="center">
   <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-303440?style=flat-square">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-本地部署-76b9db?style=flat-square">
-  <a href="LICENSE"><img alt="MIT" src="https://img.shields.io/badge/License-MIT-ed7a9e?style=flat-square"></a>
+  <img alt="MIT" src="https://img.shields.io/badge/License-MIT-ed7a9e?style=flat-square">
 </p>
-<p align="center"><a href="https://github.com/Ownhelm/Bilight">项目仓库</a> · <a href="#为什么做-bilight">初衷</a> · <a href="#可以做什么">功能</a> · <a href="#快速开始">开始使用</a> · <a href="ios/README.md">iPhone 安装</a> · <a href="docs/docker.md">Docker 部署</a></p>
 
 > [!IMPORTANT]
 > Bilight 是个人学习与技术研究项目，并非哔哩哔哩官方客户端，与哔哩哔哩无隶属或合作关系。项目依赖的非官方接口可能随时变更或失效；使用时请遵守平台规则、版权要求与所在地法律，不得用于绕过付费、隐私保护或其他访问控制。
@@ -89,10 +88,10 @@ docker compose up -d --build
 
 ## 反馈与参与
 
-项目仍在持续打磨。遇到问题可以[提交反馈](https://github.com/Ownhelm/Bilight/issues)，说明设备、操作步骤和错误提示；请勿附上登录凭据或包含个人信息的截图。参与开发请看[贡献指南](CONTRIBUTING.md)。
+项目仍在持续打磨。遇到问题可以[提交反馈](https://github.com/Ownhelm/Bilight/issues)，说明设备、操作步骤和错误提示；请勿附上登录凭据或包含个人信息的截图。
 
 ## 致谢与许可
 
-专注观看的思路参考了 [FocuBili](https://github.com/L1Xu4n/FocuBili)，网页播放器使用 [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) 与 [dash.js](https://github.com/Dash-Industry-Forum/dash.js)。感谢这些开源项目。
+专注观看的思路参考了 FocuBili，网页播放器使用 ArtPlayer 与 dash.js。感谢这些开源项目。
 
 项目原创代码使用 [MIT License](LICENSE)。视频、用户内容、商标及第三方依赖分别属于其权利人，详见[依赖说明](THIRD_PARTY_NOTICES.md)。
