@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, ChatCircle, Check, SignOut, TelevisionSimple, UserCircle, Users } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, ChatCircle, Check, SignOut, UserCircle, Users } from '@phosphor-icons/react';
 import type { AuthState, Comment, CreatorSummary, Page, SearchPage, VideoDetail, VideoSummary } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, SearchBox, useResource, VideoGrid } from './components';
@@ -9,7 +9,8 @@ import { VideoPlayer } from './Player';
 import { TripleActions } from './TripleActions';
 import { HistoryMenu, HistoryPage } from './History';
 import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollections';
-import { completeFollowingRows, useFollowingColumns, useFollowingFeed } from './following';
+import { completeFollowingRows, FollowingFeed, useFollowingColumns, useFollowingFeed } from './following';
+import playbackMark from '../branding/playback-mark.svg?no-inline';
 
 export function App() {
   const location = useLocation();
@@ -18,6 +19,8 @@ export function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [authGeneration, setAuthGeneration] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
+  const followingCache = useMemo(() => new FollowingFeed(), [auth?.user?.mid, authGeneration]);
+  useEffect(() => () => followingCache.clear(), [followingCache]);
   const refreshAuth = useCallback(async () => {
     const state = await api<AuthState>('/api/auth/state'); setAuth(state); setAuthError('');
     if (state.authenticated) { setLoginOpen(false); setAuthGeneration(value => value + 1); }
@@ -29,7 +32,11 @@ export function App() {
     window.addEventListener('bilight:session-expired', expired);
     return () => { controller.abort(); window.removeEventListener('bilight:session-expired', expired); };
   }, []);
-  useEffect(() => { window.scrollTo({ top: 0 }); }, [location.pathname, location.search]);
+  useEffect(() => { if (location.pathname !== '/following') window.scrollTo({ top: 0 }); }, [location.pathname, location.search]);
+  useEffect(() => {
+    const previous = history.scrollRestoration; history.scrollRestoration = 'manual';
+    return () => { history.scrollRestoration = previous; };
+  }, []);
   async function logout() {
     if (loggingOut) return; setLoggingOut(true);
     try { await api('/api/auth/logout', { method: 'POST' }); setAuth({ authenticated: false }); setAuthGeneration(value => value + 1); }
@@ -38,7 +45,7 @@ export function App() {
   }
   const isHome = location.pathname === '/';
   return <><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
-    <Link className="brand" to="/" aria-label="Bilight 首页"><TelevisionSimple size={31} weight="bold" /><span>bilight<span className="brand-dot">.</span></span></Link>
+    <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
     <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following"><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
       {auth?.authenticated && auth.user ? <details className="account-menu"><summary aria-label={`账号：${auth.user.name}`}><img src={auth.user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary><div className="account-popover"><p>{auth.user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span><button onClick={() => void logout()} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button></div></details> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}
@@ -48,7 +55,7 @@ export function App() {
     <main id="main-content"><Routes>
       <Route path="/" element={<Home />} />
       <Route path="/search" element={<Search />} />
-      <Route path="/following" element={<Following key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />} />
+      <Route path="/following" element={<Following key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} cache={followingCache} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/history" element={<HistoryPage key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}:${location.search}`} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/creator/:mid" element={<Creator />} />
       <Route path="/creator/:mid/collections/:kind/:collectionId" element={<Creator />} />
@@ -81,8 +88,10 @@ function Search() {
   </div>;
 }
 
-function Following({ auth, onLogin }: { auth: AuthState | null; onLogin: () => void }) {
-  const feed = useFollowingFeed(Boolean(auth?.authenticated));
+function Following({ auth, onLogin, cache }: { auth: AuthState | null; onLogin: () => void; cache: FollowingFeed }) {
+  const feed = useFollowingFeed(cache, Boolean(auth?.authenticated));
+  const restored = useRef(feed.initialized);
+  const scrollIntent = useRef(false), nearEnd = useRef(false);
   const columns = useFollowingColumns();
   const videos = completeFollowingRows(feed.items, columns, Boolean(feed.cursor));
   const sentinel = useRef<HTMLDivElement>(null);
@@ -93,6 +102,12 @@ function Following({ auth, onLogin }: { auth: AuthState | null; onLogin: () => v
     feed.loadMore();
   }, [feed.loading, feed.error, feed.cursor, feed.loadMore, videos.length, columns]);
   const loadMore = useRef(requestMore); loadMore.current = requestMore;
+  useLayoutEffect(() => {
+    window.scrollTo({ top: cache.scrollTop, behavior: 'instant' });
+    const remember = () => { cache.scrollTop = Math.max(0, window.scrollY); };
+    window.addEventListener('scroll', remember, { passive: true });
+    return () => { window.removeEventListener('scroll', remember); };
+  }, [cache]);
   useEffect(() => { document.title = '我的关注 · Bilight'; }, []);
   useEffect(() => {
     const target = fillTarget.current;
@@ -104,10 +119,23 @@ function Following({ auth, onLogin }: { auth: AuthState | null; onLogin: () => v
   useEffect(() => {
     if (!auth?.authenticated || !feed.initialized || !sentinel.current || !('IntersectionObserver' in window)) return;
     // Keep one observer: an empty filtered page must not start an unattended fetch loop.
-    const observer = new IntersectionObserver(entries => { if (entries.some(entry => entry.isIntersecting)) loadMore.current(); }, { rootMargin: '0px 0px 240px 0px' });
+    const observer = new IntersectionObserver(entries => {
+      nearEnd.current = entries.some(entry => entry.isIntersecting);
+      if (nearEnd.current && (!restored.current || scrollIntent.current)) loadMore.current();
+    }, { rootMargin: '0px 0px 240px 0px' });
     observer.observe(sentinel.current);
     return () => observer.disconnect();
   }, [auth?.authenticated, feed.initialized]);
+  useEffect(() => {
+    const intent = (event: Event) => {
+      if (event instanceof WheelEvent && event.deltaY <= 0) return;
+      if (event instanceof KeyboardEvent && (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || !['ArrowDown', 'PageDown', 'End', ' '].includes(event.key) || (event.target as HTMLElement | null)?.closest('input,textarea,select,[contenteditable="true"],[role="dialog"]'))) return;
+      scrollIntent.current = true;
+      if (nearEnd.current) loadMore.current();
+    };
+    window.addEventListener('wheel', intent, { passive: true }); window.addEventListener('touchmove', intent, { passive: true }); window.addEventListener('keydown', intent);
+    return () => { window.removeEventListener('wheel', intent); window.removeEventListener('touchmove', intent); window.removeEventListener('keydown', intent); };
+  }, []);
   return <div className="page-container following-page"><div className="page-heading"><div><p className="section-eyebrow">来自你的选择</p><h1>我的关注</h1></div>{auth?.authenticated && <button className="button button-quiet following-refresh" onClick={() => { fillTarget.current = { count: columns, attempts: 1 }; feed.refresh(); }} disabled={feed.loading}><ArrowClockwise className={feed.loading ? 'spin' : ''} size={16} />刷新最新</button>}</div>
     {auth?.authenticated && <p className="following-description">只看已关注 UP 主的视频，按发布时间更新。向下滚动继续加载。</p>}
     {!auth ? <Loading text="正在连接账号" /> : !auth.authenticated ? <Empty title="看看关注的 UP 主更新了什么" action={<button className="button button-primary" onClick={onLogin}>登录哔哩哔哩</button>}>登录后，只显示你已关注 UP 主的视频。</Empty> : <>
@@ -154,7 +182,7 @@ function Video({ auth, authGeneration, onLogin }: { auth: AuthState | null; auth
       <Link className="watch-creator" to={`/creator/${data.owner.mid}`}><img src={data.owner.avatar} alt="" referrerPolicy="no-referrer" /><div><strong>{data.owner.name}</strong><span>查看 UP 主的视频</span></div><ArrowRight size={18} /></Link>
       {data.description && <details className="video-description"><summary>视频简介<CaretDown size={15} /></summary><p>{data.description}</p></details>}
       <Comments bvid={data.bvid} />
-    </div>{data.parts.length > 1 && <aside className="parts-panel" aria-label="视频分P"><div className="parts-heading"><h2>分 P 列表</h2><span>{part.page} / {data.parts.length}</span></div><p className="parts-note">选择后手动播放</p><div className="parts-list">{data.parts.map(item => <button key={item.cid} className={item.cid === part.cid ? 'active' : ''} onClick={() => setParams({ p: String(item.page) })} aria-current={item.cid === part.cid ? 'true' : undefined}><span className="part-number">{String(item.page).padStart(2, '0')}</span><span className="part-title">{item.title}</span><span className="part-duration">{duration(item.duration)}</span></button>)}</div></aside>}</div>
+    </div>{data.parts.length > 1 && <aside className="parts-panel" aria-label="视频分P"><div className="parts-heading"><h2>分 P 列表</h2><span>{part.page} / {data.parts.length}</span></div><p className="parts-note">点击切换分 P</p><div className="parts-list">{data.parts.map(item => <button key={item.cid} className={item.cid === part.cid ? 'active' : ''} onClick={() => setParams({ p: String(item.page) })} aria-current={item.cid === part.cid ? 'true' : undefined}><span className="part-number">{String(item.page).padStart(2, '0')}</span><span className="part-title">{item.title}</span><span className="part-duration">{duration(item.duration)}</span></button>)}</div></aside>}</div>
   </div>;
 }
 

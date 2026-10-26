@@ -458,10 +458,11 @@ export class BiliGateway {
     const accepted = Array.isArray(data.accept_quality) ? data.accept_quality : [], labels = Array.isArray(data.accept_description) ? data.accept_description : [];
     const label = (id: number) => clean(labels[accepted.indexOf(id)] ?? array(data.support_formats).find(item => number(item.quality) === id)?.new_description ?? `${id}`, 100);
     if (videos.length) {
-      const candidates = videos.filter(track => number(track.id) <= quality), selected = (candidates.length ? candidates : videos).sort((a, b) => number(b.id) - number(a.id) || number(b.bandwidth) - number(a.bandwidth))[0];
+      const ids = [...new Set(videos.map(track => number(track.id)))].sort((a, b) => b - a);
+      const selectedId = ids.find(id => id <= quality) ?? ids.at(-1);
+      const selected = videos.filter(track => number(track.id) === selectedId).sort((a, b) => number(b.bandwidth) - number(a.bandwidth))[0];
       const video = this.dashTrack(selected), audio = audios.length ? this.dashTrack(audios.sort((a, b) => number(b.bandwidth) - number(a.bandwidth))[0]) : undefined;
       if (!video || (array(dash.audio).length > 0 && !audio)) throw new BiliError('UNSUPPORTED_PLAYBACK', '当前视频没有可用的 AVC/AAC 播放轨道', 422);
-      const ids = [...new Set(videos.map(track => number(track.id)))].sort((a, b) => b - a);
       return { cid, quality: video.id, qualities: ids.map(id => ({ id, label: label(id) })), duration: number(dash.duration, number(data.timelength) / 1000), video, ...(audio ? { audio } : {}), subtitles };
     }
     const segments = array(data.durl).map(segment => ({ url: https(segment.url), length: number(segment.length) })).filter(segment => segment.url && segment.length > 0);

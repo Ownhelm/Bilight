@@ -13,6 +13,7 @@ iOS 项目位于 `ios/`，直接用 Xcode 打开；构建和账号说明见 [iPh
 ```bash
 npm test
 npm run build
+npm run check:repo
 BILIGHT_DESTINATION='platform=iOS Simulator,name=你的模拟器名称' bash ios/scripts/verify.sh test
 ```
 

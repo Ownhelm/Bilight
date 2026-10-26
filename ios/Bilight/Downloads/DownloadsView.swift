@@ -174,16 +174,6 @@ struct OfflineVideoView: View {
                         Text("P\(record.part.page) · \(record.qualityLabel) · 离线观看").font(.caption).foregroundStyle(
                             Color.biliMuted)
                         HStack(spacing: 30) {
-                            Button {
-                                model.seek(-5)
-                            } label: {
-                                Image(systemName: "gobackward.5")
-                            }.accessibilityLabel("后退5秒")
-                            Button {
-                                model.seek(5)
-                            } label: {
-                                Image(systemName: "goforward.5")
-                            }.accessibilityLabel("前进5秒")
                             ShareLink("导出 MP4", item: store.fileURL(record))
                         }.padding(.vertical, 10)
                         if let error = model.error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }

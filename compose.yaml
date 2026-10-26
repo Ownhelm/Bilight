@@ -33,6 +33,6 @@ services:
         max-file: "2"
 secrets:
   master_key:
-    file: ./.secrets/master-key
+    file: ${BILIGHT_MASTER_KEY_FILE:-../Local/secrets/master-key}
 volumes:
   bilight_data:

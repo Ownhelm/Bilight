@@ -1,7 +1,7 @@
 import AVKit
 
 /// Move the same AVKit controller between containers; orientation changes never replace its player or item.
-@MainActor final class PlayerContainer: UIViewController {
+@MainActor final class PlayerContainer: UIViewController, UIGestureRecognizerDelegate {
     let controller: AVPlayerViewController
     private let model: PlayerModel
     private let fullscreenButton = UIButton(type: .system)
@@ -11,6 +11,37 @@ import AVKit
     private var deviceWasLandscape = false
     private var suppressUntilPortrait = false
     private var playbackIntent: (AVPlayerItem?, Bool, Float)?
+    private var controlsAutoHide: Task<Void, Never>?
+    private var playbackControls: PlaybackControls?
+    private let seekFeedback = UILabel()
+    private var seekFeedbackTask: Task<Void, Never>?
+    private var fullscreenPullStart = CGPoint.zero
+    private lazy var seekTap: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(doubleTapSeek(_:)))
+        tap.numberOfTapsRequired = 2
+        tap.name = "bilight-double-tap-seek"
+        tap.delegate = self
+        return tap
+    }()
+    private lazy var fullscreenTap: UITapGestureRecognizer = {
+        let tap = UITapGestureRecognizer(target: self, action: #selector(fullscreenSurfaceTapped))
+        tap.name = "bilight-fullscreen-controls"
+        tap.cancelsTouchesInView = false
+        tap.require(toFail: seekTap)
+        tap.delegate = self
+        return tap
+    }()
+    private lazy var fullscreenPull: UIPanGestureRecognizer = {
+        let pan = UIPanGestureRecognizer(target: self, action: #selector(fullscreenPulled(_:)))
+        pan.name = "bilight-fullscreen-pull-down"
+        pan.maximumNumberOfTouches = 1
+        pan.delegate = self
+        return pan
+    }()
+    private var isPortraitFullscreen: Bool {
+        guard let fullscreen, !exitingFullscreen else { return false }
+        return Self.orientation(fullscreen.view.window?.windowScene)?.isPortrait == true
+    }
     var nativeFullscreen = false
     var orientationMask: UIInterfaceOrientationMask {
         model.isFullscreen && !exitingFullscreen ? .allButUpsideDown : .portrait
@@ -21,10 +52,33 @@ import AVKit
         super.init(nibName: nil, bundle: nil)
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+    func installPlaybackControls(_ controls: PlaybackControls) {
+        playbackControls = controls
+        controls.onActivity = { [weak self] in
+            self?.controlsAutoHide?.cancel()
+            self?.setFullscreenButtonVisible(true, animated: true)
+            self?.scheduleControlsAutoHide()
+        }
+        loadViewIfNeeded()
+    }
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
         Self.attach(controller, to: self)
+        controller.view.addGestureRecognizer(seekTap)
+        if let overlay = controller.contentOverlayView {
+            seekFeedback.textAlignment = .center
+            seekFeedback.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
+            seekFeedback.textColor = .white
+            seekFeedback.backgroundColor = .black.withAlphaComponent(0.65)
+            seekFeedback.layer.cornerRadius = 8
+            seekFeedback.clipsToBounds = true
+            seekFeedback.isUserInteractionEnabled = false
+            seekFeedback.isHidden = true
+            seekFeedback.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(seekFeedback)
+            NSLayoutConstraint.activate([seekFeedback.centerXAnchor.constraint(equalTo: overlay.centerXAnchor), seekFeedback.centerYAnchor.constraint(equalTo: overlay.centerYAnchor), seekFeedback.heightAnchor.constraint(equalToConstant: 46)])
+        }
         fullscreenButton.tintColor = .white
         fullscreenButton.backgroundColor = .black.withAlphaComponent(0.45)
         fullscreenButton.layer.cornerRadius = 9
@@ -33,6 +87,7 @@ import AVKit
     }
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        if playbackControls != nil { scheduleControlsAutoHide() }
         PlaybackOrientationDelegate.active = self
         if orientationObserver == nil {
             UIDevice.current.beginGeneratingDeviceOrientationNotifications()
@@ -99,29 +154,28 @@ import AVKit
         placeButton(in: target.view, expanded: true)
         present(target, animated: animated) { [weak self] in
             guard let self else { return }
+            if self.exitingFullscreen {
+                self.finishExit(from: target)
+                return
+            }
             self.restorePlayback()
             self.traceFullscreen(active: true)
+            self.scheduleControlsAutoHide()
             if rotate { self.requestOrientation(.landscape, from: target) }
         }
     }
     func exitFullscreen() {
         guard let target = fullscreen, !target.isBeingDismissed, !exitingFullscreen else { return }
-        rememberPlayback()
+        if playbackIntent == nil { rememberPlayback() }
         exitingFullscreen = true
+        controlsAutoHide?.cancel()
         refreshOrientationPolicy()
-        let scene = target.view.window?.windowScene
-        if Self.orientation(scene)?.isPortrait == true {
-            finishExit(from: target)
-            return
-        }
-        target.setNeedsUpdateOfSupportedInterfaceOrientations()
-        scene?.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { [weak self, weak target] _ in
-            guard let self, let target else { return }
-            self.finishExit(from: target)
-        }
+        // Presentation may not have a window yet. Its completion will honor this exit request.
+        // Dismiss first: a portrait geometry request need not produce a rotation callback.
+        finishExit(from: target)
     }
     private func finishExit(from target: FullscreenContainer) {
-        guard fullscreen === target, !target.isBeingDismissed else { return }
+        guard fullscreen === target, !target.isBeingPresented, !target.isBeingDismissed else { return }
         if playbackIntent == nil { rememberPlayback() }
         target.dismiss(animated: false) { [weak self, weak target] in
             guard let self, let target else { return }
@@ -140,6 +194,7 @@ import AVKit
         model.isFullscreen = nativeFullscreen
         exitingFullscreen = false
         refreshOrientationPolicy()
+        requestOrientation(.portrait, scene: view.window?.windowScene)
         restorePlayback()
         traceFullscreen(active: false)
     }
@@ -160,7 +215,9 @@ import AVKit
         playbackIntent = nil
         guard model.player.currentItem === intent.0 else { return }
         model.setRate(intent.2)
-        if intent.1 { model.player.play() } else { model.player.pause() }
+        if intent.1 {
+            if model.player.timeControlStatus == .paused { model.player.play() }
+        } else if model.player.timeControlStatus != .paused { model.player.pause() }
     }
     func nativeFullscreenEnded(cancelled: Bool) {
         nativeFullscreen = cancelled
@@ -197,6 +254,14 @@ import AVKit
         scene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
     }
     private func placeButton(in container: UIView, expanded: Bool) {
+        controlsAutoHide?.cancel()
+        fullscreenTap.view?.removeGestureRecognizer(fullscreenTap)
+        fullscreenPull.view?.removeGestureRecognizer(fullscreenPull)
+        if expanded || playbackControls != nil { container.addGestureRecognizer(fullscreenTap) }
+        if expanded {
+            container.addGestureRecognizer(fullscreenPull)
+        }
+        setFullscreenButtonVisible(true, animated: false)
         fullscreenButton.removeFromSuperview()
         fullscreenButton.setImage(
             UIImage(systemName: expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right"),
@@ -213,6 +278,88 @@ import AVKit
             fullscreenButton.widthAnchor.constraint(equalToConstant: 44),
             fullscreenButton.heightAnchor.constraint(equalToConstant: 44),
         ])
+    }
+    @objc func fullscreenSurfaceTapped() {
+        guard fullscreen != nil || playbackControls != nil, !exitingFullscreen else { return }
+        controlsAutoHide?.cancel()
+        let visible = fullscreenButton.alpha < 0.01 || UIAccessibility.isVoiceOverRunning
+        setFullscreenButtonVisible(visible, animated: true)
+        if visible { scheduleControlsAutoHide() }
+    }
+    @objc func fullscreenPulled(_ gesture: UIPanGestureRecognizer) {
+        if gesture.state == .began {
+            // UIKit resets translation at recognition; retain the movement that began a quick pull.
+            gesture.setTranslation(fullscreenPullStart, in: gesture.view)
+            fullscreenPullStart = .zero
+            return
+        }
+        guard gesture.state == .ended, isPortraitFullscreen else { return }
+        let distance = gesture.translation(in: gesture.view)
+        let velocity = gesture.velocity(in: gesture.view)
+        guard distance.y > abs(distance.x) * 1.3,
+            distance.y >= 80 || (distance.y >= 28 && velocity.y >= 700)
+        else { return }
+        exitFullscreen()
+    }
+    @objc private func doubleTapSeek(_ gesture: UITapGestureRecognizer) {
+        guard gesture.state == .ended else { return }
+        let delta = gesture.location(in: controller.view).x < controller.view.bounds.midX ? -10.0 : 10.0
+        let before = model.player.currentTime().seconds
+        guard let target = model.seek(delta) else { return }
+        showSeekFeedback(before: before, target: target)
+    }
+    func showSeekFeedback(before: Double, target: Double) {
+        let seconds = Int(abs(target - before).rounded())
+        let direction = target > before ? "前进" : "后退"
+        seekFeedback.text = seconds == 0 ? "   已到视频边界   " : "   \(direction) \(seconds) 秒 · \(timeLabel(target))   "
+        seekFeedback.isHidden = false
+        seekFeedbackTask?.cancel()
+        seekFeedbackTask = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(800)) } catch { return }
+            self?.seekFeedback.isHidden = true
+        }
+    }
+    private func scheduleControlsAutoHide() {
+        controlsAutoHide?.cancel()
+        guard fullscreen != nil || playbackControls != nil, !UIAccessibility.isVoiceOverRunning else { return }
+        controlsAutoHide = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
+            guard let self, self.fullscreen != nil || self.playbackControls != nil, !UIAccessibility.isVoiceOverRunning else { return }
+            if self.playbackControls?.isInteracting == true { self.scheduleControlsAutoHide(); return }
+            self.setFullscreenButtonVisible(false, animated: true)
+        }
+    }
+    private func setFullscreenButtonVisible(_ visible: Bool, animated: Bool) {
+        playbackControls?.setVisible(visible, animated: animated)
+        fullscreenButton.isUserInteractionEnabled = visible
+        fullscreenButton.accessibilityElementsHidden = !visible
+        UIView.animate(withDuration: animated ? 0.2 : 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+            self.fullscreenButton.alpha = visible ? 1 : 0
+        }
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        var target = touch.view
+        while let view = target {
+            if view is UIControl { return false }
+            target = view.superview
+        }
+        return true
+    }
+    func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        guard gestureRecognizer === fullscreenPull else { return true }
+        return beginFullscreenPull(fullscreenPull.translation(in: fullscreenPull.view))
+    }
+    func beginFullscreenPull(_ distance: CGPoint) -> Bool {
+        let accepted = isPortraitFullscreen && distance.y > 0 && distance.y > abs(distance.x) * 1.3
+        fullscreenPullStart = accepted ? distance : .zero
+        return accepted
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer !== seekTap && otherGestureRecognizer !== seekTap
+            && gestureRecognizer !== fullscreenPull && otherGestureRecognizer !== fullscreenPull
+    }
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        gestureRecognizer === seekTap && otherGestureRecognizer is UITapGestureRecognizer && otherGestureRecognizer !== fullscreenTap
     }
     static func orientation(_ scene: UIWindowScene?) -> UIInterfaceOrientation? {
         guard let scene else { return nil }
@@ -237,6 +384,12 @@ import AVKit
         child.removeFromParent()
     }
     func shutdown() {
+        playbackControls?.stop()
+        controlsAutoHide?.cancel()
+        seekFeedbackTask?.cancel()
+        seekTap.view?.removeGestureRecognizer(seekTap)
+        fullscreenTap.view?.removeGestureRecognizer(fullscreenTap)
+        fullscreenPull.view?.removeGestureRecognizer(fullscreenPull)
         releaseOrientation()
         controller.delegate = nil
         if let fullscreen {

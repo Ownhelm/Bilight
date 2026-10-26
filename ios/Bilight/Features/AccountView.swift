@@ -32,7 +32,6 @@ struct AccountView: View {
                     accountLink("我的关注的人", symbol: "person.2", route: .followedPeople(false))
                     accountLink("我的收藏", symbol: "star", route: .favoriteFolders)
                     accountLink("我的下载", symbol: "arrow.down.circle", route: .downloads)
-                    accountLink("我的最近访问", symbol: "clock.arrow.circlepath", route: .recentCreators)
                 }
                 Section {
                     accountLink("常访问的 UP 主", symbol: "person.crop.circle", route: .followedPeople(true))
@@ -172,85 +171,6 @@ struct FollowedPeopleView: View {
                     NativeTrace.mark(
                         .libraryFailed,
                         ["kind": frequent ? 1 : 0, "code": Int((error as? BiliFailure)?.code ?? "") ?? 0])
-                    app.handle(error)
-                }
-                busy = false
-            }
-    }
-}
-
-struct RecentCreatorsView: View {
-    @EnvironmentObject private var app: AppModel
-    @State private var result: Page<FollowedPerson>?
-    @State private var page = 1
-    @State private var refresh = 0
-    @State private var busy = true
-    @State private var error: String?
-    var body: some View {
-        List {
-            if busy {
-                LoadingBlock(label: "正在读取 B 站常访问")
-            } else if let error {
-                FailureBlock(error: error) { refresh += 1 }
-            } else if let result {
-                if result.items.isEmpty {
-                    EmptyBlock(symbol: "clock", title: "B 站暂无常访问记录", message: "登录账号的最常访问 UP 主会显示在这里。")
-                        .listRowSeparator(.hidden)
-                } else {
-                    Section {
-                        ForEach(result.items) { item in
-                            Button {
-                                app.open(item.user)
-                            } label: {
-                                HStack(spacing: 13) {
-                                    RemoteImage(url: item.user.avatar, avatar: true).frame(width: 52, height: 52)
-                                        .clipShape(Circle())
-                                    VStack(alignment: .leading, spacing: 6) {
-                                        Text(item.user.name).font(.system(size: 15, weight: .medium)).foregroundStyle(
-                                            .primary)
-                                        if !item.user.description.isEmpty {
-                                            Text(item.user.description).font(.caption).foregroundStyle(Color.biliMuted)
-                                                .lineLimit(1)
-                                        }
-                                    }
-                                    Spacer()
-                                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(Color.biliMuted)
-                                }.padding(.vertical, 6)
-                            }.buttonStyle(.plain)
-                        }
-                    } footer: {
-                        Text("按 B 站最常访问顺序展示。B 站未提供每次主页访问的时间。")
-                    }
-                }
-                PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }.listRowSeparator(.hidden)
-            }
-        }.listStyle(.plain).navigationTitle("我的最近访问").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button {
-                        refresh += 1
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }.accessibilityLabel("刷新最近访问")
-                }
-            }.task(id: "\(page)-\(refresh)") {
-                guard let mid = app.user?.mid else {
-                    busy = false
-                    return
-                }
-                busy = true
-                error = nil
-                do {
-                    let value = try await app.client.followedPeople(mid: mid, page: page, frequent: true)
-                    try Task.checkCancellation()
-                    guard app.user?.mid == mid else { return }
-                    result = value
-                    for item in value.items { app.register(item.user) }
-                } catch is CancellationError { return } catch {
-                    if Task.isCancelled { return }
-                    self.error = error.localizedDescription
-                    NativeTrace.mark(
-                        .libraryFailed, ["kind": 1, "code": Int((error as? BiliFailure)?.code ?? "") ?? 0])
                     app.handle(error)
                 }
                 busy = false

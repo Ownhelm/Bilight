@@ -32,3 +32,26 @@ bilight-backup*/
 # Internal acceptance notes may contain personal viewing and device details.
 docs/acceptance.md
 ios/ACCEPTANCE.md
+
+# The repository contains application source, never publication or local-delivery material.
+/release/
+/releases/
+/Promotion/
+/Local/
+/Legal/
+/video/
+/docs/assets/*
+!/docs/assets/logo.svg
+/ios/Bilight/Demo/*.png
+/ios/Bilight/Demo/*.jpg
+/ios/Bilight/Demo/*.jpeg
+*.zip
+*.dmg
+*.wav
+*.m4a
+*.mp3
+*.mov
+*.mp4
+!/ios/BilightTests/Fixtures/fullscreen-motion.mp4
+
+/ios/BilightPreview.xcodeproj/

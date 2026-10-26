@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import type { Page, VideoSummary } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 
@@ -31,41 +31,57 @@ export function useFollowingColumns(): number {
 interface FeedState { items: VideoSummary[]; cursor: string | null; loading: boolean; initialized: boolean; error: Error | null }
 const emptyFeed: FeedState = { items: [], cursor: null, loading: false, initialized: false, error: null };
 
-export function useFollowingFeed(enabled: boolean) {
-  const [state, setState] = useState<FeedState>(emptyFeed);
-  const active = useRef<AbortController | null>(null);
-  const visited = useRef(new Set<string>());
-  const lastRequest = useRef({ cursor: '', replace: true });
-  const load = useCallback(async (cursor: string, replace: boolean) => {
-    if (active.current) return;
-    const controller = new AbortController(); active.current = controller;
-    lastRequest.current = { cursor, replace };
-    setState(current => ({ ...current, loading: true, error: null }));
+export class FollowingFeed {
+  private state = emptyFeed;
+  private active: AbortController | null = null;
+  private visited = new Set<string>();
+  private lastRequest = { cursor: '', replace: true };
+  private listeners = new Set<() => void>();
+  scrollTop = 0;
+  constructor(private readPage = (cursor: string, signal: AbortSignal) => api<Page<VideoSummary>>(`/api/following${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal })) {}
+  getSnapshot = () => this.state;
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private publish(state: FeedState) { this.state = state; this.listeners.forEach(listener => listener()); }
+  ensureLoaded = () => { if (!this.state.initialized) return this.load('', true); };
+  loadMore = () => { if (this.state.cursor && !this.state.error) return this.load(this.state.cursor, false); };
+  refresh = () => this.load('', true);
+  retry = () => this.load(this.lastRequest.cursor, this.lastRequest.replace);
+  clear = () => {
+    this.active?.abort(); this.active = null;
+    this.visited.clear(); this.lastRequest = { cursor: '', replace: true }; this.scrollTop = 0;
+    this.publish(emptyFeed);
+  };
+  private async load(cursor: string, replace: boolean) {
+    if (this.active) return;
+    const controller = new AbortController(); this.active = controller;
+    this.lastRequest = { cursor, replace };
+    this.publish({ ...this.state, loading: true, error: null });
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
     try {
-      const page = await api<Page<VideoSummary>>(`/api/following${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal: controller.signal });
-      if (controller.signal.aborted || active.current !== controller) return;
-      if (replace) visited.current.clear();
-      visited.current.add(cursor);
-      const next = nextFollowingCursor(page, visited.current);
-      setState(current => ({ items: mergeFollowing(replace ? [] : current.items, page.items), cursor: next, loading: false, initialized: true, error: null }));
+      const page = await this.readPage(cursor, controller.signal);
+      if (controller.signal.aborted || this.active !== controller) return;
+      if (replace) this.visited.clear();
+      this.visited.add(cursor);
+      const next = nextFollowingCursor(page, this.visited);
+      this.publish({ items: mergeFollowing(replace ? [] : this.state.items, page.items), cursor: next, loading: false, initialized: true, error: null });
     } catch (error) {
-      if (active.current !== controller || (isAbort(error) && !timedOut)) return;
+      if (this.active !== controller || (isAbort(error) && !timedOut)) return;
       const failure = timedOut ? new Error('B 站响应较慢，请重试。已加载的视频会保留。') : error instanceof Error ? error : new Error(errorMessage(error));
-      setState(current => ({ ...current, loading: false, initialized: true, error: failure }));
+      this.publish({ ...this.state, loading: false, initialized: true, error: failure });
     } finally {
       clearTimeout(timer);
-      if (active.current === controller) { active.current = null; setState(current => ({ ...current, loading: false })); }
+      if (this.active === controller) this.active = null;
     }
-  }, []);
+  }
+}
+
+export function useFollowingFeed(cache: FollowingFeed, enabled: boolean) {
+  const state = useSyncExternalStore(cache.subscribe, cache.getSnapshot);
   useEffect(() => {
-    setState(emptyFeed); visited.current.clear();
-    if (enabled) void load('', true);
-    return () => { active.current?.abort(); active.current = null; };
-  }, [enabled, load]);
-  const loadMore = useCallback(() => { if (state.cursor && !state.error) void load(state.cursor, false); }, [state.cursor, state.error, load]);
-  const refresh = useCallback(() => { if (enabled) void load('', true); }, [enabled, load]);
-  const retry = useCallback(() => { if (enabled) void load(lastRequest.current.cursor, lastRequest.current.replace); }, [enabled, load]);
-  return { ...state, loadMore, refresh, retry };
+    if (enabled) void cache.ensureLoaded();
+    else cache.clear();
+    // Route changes only unsubscribe; the account-owned request/cache survives navigation.
+  }, [enabled, cache]);
+  return { ...state, loadMore: cache.loadMore, refresh: cache.refresh, retry: cache.retry };
 }

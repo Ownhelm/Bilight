@@ -17,7 +17,8 @@ enum DemoFixtures {
     }
     static func image(_ url: URL) -> UIImage? {
         guard url.host == "i0.hdslb.com", url.path.hasPrefix("/bilight-demo/demo-"),
-            let file = Bundle.main.url(forResource: url.deletingPathExtension().lastPathComponent, withExtension: "png")
+            ["png", "jpg", "jpeg"].contains(url.pathExtension.lowercased()),
+            let file = Bundle.main.url(forResource: url.deletingPathExtension().lastPathComponent, withExtension: url.pathExtension, subdirectory: "DemoAssets")
         else { return nil }
         return UIImage(contentsOfFile: file.path)
     }
@@ -42,6 +43,21 @@ final class DemoProtocol: URLProtocol {
                 var data = fixtures[url.path] as? JSON
             else { throw BiliFailure(code: "DEMO_ONLY", message: "此操作未纳入离线演示。") }
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            let preview = obj(fixtures["_preview"])
+            func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+            if ["/x/web-interface/view", "/x/web-interface/wbi/view"].contains(url.path) {
+                guard let video = obj(preview["videos"])[parameter("bvid")] as? JSON else { throw BiliFailure.invalid }
+                data = video
+            } else if url.path == "/x/space/wbi/acc/info" {
+                guard let creator = obj(preview["creators"])[parameter("mid")] as? JSON else { throw BiliFailure.invalid }
+                data = creator
+            } else if url.path == "/x/space/wbi/arc/search" {
+                let values = list(obj(fixtures["/x/web-interface/wbi/search/type"])["result"]).filter { int(obj($0["owner"])["mid"]) == Int(parameter("mid")) }
+                data = ["list": ["vlist": values], "page": ["count": values.count]]
+            } else if url.path == "/x/polymer/web-space/seasons_series_list" {
+                guard let directory = obj(preview["directories"])[parameter("mid")] as? JSON else { throw BiliFailure.invalid }
+                data = directory
+            }
             if url.path.hasSuffix("/search/type"), query.contains(where: { $0.name == "search_type" && $0.value == "bili_user" }) {
                 data["result"] = list(obj(fixtures["/x/relation/followings"])["list"]).map { raw in
                     ["mid": raw["mid"] ?? 0, "uname": raw["name"] ?? "", "upic": raw["face"] ?? "", "usign": raw["sign"] ?? "", "fans": raw["fans"] ?? 0]

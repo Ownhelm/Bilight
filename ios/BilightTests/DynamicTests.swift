@@ -238,6 +238,56 @@ final class DynamicTests: XCTestCase {
         } catch let error as BiliFailure { XCTAssertEqual(error.code, "FOLLOW_TIMEOUT") }
         XCTAssertLessThan(Date().timeIntervalSince(began), 2)
     }
+    @MainActor func testReenterKeepsFeedPagesAndPositionUntilExplicitRefresh() async throws {
+        let first = item("1057955152016703512"), second = item("1057955152016703513")
+        var reads = 0, failing = false
+        let (client, http) = fixture { request in
+            if request.url!.path == "/x/relation/relations" { return ["code": 0, "data": ["7": ["attribute": 2]]] }
+            reads += 1
+            if failing { throw URLError(.timedOut) }
+            let next = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems?.first { $0.name == "offset" }?.value
+            return ["code": 0, "data": next == nil ? ["items": [first], "has_more": true, "offset": "page1"] : ["items": [second], "has_more": false]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let model = FollowingModel()
+        await model.enter(client: client, mid: 3)
+        await model.load(client: client, mid: 3)
+        model.visiblePostID = second["id_str"] as? String
+        await model.enter(client: client, mid: 3)
+        XCTAssertEqual(reads, 2, "Returning from video must not request the feed again")
+        XCTAssertEqual(model.posts.count, 2)
+        XCTAssertEqual(model.visiblePostID, second["id_str"] as? String)
+        failing = true
+        await model.load(client: client, mid: 3, reset: true)
+        XCTAssertNotNil(model.error)
+        XCTAssertEqual(model.posts.count, 2, "A failed refresh must keep the visible cache")
+        await model.enter(client: client, mid: 3)
+        XCTAssertEqual(reads, 3)
+        failing = false
+        await model.retry(client: client, mid: 3)
+        XCTAssertEqual(reads, 4)
+        XCTAssertEqual(model.posts.count, 1)
+        XCTAssertNil(model.visiblePostID)
+        model.account(nil)
+        XCTAssertTrue(model.posts.isEmpty)
+        XCTAssertFalse(model.initialized)
+    }
+    @MainActor func testEmptyFeedStaysCachedAndUnfollowOnlyRemovesItsAuthor() async throws {
+        var reads = 0
+        let (client, http) = fixture { request in
+            reads += 1
+            return ["code": 0, "data": ["items": [], "has_more": false]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let model = FollowingModel()
+        await model.enter(client: client, mid: 3)
+        await model.enter(client: client, mid: 3)
+        XCTAssertEqual(reads, 1)
+        XCTAssertTrue(model.initialized)
+        model.posts = [try XCTUnwrap(DynamicPost.map(item(mid: 7))), try XCTUnwrap(DynamicPost.map(item("1057955152016703513", mid: 8)))]
+        model.removeAuthor(7)
+        XCTAssertEqual(model.posts.map(\.author.mid), [8])
+    }
     func testDynamicCommentsUseReturnedTypeAndExactOID() async throws {
         let (client, _) = fixture { request in
             XCTAssertEqual(request.url!.path, "/x/v2/reply/wbi/main")

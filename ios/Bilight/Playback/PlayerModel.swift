@@ -1,6 +1,23 @@
 import AVFoundation
 import Combine
 
+/// Device preferences contain no account or viewing-history data.
+final class PlaybackPreferences {
+    private let defaults: UserDefaults
+    init(defaults: UserDefaults = .standard) { self.defaults = defaults }
+    var danmakuEnabled: Bool {
+        get { defaults.bool(forKey: "bilight.playback.danmaku") }
+        set { defaults.set(newValue, forKey: "bilight.playback.danmaku") }
+    }
+    var quality: Int {
+        get {
+            let value = defaults.integer(forKey: "bilight.playback.quality")
+            return (1...127).contains(value) ? value : 127
+        }
+        set { if (1...127).contains(newValue) { defaults.set(newValue, forKey: "bilight.playback.quality") } }
+    }
+}
+
 @MainActor final class PlayerModel: ObservableObject {
     let player = AVPlayer()
     @Published var playback: Playback?
@@ -12,6 +29,14 @@ import Combine
     @Published var selectedSubtitle: Int?
     @Published var subtitleText = ""
     @Published var rate: Float = 1
+    @Published var danmakuEnabled = false
+    @Published var danmakuFontSize: CGFloat = 20
+    @Published var danmakuOpacity: CGFloat = 1
+    @Published var danmakuItems: [Danmaku] = []
+    @Published var danmakuRevision = UUID()
+    @Published var danmakuError: String?
+    private var danmakuRequest: Task<Void, Never>?
+    private let preferences: PlaybackPreferences
     private var loaders: [MediaLoader] = []
     private var sourceAssets: [AVURLAsset] = []
     private var stream: SegmentedStream?
@@ -29,12 +54,19 @@ import Combine
     private var previous = 0.0, progress = 0.0, watched = false, dirty = false, lastSaved = Date.distantPast
     var onWatch: ((Double, Bool) -> Void)?
     var isFullscreen = false
-    init() {
+    init(preferences: PlaybackPreferences = PlaybackPreferences()) {
+        self.preferences = preferences
+        danmakuEnabled = preferences.danmakuEnabled
         player.actionAtItemEnd = .pause
         observer = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak self] time in Task { @MainActor in self?.tick(time.seconds) } }
         playStatus = player.observe(\.timeControlStatus) { [weak self] player, _ in
+            if player.timeControlStatus != .paused {
+                let time = player.currentTime().seconds
+                NativeTrace.mark(player.timeControlStatus == .playing ? .playbackRunning : .playbackWaiting,
+                    ["positionMs": time.isFinite ? Int(max(0, time) * 1000) : 0])
+            }
             if player.timeControlStatus == .paused { Task { @MainActor in self?.flush() } }
         }
         defaultRateStatus = player.observe(\.defaultRate) { [weak self] player, _ in
@@ -63,8 +95,13 @@ import Combine
         }
     }
     func load(
-        client: BiliClient, bvid: String, part: VideoPart, start: Double = 0, quality: Int = 127, preserve: Bool = false
+        client: BiliClient, bvid: String, part: VideoPart, start: Double = 0, quality: Int? = nil, preserve: Bool = false
     ) {
+        if !preserve {
+            clearDanmaku()
+            updateDanmaku(preferences.danmakuEnabled, client: client, cid: part.cid)
+        }
+        let quality = quality ?? preferences.quality
         request?.cancel()
         let token = UUID()
         version = token
@@ -136,7 +173,7 @@ import Combine
                 }
                 try Task.checkCancellation()
                 guard version == token else { throw CancellationError() }
-                let playing = preserve && player.rate > 0
+                let playing = !preserve || player.timeControlStatus != .paused
                 let position = preserve ? player.currentTime().seconds : start
                 let item = AVPlayerItem(asset: asset)
                 item.preferredForwardBufferDuration = 0
@@ -200,12 +237,19 @@ import Combine
         }
         if !preserve { loadSubtitles(client: client, bvid: bvid, cid: part.cid) }
     }
-    func seek(_ delta: Double) {
+    func selectQuality(_ quality: Int, client: BiliClient, bvid: String, part: VideoPart) {
+        guard qualityChoices.contains(where: { $0.id == quality }) else { return }
+        preferences.quality = quality
+        if !busy && playback?.quality == quality { return }
+        load(client: client, bvid: bvid, part: part, quality: quality, preserve: true)
+    }
+    @discardableResult func seek(_ delta: Double) -> Double? {
         let current = player.currentTime().seconds
-        guard current.isFinite, let duration = playback?.duration else { return }
+        guard current.isFinite, let duration = playback?.duration else { return nil }
         previous = min(duration, max(0, current + delta))
         player.seek(
             to: CMTime(seconds: previous, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        return previous
     }
     func loadLocal(_ url: URL, record: DownloadRecord) {
         stop()
@@ -222,11 +266,13 @@ import Combine
             if item.status == .readyToPlay { NativeTrace.mark(.offlineReady, ["quality": record.quality]) }
             if item.status == .failed { Task { @MainActor in self?.error = "本地视频暂时无法播放，请重新下载。" } }
         }
+        player.defaultRate = rate
+        player.play()
     }
     func setRate(_ value: Float) {
-        rate = value
-        player.defaultRate = value
-        if player.rate > 0 { player.rate = value }
+        if rate != value { rate = value }
+        if player.defaultRate != value { player.defaultRate = value }
+        if player.rate > 0, player.rate != value { player.rate = value }
     }
     private func tick(_ current: Double) {
         guard current.isFinite else { return }
@@ -250,6 +296,7 @@ import Combine
         lastSaved = Date()
     }
     func stop() {
+        clearDanmaku()
         flush()
         request?.cancel()
         subtitleRequest?.cancel()
@@ -265,6 +312,29 @@ import Combine
         playback = nil
         qualityChoices = []
         busy = false
+    }
+    private func clearDanmaku() {
+        danmakuRequest?.cancel(); danmakuRequest = nil
+        danmakuEnabled = false; danmakuItems = []; danmakuError = nil; danmakuRevision = UUID()
+    }
+    func setDanmakuEnabled(_ enabled: Bool, client: BiliClient, cid: Int) {
+        preferences.danmakuEnabled = enabled
+        updateDanmaku(enabled, client: client, cid: cid)
+    }
+    private func updateDanmaku(_ enabled: Bool, client: BiliClient, cid: Int) {
+        danmakuRequest?.cancel(); danmakuRequest = nil
+        danmakuEnabled = enabled; danmakuError = nil
+        guard enabled else { danmakuItems = []; danmakuRevision = UUID(); return }
+        danmakuRequest = Task {
+            do {
+                let data = try await client.http.danmakuData(cid)
+                let items = try await Task.detached(priority: .utility) { try Danmaku.parse(data) }.value
+                try Task.checkCancellation()
+                if danmakuEnabled { danmakuItems = items; danmakuRevision = UUID() }
+            } catch is CancellationError {} catch {
+                if !Task.isCancelled { danmakuError = error.localizedDescription }
+            }
+        }
     }
     private func loadSubtitles(client: BiliClient, bvid: String, cid: Int) {
         subtitleRequest?.cancel()
@@ -328,5 +398,6 @@ import Combine
         if let jump { NotificationCenter.default.removeObserver(jump) }
         request?.cancel()
         subtitleRequest?.cancel()
+        danmakuRequest?.cancel()
     }
 }

@@ -534,6 +534,18 @@ test('playback selects AVC and AAC, keeps byte ranges and derives only offered A
   assert.equal(result.subtitles[0].url, 'https://aisubtitle.hdslb.com/file.json'); assert.equal(result.segments, undefined);
 });
 
+test('a saved quality falls down the offered AVC ladder and returns to 4K when available', async () => {
+  let available = [80, 64];
+  const { gateway } = fixture(({ url }) => url.endsWith('/playurl') ? { dash: { video: available.map(id => track(id, 'avc1.640032')), audio: [] } } : {});
+  assert.equal((await gateway.playback(BV1, 5, 120)).quality, 80);
+  available = [32, 64];
+  assert.equal((await gateway.playback(BV1, 6, 120)).quality, 64);
+  available = [80, 120, 64];
+  assert.equal((await gateway.playback(BV1, 7, 120)).quality, 120);
+  assert.equal((await gateway.playback(BV1, 7, 112)).quality, 80);
+  assert.equal((await gateway.playback(BV1, 7, 16)).quality, 64, 'Below the minimum uses the lowest offered stream, never the highest');
+});
+
 test('playback refuses HEVC-only or FLV media and does not invent a progressive MP4', async () => {
   for (const payload of [{ dash: { video: [track(80, 'hev1.1.6.L120.90')], audio: [track(30280, 'mp4a.40.2')] } }, { format: 'flv720', durl: [{ url: 'https://upos.bilivideo.com/video.flv', length: 1000 }] }]) {
     const { gateway } = fixture(({ url }) => url.endsWith('/playurl') ? payload : {});

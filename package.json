@@ -11,7 +11,10 @@
     "test": "node --import tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
     "setup": "node scripts/setup.mjs",
-    "demo": "node scripts/demo.mjs"
+    "demo": "node scripts/demo.mjs",
+    "check:repo": "node scripts/check-repository.mjs",
+    "brand:sync": "node scripts/brand.mjs --write",
+    "check:brand": "node scripts/brand.mjs --check"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

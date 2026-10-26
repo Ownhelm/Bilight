@@ -6,7 +6,7 @@ actor BiliClient {
     private var verificationVersion: UUID?
     private var verificationEpoch = UUID()
     private var followWrites: [Int: (Bool, Task<Relation, Error>)] = [:]
-    private var supportWrites: [String: (id: UUID, session: UUID, task: Task<VideoEngagement, Error>)] = [:]
+    private var supportWrites: [String: (id: UUID, session: UUID, action: VideoWrite, task: Task<VideoEngagement, Error>)] = [:]
     private var uncertainSupport: [String: UUID] = [:]
     private let followingTimeout: Duration
     init(http: BiliHTTP = BiliHTTP(), followingTimeout: Duration = .seconds(20)) {
@@ -58,17 +58,98 @@ actor BiliClient {
         return try VideoEngagement.map(data)
     }
     func triple(_ bvid: String) async throws -> VideoEngagement {
+        try await writeVideo(bvid, action: .triple)
+    }
+    func writeVideo(_ bvid: String, action: VideoWrite) async throws -> VideoEngagement {
         guard validBVID(bvid) else { throw BiliFailure.invalid }
         let version = await http.version()
-        if let pending = supportWrites[bvid], pending.session == version { return try await pending.task.value }
+        if let pending = supportWrites[bvid], pending.session == version {
+            guard pending.action == action else { throw BiliFailure(code: "INTERACTION_BUSY", message: "这个视频的互动正在处理中。") }
+            return try await pending.task.value
+        }
         guard uncertainSupport[bvid] != version else {
-            throw BiliFailure(code: "TRIPLE_UNCONFIRMED", message: "请先刷新三连状态，再继续操作。")
+            throw BiliFailure(code: action == .triple ? "TRIPLE_UNCONFIRMED" : "INTERACTION_UNCONFIRMED", message: "请先刷新互动状态，再继续操作。")
         }
         let id = UUID()
-        let task = Task { try await self.performTriple(bvid, version: version) }
-        supportWrites[bvid] = (id, version, task)
+        let task = Task<VideoEngagement, Error> {
+            if action == .triple { return try await self.performTriple(bvid, version: version) }
+            return try await self.performVideoWrite(bvid, action: action, version: version)
+        }
+        supportWrites[bvid] = (id, version, action, task)
         defer { if supportWrites[bvid]?.id == id { supportWrites[bvid] = nil } }
         return try await task.value
+    }
+    private func performVideoWrite(_ bvid: String, action: VideoWrite, version: UUID) async throws -> VideoEngagement {
+        let before = try await readEngagement(bvid, version: version)
+        let csrf = try await http.csrf()
+        let path: String
+        var form = ["bvid": bvid, "csrf": csrf]
+        switch action {
+        case .like(let liked):
+            if before.liked == liked { return before }
+            path = "/x/web-interface/archive/like"; form["like"] = liked ? "1" : "2"
+        case .coin(let target, let like):
+            let detail = try await video(bvid)
+            guard let limit = detail.coinLimit, (1...limit).contains(target) else { throw BiliFailure(code: "COIN_LIMIT", message: "超过本视频可投的硬币数量。") }
+            if before.coins >= target { return before }
+            path = "/x/web-interface/coin/add"
+            form["multiply"] = "\(target - before.coins)"; form["select_like"] = like ? "1" : "0"
+        case .favorite(let selected):
+            let folders = try await videoFavoriteFolders(bvid)
+            let ids = Set(selected)
+            guard ids.count <= 100, ids.isSubset(of: Set(folders.map(\.id))) else { throw BiliFailure(code: "FOLDERS_CHANGED", message: "收藏夹已变化，请重新选择。") }
+            let add = folders.filter { ids.contains($0.id) && !$0.selected }
+            let remove = folders.filter { !ids.contains($0.id) && $0.selected }
+            guard !add.contains(where: { $0.count >= $0.capacity }) else { throw BiliFailure(code: "FOLDER_FULL", message: "所选收藏夹已满。") }
+            if add.isEmpty && remove.isEmpty { return before }
+            let detail = try await video(bvid)
+            path = "/x/v3/fav/resource/deal"
+            form = ["rid": "\(detail.video.aid)", "type": "2", "add_media_ids": add.map { "\($0.id)" }.joined(separator: ","), "del_media_ids": remove.map { "\($0.id)" }.joined(separator: ","), "csrf": csrf]
+        case .triple: return try await performTriple(bvid, version: version)
+        }
+        try await http.ensureDevice(); try await http.check(version); try Task.checkCancellation()
+        do {
+            _ = try await http.request(path, form: form, referer: "https://www.bilibili.com/video/\(bvid)")
+            for delay in [0, 150, 350] {
+                if delay > 0 { try await Task.sleep(for: .milliseconds(delay)) }
+                try await http.check(version)
+                let state = try await readEngagement(bvid, version: version)
+                switch action {
+                case .like(let liked): if state.liked == liked { return state }
+                case .coin(let target, let like): if state.coins >= target && (!like || state.liked) { return state }
+                case .favorite(let selected):
+                    let folders = try await videoFavoriteFolders(bvid)
+                    if state.favorited == !selected.isEmpty && folders.allSatisfy({ $0.selected == selected.contains($0.id) }) { return state }
+                case .triple: break
+                }
+            }
+            throw BiliFailure(code: "INTERACTION_UNCONFIRMED", message: "结果暂未确认，请先刷新状态，避免重复操作。")
+        } catch {
+            try await http.check(version)
+            if (error as? BiliFailure)?.code == "-101" { throw error }
+            uncertainSupport[bvid] = version
+            throw BiliFailure(code: "INTERACTION_UNCONFIRMED", message: error.localizedDescription + " 请先刷新状态。")
+        }
+    }
+    func videoFavoriteFolders(_ bvid: String) async throws -> [VideoFavoriteFolder] {
+        let version = await http.version()
+        _ = try await http.csrf()
+        guard let user = try await currentUser() else { throw BiliFailure(code: "-101", message: "请先登录。") }
+        let detail = try await video(bvid)
+        let data = try await http.request("/x/v3/fav/folder/created/list-all", query: ["up_mid": "\(user.mid)", "rid": "\(detail.video.aid)", "type": "2"])
+        try await http.check(version)
+        guard let count = data["count"] as? NSNumber, (data["list"] is [JSON] || (count.intValue == 0 && data["list"] is NSNull)), count.intValue == list(data["list"]).count else { throw BiliFailure.invalid }
+        return try list(data["list"]).map { folder in
+            guard int(folder["id"]) > 0, int(folder["mid"]) == user.mid, [0, 1].contains(int(folder["fav_state"])), folder["fav_state"] is NSNumber, folder["media_count"] is NSNumber else { throw BiliFailure.invalid }
+            let attr = int(folder["attr"]), isDefault = attr & 2 == 0
+            return VideoFavoriteFolder(id: int(folder["id"]), title: clean(folder["title"]), count: int(folder["media_count"]), selected: int(folder["fav_state"]) == 1, isPrivate: attr & 1 == 1, capacity: int(folder["max_count"]) > 0 ? int(folder["max_count"]) : isDefault ? 50000 : 1000)
+        }.sorted { $0.selected && !$1.selected }
+    }
+    func videoStatistics(_ bvid: String) async throws -> VideoStatistics {
+        guard validBVID(bvid) else { throw BiliFailure.invalid }
+        let data = try await http.request("/x/web-interface/wbi/view", query: ["bvid": bvid], wbi: true)
+        guard data["bvid"] as? String == bvid else { throw BiliFailure.invalid }
+        return try VideoStatistics.map(obj(data["stat"]))
     }
     private func performTriple(_ bvid: String, version: UUID) async throws -> VideoEngagement {
         let before = try await readEngagement(bvid, version: version)
@@ -370,7 +451,7 @@ actor BiliClient {
     func video(_ bvid: String, known: Video? = nil) async throws -> VideoDetail {
         guard validBVID(bvid) else { throw BiliFailure(code: "INVALID_VIDEO", message: "视频 BV 号不正确。") }
         let data: JSON
-        do { data = try await http.request("/x/web-interface/view", query: ["bvid": bvid]) } catch let error
+        do { data = try await http.request("/x/web-interface/wbi/view", query: ["bvid": bvid], wbi: true) } catch let error
             as BiliFailure where ["412", "-352", "-412"].contains(error.code)
         {
             let summary: Video?
@@ -390,7 +471,7 @@ actor BiliClient {
                 video: summary, parts: parts, description: "", coinLimit: nil,
                 warning: "详细资料暂不可读（\(error.code)），当前使用真实搜索或合集记录及公开分 P 数据打开。")
         }
-        guard let video = Video.map(data), data["pages"] is [Any] else { throw BiliFailure.invalid }
+        guard let video = Video.map(data), video.bvid == bvid, data["pages"] is [Any] else { throw BiliFailure.invalid }
         let parts = list(data["pages"]).map {
             VideoPart(
                 cid: int($0["cid"]), page: int($0["page"]), title: clean($0["part"]), duration: num($0["duration"]))
@@ -398,7 +479,7 @@ actor BiliClient {
         guard !parts.isEmpty else { throw BiliFailure.invalid }
         return VideoDetail(
             video: video, parts: parts, description: clean(data["desc"], limit: 10000),
-            coinLimit: [1, 3].contains(int(data["copyright"])) ? 2 : 1)
+            coinLimit: [1, 3].contains(int(data["copyright"])) ? 2 : 1, statistics: try? VideoStatistics.map(obj(data["stat"])))
     }
     func playback(_ bvid: String, cid: Int, quality: Int = 127, allowNative: Bool = true) async throws -> Playback {
         let data = try await http.request(
@@ -424,7 +505,8 @@ actor BiliClient {
         let sorted = videos.sorted {
             int($0["id"]) == int($1["id"]) ? int($0["bandwidth"]) > int($1["bandwidth"]) : int($0["id"]) > int($1["id"])
         }
-        let selected = sorted.first { int($0["id"]) <= quality } ?? sorted.first
+        let lowest = sorted.last.map { int($0["id"]) }
+        let selected = sorted.first { int($0["id"]) <= quality } ?? sorted.first { int($0["id"]) == lowest }
         let accepted = data["accept_quality"] as? [Int] ?? []
         let labels = data["accept_description"] as? [String] ?? []
         var qualities = Set(videos.map { int($0["id"]) }).sorted(by: >).map { id -> Quality in

@@ -106,6 +106,28 @@ struct VideoDetail {
     var description: String
     var coinLimit: Int?
     var warning: String? = nil
+    var statistics: VideoStatistics? = nil
+}
+struct VideoStatistics: Equatable {
+    var likes: Int
+    var coins: Int
+    var favorites: Int
+    static func map(_ data: JSON) throws -> VideoStatistics {
+        let values = ["like", "coin", "favorite"].compactMap { data[$0] as? NSNumber }
+        guard values.count == 3, values.allSatisfy({ $0.doubleValue.isFinite && $0.doubleValue >= 0 && $0.doubleValue.rounded() == $0.doubleValue }) else { throw BiliFailure.invalid }
+        return VideoStatistics(likes: values[0].intValue, coins: values[1].intValue, favorites: values[2].intValue)
+    }
+}
+enum VideoWrite: Equatable {
+    case triple, like(Bool), coin(target: Int, like: Bool), favorite([Int])
+}
+struct VideoFavoriteFolder: Identifiable {
+    var id: Int
+    var title: String
+    var count: Int
+    var selected: Bool
+    var isPrivate: Bool
+    var capacity: Int
 }
 struct VideoEngagement: Equatable {
     var liked: Bool

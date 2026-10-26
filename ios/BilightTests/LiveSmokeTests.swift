@@ -1,4 +1,4 @@
-import AVFoundation
+import AVKit
 import CryptoKit
 import XCTest
 
@@ -71,7 +71,6 @@ final class LiveSmokeTests: XCTestCase {
         XCTAssertTrue((item.asset as? AVURLAsset)?.url.isFileURL == true)
         let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA])
         item.add(output)
-        model.player.play()
         var colors = 0
         let frameDeadline = Date().addingTimeInterval(10)
         while colors <= 100, Date() < frameDeadline {
@@ -111,12 +110,12 @@ final class LiveSmokeTests: XCTestCase {
         item.add(output)
         let audioTracks = try await item.asset.loadTracks(withMediaType: .audio)
         XCTAssertEqual(audioTracks.count, 1)
-        model.player.play()
         let playingDeadline = Date().addingTimeInterval(15)
         while model.player.currentTime().seconds < 1 && Date() < playingDeadline {
             try await Task.sleep(for: .milliseconds(100))
         }
-        XCTAssertGreaterThan(model.player.currentTime().seconds, 1)
+        XCTAssertGreaterThan(model.player.currentTime().seconds, 1, "Opening a video must start playback without an extra play action")
+        try await assertStreamingFullscreenContinuity(model)
         var frame: CVPixelBuffer?
         var colors = 0
         let frameDeadline = Date().addingTimeInterval(8)
@@ -146,6 +145,19 @@ final class LiveSmokeTests: XCTestCase {
             if pausedColors <= 100 { try await Task.sleep(for: .milliseconds(100)) }
         }
         XCTAssertGreaterThan(pausedColors, 100, "Seeking while paused must display the target video frame")
+        let pausedTime = model.player.currentTime().seconds
+        model.seek(10)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(model.player.currentTime().seconds, min(87, pausedTime + 10), accuracy: 0.3)
+        XCTAssertEqual(model.player.rate, 0)
+        model.seek(-10)
+        try await Task.sleep(for: .milliseconds(600))
+        XCTAssertEqual(model.player.currentTime().seconds, pausedTime, accuracy: 0.3)
+        // Anonymous read-only smoke for the exact statistics and XML used by the new controls.
+        let detail = try await client.video("BV1gVH56jEru")
+        XCTAssertNotNil(detail.statistics)
+        let xml = try await client.http.danmakuData(43_045_423_664)
+        _ = try Danmaku.parse(xml)
         if let quality = model.playback?.qualities.last, quality.id != model.playback?.quality {
             model.load(
                 client: client, bvid: "BV1gVH56jEru",
@@ -197,6 +209,47 @@ final class LiveSmokeTests: XCTestCase {
         }
         model.stop()
         XCTAssertNil(model.player.currentItem)
+    }
+    @MainActor private func assertStreamingFullscreenContinuity(_ model: PlayerModel) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let item = model.player.currentItem
+        let controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        try await Task.sleep(for: .milliseconds(150))
+        let lock = NSLock()
+        var pauses = 0, waits = 0
+        let observation = model.player.observe(\.timeControlStatus, options: [.new]) { player, _ in
+            lock.withLock {
+                if player.timeControlStatus == .paused { pauses += 1 }
+                if player.timeControlStatus == .waitingToPlayAtSpecifiedRate { waits += 1 }
+            }
+        }
+        defer { observation.invalidate(); host.shutdown(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        let position = model.player.currentTime().seconds
+        for _ in 0..<3 {
+            host.enterFullscreen()
+            let landscape = Date().addingTimeInterval(2)
+            while PlayerContainer.orientation(window.windowScene)?.isLandscape != true && Date() < landscape {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            try await Task.sleep(for: .milliseconds(200))
+            host.exitFullscreen()
+            let portrait = Date().addingTimeInterval(2)
+            while (model.isFullscreen || PlayerContainer.orientation(window.windowScene)?.isPortrait != true) && Date() < portrait {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertFalse(model.isFullscreen)
+            XCTAssertTrue(model.player.currentItem === item)
+        }
+        let counts = lock.withLock { (pauses, waits) }
+        print("[iOS streaming rotation] pauses=\(counts.0), waits=\(counts.1), advancedMs=\(Int((model.player.currentTime().seconds-position)*1000))")
+        XCTAssertEqual(counts.0, 0, "Rotating a live stream must not pause it")
+        XCTAssertGreaterThan(model.player.currentTime().seconds, position + 0.5)
     }
     private func uniqueColors(_ buffer: CVPixelBuffer) -> Int {
         CVPixelBufferLockBaseAddress(buffer, .readOnly)

@@ -4,182 +4,262 @@ struct VideoActionBar: View {
     @EnvironmentObject private var app: AppModel
     @ObservedObject var model: PlayerModel
     var bvid: String
-    var onQuality: (Int) -> Void
+    var cid: Int
+    var statistics: VideoStatistics?
     var onDownload: () -> Void
-    @State private var engagement: VideoEngagement?
-    @State private var supportBusy = false
-    @State private var supportError: String?
-    @State private var refreshRequired = false
-    @State private var operation = UUID()
+    @StateObject private var support = VideoSupportModel()
+    @State private var panel: Panel?
+    @State private var charging = false
+    @State private var chargeProgress = 0.0
+    @ScaledMetric(relativeTo: .caption) private var actionWidth: CGFloat = 52
+    @ScaledMetric(relativeTo: .caption) private var actionHeight: CGFloat = 58
+    @ScaledMetric(relativeTo: .caption) private var iconSize: CGFloat = 22
+    @ScaledMetric(relativeTo: .caption) private var countSize: CGFloat = 13
+    @ScaledMetric(relativeTo: .caption) private var iconGap: CGFloat = 9
+    @ScaledMetric(relativeTo: .caption) private var groupGap: CGFloat = 24
+    private enum Panel: String, Identifiable { case coin, favorite; var id: String { rawValue } }
+    private var enabled: Bool { !support.busy && !support.refreshRequired }
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 3) {
-                    supportButton
-                    downloadButton
-                    seekButtons
-                    settings
-                    captions
-                }.fixedSize(horizontal: true, vertical: false).frame(maxWidth: .infinity)
-                VStack(spacing: 0) {
-                    HStack(spacing: 3) {
-                        supportButton
-                        downloadButton
-                        Spacer()
-                        captions
+                HStack(spacing: 0) {
+                    HStack(spacing: groupGap) {
+                        likeControl.frame(width: max(44, actionWidth))
+                        coinControl.frame(width: max(44, actionWidth))
+                        favoriteControl.frame(width: max(44, actionWidth))
                     }
-                    HStack(spacing: 3) {
-                        seekButtons
-                        Spacer()
-                        settings
-                    }
+                    Spacer(minLength: 8)
+                    downloadControl.frame(width: max(44, actionWidth))
                 }
+                // Keep readable labels and 44pt targets when a larger font cannot fit a single row.
+                LazyVGrid(columns: [GridItem(.flexible(minimum: 44), spacing: 12), GridItem(.flexible(minimum: 44), spacing: 12)], spacing: 12) {
+                    likeControl
+                    coinControl
+                    favoriteControl
+                    downloadControl
+                }
+            }.buttonStyle(.plain)
+            if let error = support.error {
+                HStack(alignment: .top) {
+                    Text(error).font(.caption2)
+                    Spacer(minLength: 6)
+                    Button("刷新状态") { Task { await support.refresh(client: app.client, bvid: bvid, authenticated: app.user != nil, refreshCounts: true) } }.font(.caption2).disabled(support.busy)
+                }.foregroundStyle(Color.biliPink).padding(.vertical, 4)
             }
-            if let supportError {
-                Text(supportError).font(.caption2).foregroundStyle(Color.biliPink)
+            if let error = model.danmakuError {
+                HStack {
+                    Text(error).font(.caption2)
+                    Spacer()
+                    Button("重试") { model.setDanmakuEnabled(true, client: app.client, cid: cid) }.font(.caption2)
+                }.foregroundStyle(Color.biliPink)
             }
-        }.buttonStyle(.plain).foregroundStyle(Color.biliMuted).padding(.horizontal, 12).padding(.vertical, 3)
+        }.padding(.leading, 16).padding(.trailing, 20).padding(.bottom, 2)
             .task(id: "\(bvid)-\(app.accountGeneration)") {
-                operation = UUID()
-                supportBusy = false
-                engagement = nil
-                supportError = nil
-                refreshRequired = false
-                if app.user != nil { await support(write: false) }
+                support.reset(statistics); setCharging(false)
+                await refresh()
+            }.onDisappear { setCharging(false) }
+            .onChange(of: app.accountGeneration) { _, _ in panel = nil }
+            .sheet(item: $panel) { value in
+                if value == .coin { CoinActionSheet(bvid: bvid, support: support).environmentObject(app) }
+                else { FavoriteActionSheet(bvid: bvid, support: support).environmentObject(app) }
             }
     }
-    private var supportButton: some View {
-        Button {
-            guard app.user != nil else {
-                app.showLogin = true
-                return
+    private var likeControl: some View {
+        actionIcon(.like, count: support.statistics?.likes, title: "点赞", selected: support.state?.liked == true)
+            .overlay {
+                LikePressTarget(enabled: enabled, label: "点赞，\(support.statistics.map { countLabel($0.likes) } ?? "数量暂不可用")", onTap: like, onTriple: { write(.triple) }, onCharge: setCharging, canHold: canTriple)
             }
-            Task { await support(write: !refreshRequired && engagement != nil) }
-        } label: {
-            Group {
-                if supportBusy {
-                    ProgressView().tint(Color.biliPink)
-                } else if refreshRequired {
-                    Image(systemName: "arrow.clockwise").font(.system(size: 19))
-                } else {
-                    HStack(spacing: 3) {
-                        Image(systemName: engagement?.liked == true ? "hand.thumbsup.fill" : "hand.thumbsup")
-                            .foregroundStyle(engagement?.liked == true ? Color.biliPink : Color.biliMuted)
-                        Image(systemName: (engagement?.coins ?? 0) > 0 ? "circle.circle.fill" : "circle.circle")
-                            .foregroundStyle((engagement?.coins ?? 0) > 0 ? Color.biliPink : Color.biliMuted)
-                        Image(systemName: engagement?.favorited == true ? "star.fill" : "star")
-                            .foregroundStyle(engagement?.favorited == true ? Color.biliPink : Color.biliMuted)
-                    }.font(.system(size: 17, weight: .medium))
-                        .frame(width: 72, height: 32)
-                        .background(
-                            Color.biliPink.opacity(engagement?.complete == true ? 0.1 : 0.035),
-                            in: RoundedRectangle(cornerRadius: 7))
+    }
+    private var coinControl: some View {
+        Button { open(.coin) } label: {
+            actionIcon(.coin, count: support.statistics?.coins, title: "投币", selected: (support.state?.coins ?? 0) > 0)
+        }.disabled(!enabled).accessibilityLabel("投币")
+    }
+    private var favoriteControl: some View {
+        Button { open(.favorite) } label: {
+            actionIcon(.favorite, count: support.statistics?.favorites, title: "收藏", selected: support.state?.favorited == true)
+        }.disabled(!enabled).accessibilityLabel("收藏")
+    }
+    private var downloadControl: some View {
+        Button(action: onDownload) {
+            VStack(spacing: iconGap) {
+                BiliActionIcon(kind: .download, size: iconSize)
+                Text("缓存").font(.system(size: countSize)).lineLimit(1).minimumScaleFactor(0.5)
+            }.foregroundStyle(Color.biliMuted).frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight))
+                .contentShape(Rectangle())
+        }.accessibilityLabel("下载当前分 P")
+    }
+    private func actionIcon(_ icon: BiliActionIcon.Kind, count: Int?, title: String, selected: Bool) -> some View {
+        VStack(spacing: iconGap) {
+            BiliActionIcon(kind: icon, size: iconSize).foregroundStyle(selected ? Color.biliPink : Color(white: 0.46))
+                .scaleEffect(charging ? 1.08 : 1)
+                .overlay {
+                    if charging {
+                        Circle().trim(from: 0, to: chargeProgress).stroke(Color.biliPink, style: StrokeStyle(lineWidth: 2.5 * iconSize / 22, lineCap: .round))
+                            .rotationEffect(.degrees(-90)).frame(width: 34 * iconSize / 22, height: 34 * iconSize / 22)
+                    }
                 }
-            }.frame(width: 76, height: 44).contentShape(Rectangle())
-        }.disabled(supportBusy || (engagement?.complete == true && !refreshRequired))
-            .accessibilityLabel(refreshRequired ? "刷新三连状态" : engagement?.complete == true ? "已三连" : "一键三连")
-            .accessibilityValue(supportBusy ? "正在处理" : "")
-            .accessibilityHint("点赞、投币并收藏到默认收藏夹")
+            Text(count.map(countLabel) ?? "—").font(.system(size: countSize)).foregroundStyle(selected ? Color.biliPink : Color.biliMuted)
+                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+        }.frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight)).contentShape(Rectangle())
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(title)，\(count.map(countLabel) ?? "数量暂不可用")")
     }
-    private var downloadButton: some View {
-        Button(action: onDownload) { icon("arrow.down.circle") }.accessibilityLabel("下载当前分 P")
+    private func like() {
+        guard app.user != nil else { app.showLogin = true; return }
+        guard let state = support.state else { Task { await refresh() }; return }
+        write(.like(!state.liked))
     }
-    private var seekButtons: some View {
-        Group {
-            Button {
-                model.seek(-5)
-            } label: {
-                icon("gobackward.5")
-            }.accessibilityLabel("后退5秒")
-            Button {
-                model.seek(5)
-            } label: {
-                icon("goforward.5")
-            }.accessibilityLabel("前进5秒")
+    private func canTriple() -> Bool {
+        guard app.user != nil else { app.showLogin = true; return false }
+        return enabled && support.state != nil && support.state?.complete != true
+    }
+    private func setCharging(_ value: Bool) {
+        guard charging != value else { return }
+        charging = value; chargeProgress = 0
+        if value {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            withAnimation(.linear(duration: 1.5)) { chargeProgress = 1 }
         }
     }
-    private var settings: some View {
-        Menu {
-            Section("清晰度") {
-                ForEach(model.qualityChoices) { quality in
-                    Button {
-                        onQuality(quality.id)
-                    } label: {
-                        if model.playback?.quality == quality.id {
-                            Label(quality.label, systemImage: "checkmark")
-                        } else {
-                            Text(quality.label)
+    private func open(_ value: Panel) {
+        guard app.user != nil else { app.showLogin = true; return }
+        panel = value
+    }
+    private func write(_ action: VideoWrite) {
+        guard app.user != nil else { app.showLogin = true; return }
+        Task {
+            let generation = app.accountGeneration
+            let ok = await support.write(client: app.client, bvid: bvid, action: action)
+            if ok, app.accountGeneration == generation { UINotificationFeedbackGenerator().notificationOccurred(.success) }
+        }
+    }
+    private func refresh() async { await support.refresh(client: app.client, bvid: bvid, authenticated: app.user != nil) }
+}
+
+private struct CoinActionSheet: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    var bvid: String
+    @ObservedObject var support: VideoSupportModel
+    @State private var state: VideoEngagement?
+    @State private var limit = 0
+    @State private var coins = 1
+    @State private var selectLike = true
+    @State private var busy = true
+    @State private var error: String?
+    private var remaining: Int { max(0, limit - (state?.coins ?? 0)) }
+    var body: some View {
+        NavigationStack {
+            Form {
+                if busy { ProgressView("正在读取投币状态") }
+                else if state != nil {
+                    Section {
+                        if remaining == 0 { Text("已投满") }
+                        else {
+                            Picker("投币数量", selection: $coins) { ForEach(1...remaining, id: \.self) { Text("\($0) 枚").tag($0) } }.pickerStyle(.segmented)
+                            Toggle("同时点赞", isOn: $selectLike)
                         }
                     }
                 }
-            }
-            Section("播放速度") {
-                ForEach([Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2], id: \.self) { rate in
-                    Button {
-                        model.setRate(rate)
-                    } label: {
-                        if model.rate == rate {
-                            Label(rate == 1 ? "正常" : "\(rate.formatted())×", systemImage: "checkmark")
-                        } else {
-                            Text(rate == 1 ? "正常" : "\(rate.formatted())×")
-                        }
-                    }
-                }
-            }
-            if !model.subtitleTracks.isEmpty {
-                Section("字幕语言") {
-                    ForEach(model.subtitleTracks) { track in
-                        Button {
-                            model.selectSubtitle(track)
-                        } label: {
-                            if model.selectedSubtitle == track.id {
-                                Label(track.label, systemImage: "checkmark")
-                            } else {
-                                Text(track.label)
+                if let error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }
+                if let error = support.error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }
+            }.navigationTitle("投币").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("确定") {
+                            Task {
+                                let ok = await support.write(client: app.client, bvid: bvid, action: .coin(target: (state?.coins ?? 0) + coins, like: selectLike))
+                                if ok { dismiss() }
                             }
+                        }.disabled(busy || support.busy || support.refreshRequired || remaining == 0)
+                    }
+                }.task {
+                    do {
+                        let value = try await app.client.videoEngagement(bvid)
+                        let video = try await app.client.video(bvid)
+                        guard let maximum = video.coinLimit else { throw BiliFailure.invalid }
+                        try Task.checkCancellation()
+                        state = value; limit = maximum; coins = max(1, maximum - value.coins)
+                    } catch { self.error = error.localizedDescription }
+                    busy = false
+                }
+        }.tint(Color.biliPink).presentationDetents([.medium])
+    }
+}
+
+private struct FavoriteActionSheet: View {
+    @EnvironmentObject private var app: AppModel
+    @Environment(\.dismiss) private var dismiss
+    var bvid: String
+    @ObservedObject var support: VideoSupportModel
+    @State private var folders: [VideoFavoriteFolder] = []
+    @State private var selected = Set<Int>()
+    @State private var busy = true
+    @State private var error: String?
+    @State private var creating = false
+    @State private var creationNeedsRefresh = false
+    @State private var title = ""
+    private var changed: Bool { selected != Set(folders.filter(\.selected).map(\.id)) }
+    var body: some View {
+        NavigationStack {
+            List {
+                if busy { ProgressView("正在读取收藏夹") }
+                ForEach(folders) { folder in
+                    Button {
+                        if selected.contains(folder.id) { selected.remove(folder.id) } else { selected.insert(folder.id) }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 5) {
+                                HStack { Text(folder.title); if folder.isPrivate { Image(systemName: "lock.fill").font(.caption2) } }
+                                Text("\(folder.count) / \(folder.capacity)").font(.caption).foregroundStyle(Color.biliMuted)
+                            }
+                            Spacer()
+                            Image(systemName: selected.contains(folder.id) ? "checkmark.circle.fill" : "circle").foregroundStyle(selected.contains(folder.id) ? Color.biliPink : Color.biliMuted)
+                        }.foregroundStyle(.primary).padding(.vertical, 4)
+                    }.buttonStyle(.plain).disabled(!folder.selected && folder.count >= folder.capacity && !selected.contains(folder.id))
+                }
+                Button { title = ""; creating = true } label: { Label("新建收藏夹", systemImage: "plus") }.disabled(busy || folders.count >= 100 || support.busy || creationNeedsRefresh)
+                if creationNeedsRefresh { Button("刷新收藏夹") { Task { await load() } }.disabled(busy) }
+                if let error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }
+                if let error = support.error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }
+            }.navigationTitle("收藏到（\(selected.count)）").navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("确定") { Task { if await support.write(client: app.client, bvid: bvid, action: .favorite(selected.sorted())) { dismiss() } } }
+                            .disabled(busy || !changed || support.busy || support.refreshRequired)
+                    }
+                }.task { await load() }
+                .alert("新建收藏夹", isPresented: $creating) {
+                    TextField("1–20 个字", text: $title)
+                    Button("取消", role: .cancel) {}
+                    Button("创建") {
+                        Task {
+                            guard let mid = app.user?.mid else { return }
+                            busy = true
+                            do {
+                                let previous = selected
+                                let folder = try await app.client.createFavoriteFolder(mid: mid, title: title, isPrivate: false)
+                                await load()
+                                selected.formUnion(previous.intersection(Set(folders.map(\.id))))
+                                if folders.contains(where: { $0.id == folder.id }) { selected.insert(folder.id) }
+                            } catch { self.error = error.localizedDescription; creationNeedsRefresh = true }
+                            busy = false
                         }
                     }
                 }
-            }
-        } label: {
-            icon("gearshape")
-        }.accessibilityLabel("清晰度、倍速与字幕语言")
+        }.tint(Color.biliPink).presentationDetents([.medium, .large])
     }
-    private var captions: some View {
-        HStack(spacing: 3) {
-            Image(systemName: model.selectedSubtitle == nil ? "captions.bubble" : "captions.bubble.fill")
-                .font(.system(size: 15)).foregroundStyle(
-                    model.selectedSubtitle == nil ? Color.biliMuted : Color.biliPink
-                )
-                .accessibilityHidden(true)
-            Toggle("字幕", isOn: Binding(get: { model.selectedSubtitle != nil }, set: { model.setSubtitlesEnabled($0) }))
-                .labelsHidden().tint(Color.biliPink).fixedSize().accessibilityLabel("字幕")
-                .accessibilityHint(model.subtitleTracks.isEmpty ? "暂无可用字幕" : "")
-        }.frame(minHeight: 44).disabled(model.subtitleTracks.isEmpty)
-    }
-    private func icon(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: 19)).frame(width: 44, height: 44).contentShape(Rectangle())
-    }
-    @MainActor private func support(write: Bool) async {
-        guard !supportBusy, app.user != nil else { return }
-        let token = UUID()
-        let generation = app.accountGeneration
-        operation = token
-        supportBusy = true
-        supportError = nil
-        defer { if operation == token { supportBusy = false } }
+    private func load() async {
+        busy = true; error = nil
         do {
-            let state = try await (write ? app.client.triple(bvid) : app.client.videoEngagement(bvid))
+            let value = try await app.client.videoFavoriteFolders(bvid)
             try Task.checkCancellation()
-            guard app.accountGeneration == generation, operation == token else { return }
-            engagement = state
-            refreshRequired = write && !state.complete
-            if refreshRequired { supportError = "三连未全部完成，请刷新状态。" }
-        } catch is CancellationError { return } catch {
-            guard !Task.isCancelled, app.accountGeneration == generation, operation == token else { return }
-            supportError = error.localizedDescription
-            refreshRequired = true
-            app.handle(error)
-        }
+            folders = value
+            selected = Set(value.filter(\.selected).map(\.id))
+            creationNeedsRefresh = false
+        } catch { self.error = error.localizedDescription }
+        busy = false
     }
 }

@@ -10,15 +10,21 @@ final class SegmentedStream: @unchecked Sendable {
     }
     private let token = UUID().uuidString
     private let queue = DispatchQueue(label: "app.bilight.segments")
-    private let transport = SegmentTransport()
+    private let transport: SegmentTransport
     private var listener: NWListener?
     private var startup: CheckedContinuation<Void, Error>?
     private var connections: [ObjectIdentifier: NWConnection] = [:]
+    private var transfers: [ObjectIdentifier: SegmentRelay] = [:]
+    private var cache: [String: Data] = [:]
+    private var cacheOrder: [String] = []
+    private var cacheBytes = 0
+    private var stopped = false
     private var resources: [String: Resource] = [:]
     private var playlists: [String: Data] = [:]
     private(set) var url: URL!
-    static func make(_ playback: Playback) async throws -> SegmentedStream {
-        let stream = SegmentedStream()
+    private init(configuration: URLSessionConfiguration) { transport = SegmentTransport(configuration: configuration) }
+    static func make(_ playback: Playback, configuration: URLSessionConfiguration = .ephemeral) async throws -> SegmentedStream {
+        let stream = SegmentedStream(configuration: configuration)
         do {
             guard let video = playback.video else { throw BiliFailure.invalid }
             async let videoIndex = stream.transport.index(video)
@@ -90,7 +96,14 @@ final class SegmentedStream: @unchecked Sendable {
                 }
                 self.connections[ObjectIdentifier(connection)] = connection
                 connection.stateUpdateHandler = { [weak self, weak connection] state in
-                    if case .cancelled = state, let connection { self?.connections[ObjectIdentifier(connection)] = nil }
+                    switch state {
+                    case .cancelled, .failed:
+                        guard let self, let connection else { return }
+                        let id = ObjectIdentifier(connection)
+                        self.transfers.removeValue(forKey: id)?.cancel()
+                        self.connections[id] = nil
+                    default: break
+                    }
                 }
                 connection.start(queue: self.queue)
                 self.receive(connection, buffer: Data())
@@ -126,6 +139,7 @@ final class SegmentedStream: @unchecked Sendable {
         }
     }
     private func serve(_ connection: NWConnection, header: String) {
+        guard !stopped else { connection.cancel(); return }
         let lines = header.components(separatedBy: "\r\n")
         let request = (lines.first ?? "").split(separator: " ")
         guard request.count == 3, ["GET", "HEAD"].contains(request[0]) else {
@@ -167,47 +181,45 @@ final class SegmentedStream: @unchecked Sendable {
             connection.send(content: headers, completion: .contentProcessed { _ in connection.cancel() })
             return
         }
-        var input = SegmentTransport.request(resource.track.url, range: range)
-        input.timeoutInterval = 25
-        transport.session.downloadTask(with: input) { [weak self] location, response, error in
-            guard let self, error == nil, let location,
-                (try? SegmentTransport.validate(response, range: range, total: resource.length)) != nil,
-                let handle = try? FileHandle(forReadingFrom: location),
-                (try? location.resourceValues(forKeys: [.fileSizeKey]).fileSize) == Int(length)
-            else {
-                self?.reject(connection, status: 502)
-                return
-            }
-            self.queue.async {
-                connection.send(
-                    content: headers,
-                    completion: .contentProcessed { error in
-                        if error != nil {
-                            try? handle.close()
-                            connection.cancel()
-                        } else {
-                            self.send(handle, connection: connection, remaining: length)
-                        }
-                    })
-            }
-        }.resume()
-    }
-    private func send(_ handle: FileHandle, connection: NWConnection, remaining: Int64) {
-        guard remaining > 0, let data = try? handle.read(upToCount: Int(min(remaining, 64 * 1024))), !data.isEmpty
-        else {
-            try? handle.close()
-            connection.cancel()
+        let key = "\(name):\(range.lowerBound)-\(range.upperBound)"
+        if let data = cache[key] {
+            cacheOrder.removeAll { $0 == key }
+            cacheOrder.append(key)
+            connection.send(content: headers, completion: .contentProcessed { [weak self] error in
+                if error != nil { connection.cancel() }
+                else { self?.send(data, connection: connection, offset: 0) }
+            })
             return
         }
+        var input = SegmentTransport.request(resource.track.url, range: range)
+        input.timeoutInterval = 25
+        let id = ObjectIdentifier(connection)
+        let relay = SegmentRelay(connection: connection, queue: queue, headers: headers, range: range, total: resource.length) { [weak self] data in
+            guard let self else { return }
+            self.transfers[id] = nil
+            guard !self.stopped, let data else { return }
+            // Exact ranges belong to this immutable playback source; never mix bytes across renewed URLs or qualities.
+            if let previous = self.cache.removeValue(forKey: key) { self.cacheBytes -= previous.count }
+            self.cacheOrder.removeAll { $0 == key }
+            while self.cacheBytes + data.count > 64 * 1024 * 1024, !self.cacheOrder.isEmpty {
+                let oldest = self.cacheOrder.removeFirst()
+                if let removed = self.cache.removeValue(forKey: oldest) { self.cacheBytes -= removed.count }
+            }
+            self.cache[key] = data
+            self.cacheOrder.append(key)
+            self.cacheBytes += data.count
+        }
+        transfers[id] = relay
+        transport.start(relay, request: input)
+    }
+    private func send(_ data: Data, connection: NWConnection, offset: Int) {
+        guard offset < data.count else { connection.cancel(); return }
+        let end = min(data.count, offset + 64 * 1024)
         connection.send(
-            content: data,
+            content: data.subdata(in: offset..<end),
             completion: .contentProcessed { error in
-                if error != nil {
-                    try? handle.close()
-                    connection.cancel()
-                } else {
-                    self.send(handle, connection: connection, remaining: remaining - Int64(data.count))
-                }
+                if error != nil { connection.cancel() }
+                else { self.send(data, connection: connection, offset: end) }
             })
     }
     private func reject(_ connection: NWConnection, status: Int) {
@@ -218,24 +230,116 @@ final class SegmentedStream: @unchecked Sendable {
     func stop() {
         transport.session.invalidateAndCancel()
         queue.async {
+            self.stopped = true
             self.listener?.cancel()
+            let transfers = Array(self.transfers.values)
+            self.transfers = [:]
+            transfers.forEach { $0.cancel() }
             self.connections.values.forEach { $0.cancel() }
             self.connections = [:]
+            self.cache = [:]; self.cacheOrder = []; self.cacheBytes = 0
         }
     }
 }
 
-private final class SegmentTransport: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+/// Forward validated chunks immediately; suspending while each send is pending bounds upstream read-ahead.
+private final class SegmentRelay: @unchecked Sendable {
+    let connection: NWConnection
+    private let queue: DispatchQueue
+    private let headers: Data
+    private let range: ClosedRange<Int64>
+    private let total: Int64
+    private let onFinish: (Data?) -> Void
+    private var received: Int64 = 0
+    private var started = false, finished = false
+    private var cached: Data?
+    var task: URLSessionDataTask?
+    init(connection: NWConnection, queue: DispatchQueue, headers: Data, range: ClosedRange<Int64>, total: Int64, onFinish: @escaping (Data?) -> Void) {
+        self.connection = connection; self.queue = queue; self.headers = headers
+        self.range = range; self.total = total; self.onFinish = onFinish
+        if range.upperBound - range.lowerBound + 1 <= 16 * 1024 * 1024 {
+            cached = Data(); cached?.reserveCapacity(Int(range.upperBound - range.lowerBound + 1))
+        }
+    }
+    func response(_ response: URLResponse) -> Bool {
+        guard (try? SegmentTransport.validate(response, range: range, total: total)) != nil else { return false }
+        queue.async {
+            guard !self.finished else { return }
+            self.started = true
+            self.connection.send(content: self.headers, completion: .contentProcessed { error in
+                if error != nil { self.queue.async { self.cancel() } }
+            })
+        }
+        return true
+    }
+    func receive(_ data: Data, task: URLSessionDataTask) {
+        task.suspend()
+        queue.async {
+            guard !self.finished else { task.resume(); return }
+            self.received += Int64(data.count)
+            guard self.received <= self.range.upperBound - self.range.lowerBound + 1 else {
+                task.resume(); self.cancel(); return
+            }
+            self.cached?.append(data)
+            self.connection.send(content: data, completion: .contentProcessed { error in
+                task.resume()
+                if error != nil { self.queue.async { self.cancel() } }
+            })
+        }
+    }
+    func complete(_ error: Error?) {
+        queue.async {
+            guard !self.finished else { return }
+            guard error == nil, self.started, self.received == self.range.upperBound - self.range.lowerBound + 1 else {
+                self.cancel(); return
+            }
+            self.finished = true
+            self.task = nil
+            let data = self.cached; self.cached = nil
+            self.onFinish(data)
+            self.connection.send(content: nil, isComplete: true, completion: .contentProcessed { _ in self.connection.cancel() })
+        }
+    }
+    func cancel() {
+        guard !finished else { return }
+        finished = true; cached = nil
+        task?.cancel(); task = nil
+        onFinish(nil)
+        if started { connection.cancel() }
+        else {
+            connection.send(content: Data("HTTP/1.1 502 Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".utf8), completion: .contentProcessed { _ in self.connection.cancel() })
+        }
+    }
+}
+
+private final class SegmentTransport: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private(set) var session: URLSession!
-    override init() {
+    private let lock = NSLock()
+    private var relays: [Int: SegmentRelay] = [:]
+    init(configuration config: URLSessionConfiguration) {
         super.init()
-        let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.urlCache = nil
         config.timeoutIntervalForRequest = 20
         config.timeoutIntervalForResource = 60
         session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
+    }
+    func start(_ relay: SegmentRelay, request: URLRequest) {
+        let task = session.dataTask(with: request)
+        relay.task = task
+        lock.withLock { relays[task.taskIdentifier] = relay }
+        task.resume()
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
+        let relay = lock.withLock { relays[dataTask.taskIdentifier] }
+        completionHandler(relay.map { $0.response(response) ? .allow : .cancel } ?? .allow)
+    }
+    func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        lock.withLock { relays[dataTask.taskIdentifier] }?.receive(data, task: dataTask)
+    }
+    func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        lock.withLock { relays.removeValue(forKey: task.taskIdentifier) }?.complete(error)
     }
     func optionalIndex(_ track: StreamTrack?) async throws -> SegmentedStream.Resource? {
         guard let track else { return nil }

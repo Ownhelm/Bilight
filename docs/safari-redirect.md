@@ -1,6 +1,6 @@
 # Safari 自动跳转
 
-如果只需要用域名直接打开本地项目，可访问 **http://bilibili.local**，见 [OrbStack 本地域名](local-domain.md)。下面的扩展方案仅用于将真正的 `bilibili.com` 导航自动转到本地，两种功能不同。
+正常使用直接打开 **http://127.0.0.1:3880** 即可。下面是可选的浏览器扩展配置，用于将 `bilibili.com` 的页面导航跳转到本地 Bilight；安装和使用 Bilight 不需要这项设置。
 
 安装 [RedirectWeb 免费版](https://redirectweb.net/introduction)，在 Safari 设置 → 扩展中启用。免费版只需一条启用规则；不需要购买订阅。当前 Safari 的 DNR 功能仍由扩展作者标为实验功能，必须用下面的例子实际验证。
 

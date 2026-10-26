@@ -1,4 +1,5 @@
 import AVKit
+import Combine
 import CryptoKit
 import XCTest
 
@@ -31,6 +32,209 @@ final class MockProtocol: URLProtocol {
     override func stopLoading() {}
 }
 final class CoreTests: XCTestCase {
+    private final class PlaybackEvents: @unchecked Sendable {
+        private let lock = NSLock()
+        private var pauses = 0, waits = 0
+        func record(_ status: AVPlayer.TimeControlStatus) {
+            lock.withLock {
+                if status == .paused { pauses += 1 }
+                if status == .waitingToPlayAtSpecifiedRate { waits += 1 }
+            }
+        }
+        var counts: (Int, Int) { lock.withLock { (pauses, waits) } }
+    }
+    @MainActor func testPlayingMediaDoesNotPauseOrRebufferAcrossFullscreenRotations() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let model = PlayerModel()
+        let url = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let asset = AVURLAsset(url: url)
+        let tracks = try await asset.loadTracks(withMediaType: .video)
+        let track = try XCTUnwrap(tracks.first)
+        let size = try await track.load(.naturalSize)
+        XCTAssertEqual(size, CGSize(width: 3840, height: 2160))
+        let item = AVPlayerItem(asset: asset)
+        model.player.replaceCurrentItem(with: item)
+        let controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { host.shutdown(); window.isHidden = true; previousWindow?.makeKeyAndVisible(); model.stop() }
+        model.setRate(1.25)
+        model.player.play()
+        let ready = Date().addingTimeInterval(5)
+        while model.player.currentTime().seconds < 0.4 && Date() < ready { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(model.player.timeControlStatus, .playing)
+        let events = PlaybackEvents()
+        let observation = model.player.observe(\.timeControlStatus, options: [.new]) { player, _ in events.record(player.timeControlStatus) }
+        var rateUpdates = 0
+        let subscription = model.$rate.dropFirst().sink { _ in rateUpdates += 1 }
+        defer { observation.invalidate(); subscription.cancel() }
+        let position = model.player.currentTime().seconds
+        let began = CACurrentMediaTime()
+        for _ in 0..<3 {
+            host.enterFullscreen()
+            let landscape = Date().addingTimeInterval(2)
+            while PlayerContainer.orientation(window.windowScene)?.isLandscape != true && Date() < landscape {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertTrue(model.isFullscreen)
+            try await Task.sleep(for: .milliseconds(120))
+            host.exitFullscreen()
+            let portrait = Date().addingTimeInterval(2)
+            while (model.isFullscreen || PlayerContainer.orientation(window.windowScene)?.isPortrait != true) && Date() < portrait {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertFalse(model.isFullscreen)
+            XCTAssertTrue(model.player.currentItem === item)
+            try await Task.sleep(for: .milliseconds(120))
+        }
+        let counts = events.counts
+        print("[fullscreen continuity] pauses=\(counts.0) waits=\(counts.1) rateUpdates=\(rateUpdates) elapsedMs=\(Int((CACurrentMediaTime()-began)*1000))")
+        XCTAssertEqual(counts.0, 0, "Rotation must not pause a playing item")
+        XCTAssertEqual(counts.1, 0, "A buffered local item must not rebuffer solely because it rotates")
+        XCTAssertEqual(rateUpdates, 0, "Fullscreen layout must not republish the same playback speed")
+        XCTAssertGreaterThan(model.player.currentTime().seconds, position + 0.5)
+        XCTAssertEqual(model.player.defaultRate, 1.25)
+    }
+    @MainActor private final class FullscreenPull: UIPanGestureRecognizer {
+        var phase: UIGestureRecognizer.State = .ended
+        var distance = CGPoint.zero, speed = CGPoint.zero
+        override var state: UIGestureRecognizer.State { get { phase } set { phase = newValue } }
+        override func translation(in view: UIView?) -> CGPoint { distance }
+        override func setTranslation(_ translation: CGPoint, in view: UIView?) { distance = translation }
+        override func velocity(in view: UIView?) -> CGPoint { speed }
+    }
+    @MainActor func testPortraitFullscreenPullDownExitsAndPreservesPlayer() async throws {
+        try await assertFullscreenPull(flick: false)
+    }
+    @MainActor func testPortraitFullscreenQuickDownwardFlickExits() async throws {
+        try await assertFullscreenPull(flick: true)
+    }
+    @MainActor private func assertFullscreenPull(flick: Bool) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let model = PlayerModel()
+        model.setRate(1.5)
+        let controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { host.shutdown(); window.isHidden = true; previousWindow?.makeKeyAndVisible(); model.stop() }
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertFalse(host.view.gestureRecognizers?.contains { $0.name == "bilight-fullscreen-pull-down" } == true)
+        host.enterFullscreen(rotate: false)
+        try await Task.sleep(for: .milliseconds(200))
+        let fullscreen = try XCTUnwrap(host.presentedViewController)
+        XCTAssertTrue(PlayerContainer.orientation(fullscreen.view.window?.windowScene)?.isPortrait == true)
+        let registered = try XCTUnwrap(fullscreen.view.gestureRecognizers?.first { $0.name == "bilight-fullscreen-pull-down" } as? UIPanGestureRecognizer)
+        if ProcessInfo.processInfo.environment["BILIGHT_PULL_UI_SMOKE"] == "1" {
+            // Optional CUA run drives the real registered recognizer instead of a simulated pan.
+            let deadline = Date().addingTimeInterval(45)
+            while model.isFullscreen && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        } else {
+            let gesture = FullscreenPull()
+            fullscreen.view.addGestureRecognizer(gesture)
+            // Scrubbing horizontally, dragging up, nudging, or cancelling must keep the player open.
+            for distance in [CGPoint(x: 150, y: 100), CGPoint(x: 0, y: -120), CGPoint(x: 0, y: 20)] {
+                gesture.distance = distance
+                host.fullscreenPulled(gesture)
+                XCTAssertTrue(model.isFullscreen)
+            }
+            gesture.distance = CGPoint(x: 5, y: 120)
+            gesture.phase = .cancelled
+            host.fullscreenPulled(gesture)
+            XCTAssertTrue(model.isFullscreen)
+            XCTAssertFalse(host.beginFullscreenPull(CGPoint(x: 150, y: 10)))
+            XCTAssertTrue(host.beginFullscreenPull(CGPoint(x: 5, y: flick ? 32 : 100)))
+            gesture.phase = .began
+            gesture.distance = .zero
+            host.fullscreenPulled(gesture)
+            XCTAssertEqual(gesture.distance.y, flick ? 32 : 100, "Recognition must not discard the initial drag")
+            gesture.phase = .ended
+            gesture.speed = CGPoint(x: 0, y: flick ? 900 : 100)
+            host.fullscreenPulled(gesture)
+        }
+        let deadline = Date().addingTimeInterval(1)
+        while model.isFullscreen && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(model.isFullscreen)
+        XCTAssertNil(host.presentedViewController)
+        XCTAssertNil(registered.view, "The fullscreen gesture must be removed when returning inline")
+        XCTAssertTrue(controller.parent === host)
+        XCTAssertTrue(controller.player === model.player)
+        XCTAssertEqual(model.player.defaultRate, 1.5)
+        XCTAssertEqual(model.player.rate, 0)
+    }
+    @MainActor func testFullscreenExitButtonWorksInPortrait() async throws {
+        try await assertFullscreenExit(settle: true)
+    }
+    @MainActor func testFullscreenExitButtonWorksDuringPresentation() async throws {
+        try await assertFullscreenExit(settle: false)
+    }
+    @MainActor private func assertFullscreenExit(settle: Bool) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let model = PlayerModel()
+        model.setRate(1.5)
+        let controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { host.shutdown(); window.isHidden = true; previousWindow?.makeKeyAndVisible(); model.stop() }
+        try await Task.sleep(for: .milliseconds(150))
+        host.enterFullscreen(rotate: false)
+        let fullscreen = try XCTUnwrap(host.presentedViewController)
+        let button = try XCTUnwrap(fullscreen.view.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "player-fullscreen-toggle" })
+        if settle {
+            try await Task.sleep(for: .milliseconds(200))
+            XCTAssertTrue(PlayerContainer.orientation(fullscreen.view.window?.windowScene)?.isPortrait == true)
+        }
+        XCTAssertTrue(button.isUserInteractionEnabled)
+        button.sendActions(for: .touchUpInside)
+        let deadline = Date().addingTimeInterval(1)
+        while model.isFullscreen && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertFalse(model.isFullscreen, "A visible exit button must leave fullscreen even before orientation/presentation settles")
+        XCTAssertNil(host.presentedViewController)
+        XCTAssertTrue(controller.parent === host)
+        XCTAssertTrue(controller.player === model.player)
+        XCTAssertEqual(model.player.defaultRate, 1.5)
+        XCTAssertEqual(model.player.rate, 0)
+    }
+    @MainActor func testFullscreenToggleHidesAfterInactivityWithoutReplacingPlayer() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let model = PlayerModel()
+        let controller = AVPlayerViewController()
+        controller.player = model.player
+        let host = PlayerContainer(controller: controller, model: model)
+        let window = UIWindow(windowScene: scene)
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        defer { host.shutdown(); window.isHidden = true; previousWindow?.makeKeyAndVisible(); model.stop() }
+        try await Task.sleep(for: .milliseconds(150))
+        host.enterFullscreen(rotate: false)
+        let fullscreen = try XCTUnwrap(host.presentedViewController)
+        let button = try XCTUnwrap(fullscreen.view.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "player-fullscreen-toggle" })
+        XCTAssertEqual(button.alpha, 1)
+        try await Task.sleep(for: .milliseconds(1900))
+        XCTAssertLessThanOrEqual(button.alpha, 0.01, "The fullscreen toggle must not cover the video permanently")
+        XCTAssertFalse(button.isUserInteractionEnabled)
+        XCTAssertTrue(model.isFullscreen)
+        XCTAssertTrue(controller.player === model.player)
+        let gesture = try XCTUnwrap(fullscreen.view.gestureRecognizers?.first { $0.name == "bilight-fullscreen-controls" })
+        XCTAssertFalse(gesture.cancelsTouchesInView, "Native playback controls must keep receiving touches")
+        host.fullscreenSurfaceTapped()
+        XCTAssertEqual(button.alpha, 1)
+        XCTAssertTrue(button.isUserInteractionEnabled)
+        host.fullscreenSurfaceTapped()
+        XCTAssertEqual(button.alpha, 0)
+    }
     @MainActor func testInlinePlayerLocksPagePortraitUntilFullscreenTakesOver() {
         let model = PlayerModel()
         let host = PlayerContainer(controller: AVPlayerViewController(), model: model)
@@ -463,6 +667,9 @@ final class CoreTests: XCTestCase {
         var paths: [String] = []
         let (client, _, _) = fixture { request in
             paths.append(request.url!.path)
+            if request.url!.path.hasSuffix("/nav") {
+                return ["code": 0, "data": ["wbi_img": ["img_url": "https://i0.hdslb.com/" + String(repeating: "a", count: 32) + ".png", "sub_url": "https://i0.hdslb.com/" + String(repeating: "b", count: 32) + ".png"]]]
+            }
             if request.url!.path.hasSuffix("/view") { return ["code": 0, "data": ["v_voucher": "test-challenge"]] }
             return ["code": 0, "data": [["cid": 42, "page": 2, "part": "真实分 P", "duration": 60]]]
         }
@@ -475,11 +682,14 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(result.parts.first?.page, 2)
         XCTAssertNotNil(result.warning)
         XCTAssertNil(result.coinLimit)
-        XCTAssertEqual(paths, ["/x/web-interface/view", "/x/player/pagelist"])
+        XCTAssertEqual(paths, ["/x/web-interface/nav", "/x/web-interface/wbi/view", "/x/player/pagelist"])
     }
     func testPermissionFailuresAreNotReplacedWithPublicMetadata() async throws {
         var requests = 0
-        let (client, _, _) = fixture { _ in
+        let (client, _, _) = fixture { request in
+            if request.url!.path.hasSuffix("/nav") {
+                return ["code": 0, "data": ["wbi_img": ["img_url": "https://i0.hdslb.com/" + String(repeating: "a", count: 32) + ".png", "sub_url": "https://i0.hdslb.com/" + String(repeating: "b", count: 32) + ".png"]]]
+            }
             requests += 1
             return ["code": 62002, "message": "稿件不可见"]
         }

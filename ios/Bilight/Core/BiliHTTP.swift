@@ -7,6 +7,7 @@ enum NativeStage: String {
     case downloadFinished, downloadFailed
     case offlineReady
     case fullscreenChanged
+    case playbackWaiting, playbackRunning
     case supportReady
     case subtitleReady
     case searchPosition
@@ -18,22 +19,26 @@ enum NativeStage: String {
 enum NativeTrace {
     #if DEBUG
         private static let lock = NSLock()
+        private static let writer = DispatchQueue(label: "app.bilight.diagnostics", qos: .utility)
         private static var records: [JSON] = []
     #endif
     /// Development diagnostics contain fixed stages and numeric counts/status, never payloads or credentials.
     static func mark(_ stage: NativeStage, _ fields: [String: Int] = [:]) {
         #if DEBUG
             guard ProcessInfo.processInfo.environment["BILIGHT_ISOLATED_TESTS"] != "1" else { return }
-            lock.withLock {
-                if stage == .boot { records = [] }
-                records.append(["time": Date().timeIntervalSince1970, "stage": stage.rawValue, "counts": fields])
-                records = Array(records.suffix(64))
-                if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
-                    let data = try? JSONSerialization.data(withJSONObject: records, options: [.sortedKeys])
-                {
-                    try? data.write(
-                        to: directory.appendingPathComponent("BilightDiagnostics.json"),
-                        options: [.atomic, .completeFileProtection])
+            let time = Date().timeIntervalSince1970
+            writer.async {
+                lock.withLock {
+                    if stage == .boot { records = [] }
+                    records.append(["time": time, "stage": stage.rawValue, "counts": fields])
+                    records = Array(records.suffix(64))
+                    if let directory = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first,
+                        let data = try? JSONSerialization.data(withJSONObject: records, options: [.sortedKeys])
+                    {
+                        try? data.write(
+                            to: directory.appendingPathComponent("BilightDiagnostics.json"),
+                            options: [.atomic, .completeFileProtection])
+                    }
                 }
             }
         #endif
@@ -217,6 +222,23 @@ actor BiliHTTP {
         }
         guard let result = value["data"] as? [JSON] else { throw BiliFailure.invalid }
         return result
+    }
+    func danmakuData(_ cid: Int) async throws -> Data {
+        guard cid > 0 else { throw BiliFailure.invalid }
+        let version = generation
+        let url = URL(string: "https://api.bilibili.com/x/v1/dm/list.so?oid=\(cid)")!
+        var request = URLRequest(url: url)
+        request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
+        request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
+        let header = cookies.filter { $0.matches(url) }.map { "\($0.name)=\($0.value)" }.joined(separator: "; ")
+        if !header.isEmpty { request.setValue(header, forHTTPHeaderField: "Cookie") }
+        let (data, response) = try await session.data(for: request)
+        try Task.checkCancellation(); try check(version)
+        guard let response = response as? HTTPURLResponse, response.statusCode == 200,
+            response.url.map(Self.trusted) == true, data.count <= 8_000_000,
+            !(response.mimeType?.contains("json") ?? false)
+        else { throw BiliFailure(code: "DANMAKU_UNAVAILABLE", message: "弹幕暂时无法读取，请重试。") }
+        return data
     }
     private func envelope(_ path: String, query: [String: String], form: [String: String]?, wbi: Bool, referer: String)
         async throws -> JSON

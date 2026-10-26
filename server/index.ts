@@ -6,8 +6,8 @@ import { AuthService } from './auth.js';
 import { BiliGateway } from './gateway.js';
 import { createApp } from './app.js';
 
-const dataDir = resolve(process.env.DATA_DIR ?? 'data');
-const keyFile = resolve(process.env.BILIGHT_KEY_FILE ?? '.secrets/master-key');
+const dataDir = resolve(process.env.DATA_DIR ?? '../Local/data');
+const keyFile = resolve(process.env.BILIGHT_KEY_FILE ?? '../Local/secrets/master-key');
 if (!existsSync(keyFile)) { console.error('缺少会话加密密钥，请先运行 npm run setup。'); process.exit(1); }
 const key = readFileSync(keyFile);
 if (key.length !== 32) { console.error('会话加密密钥必须是 32 字节。'); process.exit(1); }

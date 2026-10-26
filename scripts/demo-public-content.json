@@ -1,0 +1,393 @@
+{
+  "capturedAt": "2026-10-25T23:48:56.278438+00:00",
+  "creators": [
+    {
+      "mid": 946974,
+      "name": "影视飓风",
+      "avatar": "/demo-assets/demo-public-avatar-946974.jpg",
+      "description": "无限进步！",
+      "fans": 18807244
+    },
+    {
+      "mid": 37029661,
+      "name": "小鹿Lawrence",
+      "avatar": "/demo-assets/demo-public-avatar-37029661.jpg",
+      "description": "独立导演 / 摄影师 / 配音演员",
+      "fans": 2300473
+    },
+    {
+      "mid": 383578614,
+      "name": "超Carry的柴西",
+      "avatar": "/demo-assets/demo-public-avatar-383578614.jpg",
+      "description": "国内旅行徒步/互联网脚替",
+      "fans": 2640503
+    }
+  ],
+  "videos": [
+    {
+      "bvid": "BV12qnt6VEM1",
+      "aid": 117489837016867,
+      "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+      "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+      "duration": 1542,
+      "publishedAt": 1792759328,
+      "ownerMid": 383578614,
+      "copyright": 1,
+      "statistics": {
+        "view": 4427267,
+        "like": 178495,
+        "coin": 65515,
+        "favorite": 49647,
+        "reply": 3989,
+        "share": 5853
+      },
+      "parts": [
+        {
+          "cid": 42989062102,
+          "page": 1,
+          "part": "拉斯维加斯_上传版_B站流量开头-换源",
+          "duration": 1542
+        }
+      ]
+    },
+    {
+      "bvid": "BV1rRut6rEGS",
+      "aid": 117053428075107,
+      "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+      "cover": "/demo-assets/demo-public-cover-BV1rRut6rEGS.jpg",
+      "duration": 1745,
+      "publishedAt": 1786094663,
+      "ownerMid": 383578614,
+      "copyright": 1,
+      "statistics": {
+        "view": 8313534,
+        "like": 275805,
+        "coin": 98772,
+        "favorite": 85313,
+        "reply": 5053,
+        "share": 10088
+      },
+      "parts": [
+        {
+          "cid": 40682719112,
+          "page": 1,
+          "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车",
+          "duration": 1745
+        }
+      ]
+    },
+    {
+      "bvid": "BV1qCrYB4Ekb",
+      "aid": 115881958973309,
+      "title": "人均20万去了趟南极！但…… ｜南极【上】",
+      "cover": "/demo-assets/demo-public-cover-BV1qCrYB4Ekb.jpg",
+      "duration": 1806,
+      "publishedAt": 1768223972,
+      "ownerMid": 37029661,
+      "copyright": 1,
+      "statistics": {
+        "view": 2450108,
+        "like": 114576,
+        "coin": 86439,
+        "favorite": 39092,
+        "reply": 2976,
+        "share": 17065
+      },
+      "parts": [
+        {
+          "cid": 35711617240,
+          "page": 1,
+          "part": "20251225_南极cpb_B站3.0换源",
+          "duration": 1806
+        }
+      ]
+    },
+    {
+      "bvid": "BV1eDEazVErL",
+      "aid": 114520655663712,
+      "title": "去了一趟世界尽头。",
+      "cover": "/demo-assets/demo-public-cover-BV1eDEazVErL.jpg",
+      "duration": 1290,
+      "publishedAt": 1747454400,
+      "ownerMid": 946974,
+      "copyright": 1,
+      "statistics": {
+        "view": 8485788,
+        "like": 391761,
+        "coin": 132893,
+        "favorite": 82108,
+        "reply": 6703,
+        "share": 25396
+      },
+      "parts": [
+        {
+          "cid": 29999172508,
+          "page": 1,
+          "part": "去了一趟世界尽头。",
+          "duration": 1210
+        },
+        {
+          "cid": 29999236037,
+          "page": 2,
+          "part": "我们把唱片带到了冰川上 MV纯享版",
+          "duration": 80
+        }
+      ]
+    },
+    {
+      "bvid": "BV1SC9mY4Epz",
+      "aid": 114120653282953,
+      "title": "一夜鱼龙舞好看吗？我扛着呢！",
+      "cover": "/demo-assets/demo-public-cover-BV1SC9mY4Epz.jpg",
+      "duration": 1064,
+      "publishedAt": 1741343267,
+      "ownerMid": 37029661,
+      "copyright": 1,
+      "statistics": {
+        "view": 1136577,
+        "like": 25644,
+        "coin": 22287,
+        "favorite": 9232,
+        "reply": 603,
+        "share": 3527
+      },
+      "parts": [
+        {
+          "cid": 28739635657,
+          "page": 1,
+          "part": "一夜鱼龙舞好看吗？我扛着呢！",
+          "duration": 1064
+        }
+      ]
+    },
+    {
+      "bvid": "BV15jmRYqEBf",
+      "aid": 113485836981768,
+      "title": "去了一趟伦敦。",
+      "cover": "/demo-assets/demo-public-cover-BV15jmRYqEBf.jpg",
+      "duration": 1327,
+      "publishedAt": 1731661200,
+      "ownerMid": 946974,
+      "copyright": 1,
+      "statistics": {
+        "view": 3834425,
+        "like": 161576,
+        "coin": 62894,
+        "favorite": 30753,
+        "reply": 2704,
+        "share": 6659
+      },
+      "parts": [
+        {
+          "cid": 26772505883,
+          "page": 1,
+          "part": "去了一趟伦敦。",
+          "duration": 1103
+        },
+        {
+          "cid": 26770605553,
+          "page": 2,
+          "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+          "duration": 224
+        }
+      ]
+    },
+    {
+      "bvid": "BV1am41167pK",
+      "aid": 1902880397,
+      "title": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+      "cover": "/demo-assets/demo-public-cover-BV1am41167pK.jpg",
+      "duration": 597,
+      "publishedAt": 1712739600,
+      "ownerMid": 383578614,
+      "copyright": 1,
+      "statistics": {
+        "view": 3537664,
+        "like": 94031,
+        "coin": 29534,
+        "favorite": 22579,
+        "reply": 1725,
+        "share": 4895
+      },
+      "parts": [
+        {
+          "cid": 1499083034,
+          "page": 1,
+          "part": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+          "duration": 597
+        }
+      ]
+    },
+    {
+      "bvid": "BV1hu4m1P7Mu",
+      "aid": 1300578906,
+      "title": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+      "cover": "/demo-assets/demo-public-cover-BV1hu4m1P7Mu.jpg",
+      "duration": 235,
+      "publishedAt": 1708142400,
+      "ownerMid": 946974,
+      "copyright": 1,
+      "statistics": {
+        "view": 2265888,
+        "like": 125367,
+        "coin": 69404,
+        "favorite": 43816,
+        "reply": 2663,
+        "share": 8789
+      },
+      "parts": [
+        {
+          "cid": 1441679309,
+          "page": 1,
+          "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+          "duration": 235
+        }
+      ]
+    }
+  ],
+  "collections": [
+    {
+      "id": 2046621,
+      "mid": 946974,
+      "kind": "season",
+      "title": "合集·样片日记",
+      "description": "",
+      "cover": "/demo-assets/demo-public-collection-2046621.jpg",
+      "count": 26
+    },
+    {
+      "id": 7039840,
+      "mid": 946974,
+      "kind": "season",
+      "title": "合集·百万支票",
+      "description": "",
+      "cover": "/demo-assets/demo-public-collection-7039840.jpg",
+      "count": 5
+    },
+    {
+      "id": 5485575,
+      "mid": 946974,
+      "kind": "season",
+      "title": "合集·去了一趟……",
+      "description": "",
+      "cover": "/demo-assets/demo-public-collection-5485575.jpg",
+      "count": 17
+    },
+    {
+      "id": 5222937,
+      "mid": 37029661,
+      "kind": "season",
+      "title": "S3·清单人生",
+      "description": "",
+      "cover": "/demo-assets/demo-public-collection-5222937.jpg",
+      "count": 23
+    },
+    {
+      "id": 9396912,
+      "mid": 383578614,
+      "kind": "season",
+      "title": "公路日记",
+      "description": "",
+      "cover": "/demo-assets/demo-public-collection-9396912.jpg",
+      "count": 5
+    }
+  ],
+  "assets": [
+    {
+      "file": "demo-public-avatar-946974.jpg",
+      "url": "https://i0.hdslb.com/bfs/face/c1733474892caa45952b2c09a89323157df7129a.jpg",
+      "source": "https://space.bilibili.com/946974",
+      "sha256": "9c24d8baccc246c9478287a9e9b65215ff8f64e87490b2bfb0ab2c94eb2a151a"
+    },
+    {
+      "file": "demo-public-avatar-37029661.jpg",
+      "url": "https://i1.hdslb.com/bfs/face/e4c9f5f6bfd8c48de684d2456e8fe3ecce8f0c6c.jpg",
+      "source": "https://space.bilibili.com/37029661",
+      "sha256": "9fe46b8665e88f444a0fd5817ef17ca45823ca2e3b6ff9aa755cfb97c219bf4d"
+    },
+    {
+      "file": "demo-public-avatar-383578614.jpg",
+      "url": "https://i0.hdslb.com/bfs/face/f92305389384d8893db8684ff4f443ef6984f403.jpg",
+      "source": "https://space.bilibili.com/383578614",
+      "sha256": "2428a02897f4a570f23b9e363e4a501d66e5be21d0bea456d4e57f050fac1775"
+    },
+    {
+      "file": "demo-public-cover-BV1eDEazVErL.jpg",
+      "url": "https://i0.hdslb.com/bfs/archive/9aae4ddd78adecdc2f9488e81672ab87fdb3f48f.jpg",
+      "source": "https://www.bilibili.com/video/BV1eDEazVErL/",
+      "sha256": "60039ac947749aa3c0abcb9dff6b30b22af73671c3881eebb6fe251708f171f8"
+    },
+    {
+      "file": "demo-public-cover-BV1hu4m1P7Mu.jpg",
+      "url": "https://i2.hdslb.com/bfs/archive/0d5c0539851bfa91c21732c05960cb12c2645a3e.jpg",
+      "source": "https://www.bilibili.com/video/BV1hu4m1P7Mu/",
+      "sha256": "da8db8b1e6612117f724021a887eda7da0f5cf811487f6bc9580c97b910506ed"
+    },
+    {
+      "file": "demo-public-cover-BV15jmRYqEBf.jpg",
+      "url": "https://i1.hdslb.com/bfs/archive/b2aa19b141ae149abec1840f74e0613c32f4336a.jpg",
+      "source": "https://www.bilibili.com/video/BV15jmRYqEBf/",
+      "sha256": "3ec844ca3398d34de427e37dd364e686e815b36ec1dfbf11283ddf5f405ef5a8"
+    },
+    {
+      "file": "demo-public-cover-BV1qCrYB4Ekb.jpg",
+      "url": "https://i1.hdslb.com/bfs/archive/ffcf5a6afb5ec787029ef17c0f27f515f747a4ea.jpg",
+      "source": "https://www.bilibili.com/video/BV1qCrYB4Ekb/",
+      "sha256": "7bacff98eaf20c8bb167f74102df275ed0ac7019692ca9ec4dfcd3a1faf5f50b"
+    },
+    {
+      "file": "demo-public-cover-BV1SC9mY4Epz.jpg",
+      "url": "https://i2.hdslb.com/bfs/archive/51ff2981177f09b067d7be6cd5cbff6939e8f466.jpg",
+      "source": "https://www.bilibili.com/video/BV1SC9mY4Epz/",
+      "sha256": "6b3b93a97c30ead186f4bc6e00618392617af8cff30e5107f80410de46ceb73c"
+    },
+    {
+      "file": "demo-public-cover-BV12qnt6VEM1.jpg",
+      "url": "https://i2.hdslb.com/bfs/archive/65c7b43fb6fdd34cfc122c76fd9e90ccf4c5401d.jpg",
+      "source": "https://www.bilibili.com/video/BV12qnt6VEM1/",
+      "sha256": "9e716ab53867f8364e5fb2d26f43f43448ce55f1bfbc05dfaafab31080a5f778"
+    },
+    {
+      "file": "demo-public-cover-BV1rRut6rEGS.jpg",
+      "url": "https://i2.hdslb.com/bfs/archive/bf3f07f9156dd65a2d495bf3ff4f0cd8109592ea.jpg",
+      "source": "https://www.bilibili.com/video/BV1rRut6rEGS/",
+      "sha256": "8199a939807e705144b2340a3cbec5974e4b5c59cd8e35c11a2936501a33075c"
+    },
+    {
+      "file": "demo-public-cover-BV1am41167pK.jpg",
+      "url": "https://i2.hdslb.com/bfs/archive/91ddfeeddf3cd762574c4101631967cd2b7d4314.jpg",
+      "source": "https://www.bilibili.com/video/BV1am41167pK/",
+      "sha256": "9505f304eacc7e32b4c69038d6ed2655384f445e9f5a2f123cb031dca6689424"
+    },
+    {
+      "file": "demo-public-collection-2046621.jpg",
+      "url": "https://archive.biliimg.com/bfs/archive/e2ca3e5a6672cf35c9e61ac02e8d739cc0aafa8b.jpg",
+      "source": "https://space.bilibili.com/946974/lists/2046621?type=season",
+      "sha256": "11b64a930aee7f6970ad9fbcf70d8ab31c8858ed48d940e1257dd560b74aba69"
+    },
+    {
+      "file": "demo-public-collection-7039840.jpg",
+      "url": "https://archive.biliimg.com/bfs/archive/08d55d04f1789899e8c94876e70906131d897358.jpg",
+      "source": "https://space.bilibili.com/946974/lists/7039840?type=season",
+      "sha256": "27efd404669d2266168762d6ff3b3e4796f1bce07bdd35b35ad9c9fc34822b25"
+    },
+    {
+      "file": "demo-public-collection-5485575.jpg",
+      "url": "https://archive.biliimg.com/bfs/archive/a33f6c68d4021497c42b9c359306a0257d0eb916.jpg",
+      "source": "https://space.bilibili.com/946974/lists/5485575?type=season",
+      "sha256": "471770edb7950a6994716cc3ec01516e91536277667f838d40fcd9adc9844fab"
+    },
+    {
+      "file": "demo-public-collection-5222937.jpg",
+      "url": "https://archive.biliimg.com/bfs/archive/9ec881bd50739c16cca29575b6e7058094c1ae46.jpg",
+      "source": "https://space.bilibili.com/37029661/lists/5222937?type=season",
+      "sha256": "126a90d02279319eecfe438da684bf5250c8445d8638c6fd1eb1b2667d7885c0"
+    },
+    {
+      "file": "demo-public-collection-9396912.jpg",
+      "url": "https://archive.biliimg.com/bfs/archive/2dc2ff03cd54e22bf763e911a4c76218befb4139.jpg",
+      "source": "https://space.bilibili.com/383578614/lists/9396912?type=season",
+      "sha256": "03a08471c5da4274f98cf76be68963e247be509af17d36ab720f95aeab6e6e99"
+    }
+  ]
+}

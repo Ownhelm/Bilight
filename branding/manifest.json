@@ -1,0 +1,11 @@
+{
+  "revision": "2026-10-26-unified",
+  "name": "Bilight",
+  "suffixDot": false,
+  "antennas": false,
+  "marks": {
+    "project": "branding/project-mark.svg",
+    "playback": "branding/playback-mark.svg",
+    "appIcon": "branding/app-icon.svg"
+  }
+}

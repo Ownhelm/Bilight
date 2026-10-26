@@ -13,6 +13,8 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci
+      - run: npm run check:repo
+      - run: npm run check:brand
       - run: npm test
       - run: npm run build
       - run: docker build -t bilight:ci .

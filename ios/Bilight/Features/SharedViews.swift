@@ -47,8 +47,8 @@ struct RemoteImage: View {
     var avatar = false
     @State private var image: UIImage?
     var body: some View {
-        ZStack {
-            Color.biliSoft
+        Color.biliSoft.overlay {
+            // The container sets layout size; a cover's aspect-fill image must not widen a grid cell.
             if let image {
                 Image(uiImage: image).resizable().scaledToFill()
             } else {
@@ -103,17 +103,23 @@ struct FollowButton: View {
     var compact = false
     @State private var error: String?
     var body: some View {
+        let following = app.relations[mid]?.following == true
         if app.user?.mid != mid {
             Button(action: toggle) {
                 Group {
                     if app.followBusy.contains(mid) {
-                        ProgressView().tint(Color.biliPink).scaleEffect(0.8)
+                        ProgressView().tint(Color.biliPink).scaleEffect(0.65)
                     } else {
-                        Image(systemName: app.relations[mid]?.following == true ? "checkmark.circle.fill" : "plus.circle")
-                            .font(.system(size: compact ? 23 : 26, weight: .medium))
+                        Image(systemName: following ? (app.relations[mid]?.mutual == true ? "arrow.left.arrow.right" : "checkmark") : "plus")
+                            .font(.system(size: compact ? 13 : 14, weight: .medium))
                     }
-                }.frame(width: 44, height: 44).contentShape(Rectangle())
-                    .foregroundStyle(app.relations[mid]?.following == true ? Color.biliPink : Color.biliMuted.opacity(0.65))
+                }.frame(width: compact ? 30 : 32, height: 26)
+                    .foregroundStyle(following ? Color.biliPink : Color.biliMuted.opacity(0.65))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 6).stroke(
+                            following ? Color.biliPink.opacity(0.25) : Color.biliMuted.opacity(0.22), lineWidth: 0.7)
+                    }
+                    .frame(width: 44, height: 44).contentShape(Rectangle())
             }.buttonStyle(.plain).disabled(app.followBusy.contains(mid)).accessibilityLabel(
                 app.relations[mid]?.following == true ? "取消关注" : "关注 UP 主"
             )

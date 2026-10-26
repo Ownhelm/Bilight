@@ -19,7 +19,7 @@ struct RootView: View {
                             Button("登录") { app.showLogin = true }
                         }.foregroundStyle(Color.biliPink).padding(12).background(Color.biliPink.opacity(0.05))
                     }
-                    Group { if tab == 0 { SearchView(windowCenter: center) } else { FollowingView() } }.id(
+                    Group { if tab == 0 { SearchView(windowCenter: center) } else { FollowingView(model: app.following) } }.id(
                         app.accountGeneration
                     ).frame(
                         maxWidth: .infinity, maxHeight: .infinity)
@@ -30,14 +30,8 @@ struct RootView: View {
                         Rectangle().fill(Color.black.opacity(0.06)).frame(height: 0.5)
                     }
                 }.background(.white)
-                    .navigationTitle("Bilight").navigationBarTitleDisplayMode(.inline)
+                    .navigationTitle("").navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        ToolbarItem(placement: .principal) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "play.rectangle").font(.system(size: 23, weight: .semibold))
-                                Text("bilight").font(.system(size: 23, weight: .bold, design: .rounded))
-                            }.foregroundStyle(Color.biliPink)
-                        }
                         ToolbarItem(placement: .topBarLeading) {
                             Button {
                                 if app.user == nil {
@@ -111,7 +105,6 @@ struct RootView: View {
         case "following": app.accountPath = [.followedPeople(false)]
         case "frequent": app.accountPath = [.followedPeople(true)]
         case "favorites": app.accountPath = [.favoriteFolders]
-        case "recent": app.accountPath = [.recentCreators]
         case "downloads": app.accountPath = [.downloads]
         default: app.accountPath = []
         }
@@ -147,7 +140,6 @@ struct RouteDestination: View {
         case .followedPeople(let frequent): FollowedPeopleView(frequent: frequent)
         case .favoriteFolders: FavoriteFoldersView()
         case .favoriteFolder(let folder): FavoriteContentsView(folder: folder)
-        case .recentCreators: RecentCreatorsView()
         case .downloads: DownloadsView(store: app.downloads)
         case .offline(let id): OfflineVideoView(store: app.downloads, id: id)
         }

@@ -4,6 +4,7 @@ import SwiftUI
     let client: BiliClient
     let downloads: DownloadStore
     let history: WatchHistory
+    let following = FollowingModel()
     @Published var user: User?
     @Published var restoring = true
     @Published var accountError: String?
@@ -13,7 +14,6 @@ import SwiftUI
     @Published var accountPath: [Route] = []
     @Published var relations: [Int: Relation] = [:]
     @Published var followBusy = Set<Int>()
-    @Published var feedGeneration = 0
     @Published var accountGeneration = UUID()
     var people: [Int: User] = [:]
     var videos: [String: Video] = [:]
@@ -44,6 +44,7 @@ import SwiftUI
         let changed = user?.mid != value?.mid
         user = value
         if changed {
+            following.account(value?.mid)
             history.account(value?.mid)
             downloads.account(value?.mid)
             relations = [:]
@@ -52,7 +53,6 @@ import SwiftUI
             accountPath = []
             if value == nil { showAccount = false }
             accountGeneration = UUID()
-            feedGeneration += 1
         }
         if let value { people[value.mid] = value }
     }
@@ -110,7 +110,7 @@ import SwiftUI
         defer { followBusy.remove(mid) }
         let after = try await client.setFollowing(mid, following: following)
         relations[mid] = after
-        feedGeneration += 1
+        if !after.following { self.following.removeAuthor(mid) }
     }
     func handle(_ error: Error) {
         if (error as? BiliFailure)?.code == "-101" {
@@ -128,7 +128,6 @@ enum Route: Hashable {
     case followedPeople(Bool)
     case favoriteFolders
     case favoriteFolder(FavoriteFolder)
-    case recentCreators
     case downloads
     case offline(UUID)
 }

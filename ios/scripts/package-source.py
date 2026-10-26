@@ -5,9 +5,9 @@ import re
 from zipfile import ZIP_DEFLATED, ZipFile
 
 source = Path(__file__).resolve().parents[1]
-destination = source.parent / "artifacts" / "Bilight-iOS-source.zip"
+destination = source.parent / "releases" / "Bilight-iOS-source.zip"
 destination.parent.mkdir(parents=True, exist_ok=True)
-excluded = {".build", ".artifacts", "xcuserdata", ".DS_Store", "__pycache__", "ACCEPTANCE.md"}
+excluded = {".build", ".artifacts", "xcuserdata", ".DS_Store", "__pycache__", "ACCEPTANCE.md", "BilightPreview.xcodeproj"}
 private_suffixes = {".xcuserstate", ".mobileprovision", ".p12", ".p8", ".pem", ".key", ".ipa", ".sqlite", ".db"}
 with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
     for path in sorted(source.rglob("*")):
@@ -20,4 +20,6 @@ with ZipFile(destination, "w", ZIP_DEFLATED) as archive:
                 archive.write(path, name)
     archive.write(source.parent / "LICENSE", "Bilight-iOS/LICENSE")
     archive.write(source.parent / "THIRD_PARTY_NOTICES.md", "Bilight-iOS/THIRD_PARTY_NOTICES.md")
+    for path in sorted((source.parent / "branding").glob("*")):
+        if path.is_file(): archive.write(path, str(Path("Bilight-iOS/branding") / path.name))
 print(destination)

@@ -1,4 +1,87 @@
 {
+  "/x/web-interface/wbi/view": {
+    "bvid": "BV12qnt6VEM1",
+    "aid": 117489837016867,
+    "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+    "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+    "duration": 1542,
+    "publishedAt": 1792759328,
+    "ownerMid": 383578614,
+    "copyright": 1,
+    "statistics": {
+      "view": 4427267,
+      "like": 178495,
+      "coin": 65515,
+      "favorite": 49647,
+      "reply": 3989,
+      "share": 5853
+    },
+    "parts": [
+      {
+        "cid": 42989062102,
+        "page": 1,
+        "part": "拉斯维加斯_上传版_B站流量开头-换源",
+        "duration": 1542
+      }
+    ],
+    "owner": {
+      "mid": 383578614,
+      "name": "超Carry的柴西",
+      "uname": "超Carry的柴西",
+      "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+      "sign": "国内旅行徒步/互联网脚替",
+      "fans": 2640503,
+      "attribute": 2,
+      "mtime": 1792922400
+    },
+    "views": 4427267,
+    "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+    "pubdate": 1792759328,
+    "stat": {
+      "view": 4427267,
+      "like": 178495,
+      "coin": 65515,
+      "favorite": 49647,
+      "reply": 3989,
+      "share": 5853
+    },
+    "cid": 42989062102,
+    "desc": "",
+    "pages": [
+      {
+        "cid": 42989062102,
+        "page": 1,
+        "part": "拉斯维加斯_上传版_B站流量开头-换源",
+        "duration": 1542
+      }
+    ]
+  },
+  "/x/web-interface/archive/relation": {
+    "like": false,
+    "coin": 0,
+    "favorite": false
+  },
+  "/x/v3/fav/folder/created/list-all": {
+    "count": 2,
+    "list": [
+      {
+        "id": 960001,
+        "mid": 910000,
+        "title": "默认收藏夹",
+        "media_count": 12,
+        "fav_state": 0,
+        "attr": 0
+      },
+      {
+        "id": 960002,
+        "mid": 910000,
+        "title": "慢慢看",
+        "media_count": 8,
+        "fav_state": 0,
+        "attr": 3
+      }
+    ]
+  },
   "/x/web-interface/nav": {
     "mid": 910000,
     "name": "Bilight 演示",
@@ -17,32 +100,32 @@
   "/x/relation/followings": {
     "list": [
       {
-        "mid": 910001,
-        "name": "山间放映室",
-        "uname": "山间放映室",
-        "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-        "sign": "把沿途的风景，慢慢记录下来。",
-        "fans": 12800,
+        "mid": 946974,
+        "name": "影视飓风",
+        "uname": "影视飓风",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+        "sign": "无限进步！",
+        "fans": 18807244,
         "attribute": 2,
         "mtime": 1792922400
       },
       {
-        "mid": 910002,
-        "name": "像素笔记",
-        "uname": "像素笔记",
-        "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-        "sign": "写点代码，也记录创造的过程。",
-        "fans": 8600,
+        "mid": 37029661,
+        "name": "小鹿Lawrence",
+        "uname": "小鹿Lawrence",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+        "sign": "独立导演 / 摄影师 / 配音演员",
+        "fans": 2300473,
         "attribute": 2,
         "mtime": 1792922400
       },
       {
-        "mid": 910003,
-        "name": "慢慢观察",
-        "uname": "慢慢观察",
-        "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-        "sign": "一些日常，一些不着急的发现。",
-        "fans": 5600,
+        "mid": 383578614,
+        "name": "超Carry的柴西",
+        "uname": "超Carry的柴西",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+        "sign": "国内旅行徒步/互联网脚替",
+        "fans": 2640503,
         "attribute": 2,
         "mtime": 1792922400
       }
@@ -50,16 +133,16 @@
     "total": 3
   },
   "/x/relation/relations": {
-    "910001": {
-      "mid": 910001,
+    "946974": {
+      "mid": 946974,
       "attribute": 2
     },
-    "910002": {
-      "mid": 910002,
+    "37029661": {
+      "mid": 37029661,
       "attribute": 2
     },
-    "910003": {
-      "mid": 910003,
+    "383578614": {
+      "mid": 383578614,
       "attribute": 2
     }
   },
@@ -83,98 +166,165 @@
         },
         "modules": {
           "module_author": {
-            "mid": 910001,
-            "name": "山间放映室",
-            "uname": "山间放映室",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-            "sign": "把沿途的风景，慢慢记录下来。",
-            "fans": 12800,
+            "mid": 383578614,
+            "name": "超Carry的柴西",
+            "uname": "超Carry的柴西",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+            "sign": "国内旅行徒步/互联网脚替",
+            "fans": 2640503,
             "attribute": 2,
             "mtime": 1792922400,
-            "pub_ts": 1792922400,
+            "pub_ts": 1792759328,
             "pub_action": "投稿了视频"
           },
           "module_dynamic": {
-            "desc": {
-              "text": "今天的风很轻，适合去山里走走。"
-            },
             "major": {
               "type": "MAJOR_TYPE_ARCHIVE",
               "archive": {
-                "bvid": "BV0000000001",
-                "aid": 920001,
-                "title": "去山里，等一场日落",
-                "cover": "/demo-assets/demo-mountain.png",
-                "duration": 260,
-                "publishedAt": 1792922400,
+                "bvid": "BV12qnt6VEM1",
+                "aid": 117489837016867,
+                "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+                "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+                "duration": 1542,
+                "publishedAt": 1792759328,
+                "ownerMid": 383578614,
+                "copyright": 1,
+                "statistics": {
+                  "view": 4427267,
+                  "like": 178495,
+                  "coin": 65515,
+                  "favorite": 49647,
+                  "reply": 3989,
+                  "share": 5853
+                },
+                "parts": [
+                  {
+                    "cid": 42989062102,
+                    "page": 1,
+                    "part": "拉斯维加斯_上传版_B站流量开头-换源",
+                    "duration": 1542
+                  }
+                ],
                 "owner": {
-                  "mid": 910001,
-                  "name": "山间放映室",
-                  "uname": "山间放映室",
-                  "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-                  "sign": "把沿途的风景，慢慢记录下来。",
-                  "fans": 12800,
+                  "mid": 383578614,
+                  "name": "超Carry的柴西",
+                  "uname": "超Carry的柴西",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+                  "sign": "国内旅行徒步/互联网脚替",
+                  "fans": 2640503,
                   "attribute": 2,
                   "mtime": 1792922400
                 },
-                "views": 12600,
-                "pic": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-                "pubdate": 1792922400,
+                "views": 4427267,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+                "pubdate": 1792759328,
                 "stat": {
-                  "view": 12600
+                  "view": 4427267,
+                  "like": 178495,
+                  "coin": 65515,
+                  "favorite": 49647,
+                  "reply": 3989,
+                  "share": 5853
                 }
               }
             }
           },
           "module_stat": {
             "like": {
-              "count": 128,
+              "count": 178495,
               "status": false
             },
             "comment": {
-              "count": 12
+              "count": 3989
             },
             "forward": {
-              "count": 6
+              "count": 0
             }
           }
         }
       },
       {
         "id_str": "950002",
-        "type": "DYNAMIC_TYPE_WORD",
+        "type": "DYNAMIC_TYPE_AV",
         "basic": {
           "comment_id_str": "950002",
           "comment_type": 17
         },
         "modules": {
           "module_author": {
-            "mid": 910002,
-            "name": "像素笔记",
-            "uname": "像素笔记",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-            "sign": "写点代码，也记录创造的过程。",
-            "fans": 8600,
+            "mid": 383578614,
+            "name": "超Carry的柴西",
+            "uname": "超Carry的柴西",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+            "sign": "国内旅行徒步/互联网脚替",
+            "fans": 2640503,
             "attribute": 2,
             "mtime": 1792922400,
-            "pub_ts": 1792918800,
-            "pub_action": "发布了动态"
+            "pub_ts": 1786094663,
+            "pub_action": "投稿了视频"
           },
           "module_dynamic": {
-            "desc": {
-              "text": "把一个小想法做出来，就是今天最开心的事。\n下次见面，分享它是怎么诞生的。"
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV1rRut6rEGS",
+                "aid": 117053428075107,
+                "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+                "cover": "/demo-assets/demo-public-cover-BV1rRut6rEGS.jpg",
+                "duration": 1745,
+                "publishedAt": 1786094663,
+                "ownerMid": 383578614,
+                "copyright": 1,
+                "statistics": {
+                  "view": 8313534,
+                  "like": 275805,
+                  "coin": 98772,
+                  "favorite": 85313,
+                  "reply": 5053,
+                  "share": 10088
+                },
+                "parts": [
+                  {
+                    "cid": 40682719112,
+                    "page": 1,
+                    "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车",
+                    "duration": 1745
+                  }
+                ],
+                "owner": {
+                  "mid": 383578614,
+                  "name": "超Carry的柴西",
+                  "uname": "超Carry的柴西",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+                  "sign": "国内旅行徒步/互联网脚替",
+                  "fans": 2640503,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 8313534,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1rRut6rEGS.jpg",
+                "pubdate": 1786094663,
+                "stat": {
+                  "view": 8313534,
+                  "like": 275805,
+                  "coin": 98772,
+                  "favorite": 85313,
+                  "reply": 5053,
+                  "share": 10088
+                }
+              }
             }
           },
           "module_stat": {
             "like": {
-              "count": 113,
+              "count": 275805,
               "status": false
             },
             "comment": {
-              "count": 13
+              "count": 5053
             },
             "forward": {
-              "count": 7
+              "count": 0
             }
           }
         }
@@ -188,56 +338,521 @@
         },
         "modules": {
           "module_author": {
-            "mid": 910003,
-            "name": "慢慢观察",
-            "uname": "慢慢观察",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-            "sign": "一些日常，一些不着急的发现。",
-            "fans": 5600,
+            "mid": 37029661,
+            "name": "小鹿Lawrence",
+            "uname": "小鹿Lawrence",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+            "sign": "独立导演 / 摄影师 / 配音演员",
+            "fans": 2300473,
             "attribute": 2,
             "mtime": 1792922400,
-            "pub_ts": 1792915200,
+            "pub_ts": 1768223972,
             "pub_action": "投稿了视频"
           },
           "module_dynamic": {
             "major": {
               "type": "MAJOR_TYPE_ARCHIVE",
               "archive": {
-                "bvid": "BV0000000003",
-                "aid": 920003,
-                "title": "给周末留一点空白",
-                "cover": "/demo-assets/demo-waves.png",
-                "duration": 365,
-                "publishedAt": 1792915200,
+                "bvid": "BV1qCrYB4Ekb",
+                "aid": 115881958973309,
+                "title": "人均20万去了趟南极！但…… ｜南极【上】",
+                "cover": "/demo-assets/demo-public-cover-BV1qCrYB4Ekb.jpg",
+                "duration": 1806,
+                "publishedAt": 1768223972,
+                "ownerMid": 37029661,
+                "copyright": 1,
+                "statistics": {
+                  "view": 2450108,
+                  "like": 114576,
+                  "coin": 86439,
+                  "favorite": 39092,
+                  "reply": 2976,
+                  "share": 17065
+                },
+                "parts": [
+                  {
+                    "cid": 35711617240,
+                    "page": 1,
+                    "part": "20251225_南极cpb_B站3.0换源",
+                    "duration": 1806
+                  }
+                ],
                 "owner": {
-                  "mid": 910003,
-                  "name": "慢慢观察",
-                  "uname": "慢慢观察",
-                  "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-                  "sign": "一些日常，一些不着急的发现。",
-                  "fans": 5600,
+                  "mid": 37029661,
+                  "name": "小鹿Lawrence",
+                  "uname": "小鹿Lawrence",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+                  "sign": "独立导演 / 摄影师 / 配音演员",
+                  "fans": 2300473,
                   "attribute": 2,
                   "mtime": 1792922400
                 },
-                "views": 10740,
-                "pic": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-                "pubdate": 1792915200,
+                "views": 2450108,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1qCrYB4Ekb.jpg",
+                "pubdate": 1768223972,
                 "stat": {
-                  "view": 10740
+                  "view": 2450108,
+                  "like": 114576,
+                  "coin": 86439,
+                  "favorite": 39092,
+                  "reply": 2976,
+                  "share": 17065
                 }
               }
             }
           },
           "module_stat": {
             "like": {
-              "count": 98,
+              "count": 114576,
               "status": false
             },
             "comment": {
-              "count": 14
+              "count": 2976
             },
             "forward": {
-              "count": 8
+              "count": 0
+            }
+          }
+        }
+      },
+      {
+        "id_str": "950004",
+        "type": "DYNAMIC_TYPE_AV",
+        "basic": {
+          "comment_id_str": "950004",
+          "comment_type": 17
+        },
+        "modules": {
+          "module_author": {
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
+            "attribute": 2,
+            "mtime": 1792922400,
+            "pub_ts": 1747454400,
+            "pub_action": "投稿了视频"
+          },
+          "module_dynamic": {
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV1eDEazVErL",
+                "aid": 114520655663712,
+                "title": "去了一趟世界尽头。",
+                "cover": "/demo-assets/demo-public-cover-BV1eDEazVErL.jpg",
+                "duration": 1290,
+                "publishedAt": 1747454400,
+                "ownerMid": 946974,
+                "copyright": 1,
+                "statistics": {
+                  "view": 8485788,
+                  "like": 391761,
+                  "coin": 132893,
+                  "favorite": 82108,
+                  "reply": 6703,
+                  "share": 25396
+                },
+                "parts": [
+                  {
+                    "cid": 29999172508,
+                    "page": 1,
+                    "part": "去了一趟世界尽头。",
+                    "duration": 1210
+                  },
+                  {
+                    "cid": 29999236037,
+                    "page": 2,
+                    "part": "我们把唱片带到了冰川上 MV纯享版",
+                    "duration": 80
+                  }
+                ],
+                "owner": {
+                  "mid": 946974,
+                  "name": "影视飓风",
+                  "uname": "影视飓风",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+                  "sign": "无限进步！",
+                  "fans": 18807244,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 8485788,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1eDEazVErL.jpg",
+                "pubdate": 1747454400,
+                "stat": {
+                  "view": 8485788,
+                  "like": 391761,
+                  "coin": 132893,
+                  "favorite": 82108,
+                  "reply": 6703,
+                  "share": 25396
+                }
+              }
+            }
+          },
+          "module_stat": {
+            "like": {
+              "count": 391761,
+              "status": false
+            },
+            "comment": {
+              "count": 6703
+            },
+            "forward": {
+              "count": 0
+            }
+          }
+        }
+      },
+      {
+        "id_str": "950005",
+        "type": "DYNAMIC_TYPE_AV",
+        "basic": {
+          "comment_id_str": "950005",
+          "comment_type": 17
+        },
+        "modules": {
+          "module_author": {
+            "mid": 37029661,
+            "name": "小鹿Lawrence",
+            "uname": "小鹿Lawrence",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+            "sign": "独立导演 / 摄影师 / 配音演员",
+            "fans": 2300473,
+            "attribute": 2,
+            "mtime": 1792922400,
+            "pub_ts": 1741343267,
+            "pub_action": "投稿了视频"
+          },
+          "module_dynamic": {
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV1SC9mY4Epz",
+                "aid": 114120653282953,
+                "title": "一夜鱼龙舞好看吗？我扛着呢！",
+                "cover": "/demo-assets/demo-public-cover-BV1SC9mY4Epz.jpg",
+                "duration": 1064,
+                "publishedAt": 1741343267,
+                "ownerMid": 37029661,
+                "copyright": 1,
+                "statistics": {
+                  "view": 1136577,
+                  "like": 25644,
+                  "coin": 22287,
+                  "favorite": 9232,
+                  "reply": 603,
+                  "share": 3527
+                },
+                "parts": [
+                  {
+                    "cid": 28739635657,
+                    "page": 1,
+                    "part": "一夜鱼龙舞好看吗？我扛着呢！",
+                    "duration": 1064
+                  }
+                ],
+                "owner": {
+                  "mid": 37029661,
+                  "name": "小鹿Lawrence",
+                  "uname": "小鹿Lawrence",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+                  "sign": "独立导演 / 摄影师 / 配音演员",
+                  "fans": 2300473,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 1136577,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1SC9mY4Epz.jpg",
+                "pubdate": 1741343267,
+                "stat": {
+                  "view": 1136577,
+                  "like": 25644,
+                  "coin": 22287,
+                  "favorite": 9232,
+                  "reply": 603,
+                  "share": 3527
+                }
+              }
+            }
+          },
+          "module_stat": {
+            "like": {
+              "count": 25644,
+              "status": false
+            },
+            "comment": {
+              "count": 603
+            },
+            "forward": {
+              "count": 0
+            }
+          }
+        }
+      },
+      {
+        "id_str": "950006",
+        "type": "DYNAMIC_TYPE_AV",
+        "basic": {
+          "comment_id_str": "950006",
+          "comment_type": 17
+        },
+        "modules": {
+          "module_author": {
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
+            "attribute": 2,
+            "mtime": 1792922400,
+            "pub_ts": 1731661200,
+            "pub_action": "投稿了视频"
+          },
+          "module_dynamic": {
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV15jmRYqEBf",
+                "aid": 113485836981768,
+                "title": "去了一趟伦敦。",
+                "cover": "/demo-assets/demo-public-cover-BV15jmRYqEBf.jpg",
+                "duration": 1327,
+                "publishedAt": 1731661200,
+                "ownerMid": 946974,
+                "copyright": 1,
+                "statistics": {
+                  "view": 3834425,
+                  "like": 161576,
+                  "coin": 62894,
+                  "favorite": 30753,
+                  "reply": 2704,
+                  "share": 6659
+                },
+                "parts": [
+                  {
+                    "cid": 26772505883,
+                    "page": 1,
+                    "part": "去了一趟伦敦。",
+                    "duration": 1103
+                  },
+                  {
+                    "cid": 26770605553,
+                    "page": 2,
+                    "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+                    "duration": 224
+                  }
+                ],
+                "owner": {
+                  "mid": 946974,
+                  "name": "影视飓风",
+                  "uname": "影视飓风",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+                  "sign": "无限进步！",
+                  "fans": 18807244,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 3834425,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV15jmRYqEBf.jpg",
+                "pubdate": 1731661200,
+                "stat": {
+                  "view": 3834425,
+                  "like": 161576,
+                  "coin": 62894,
+                  "favorite": 30753,
+                  "reply": 2704,
+                  "share": 6659
+                }
+              }
+            }
+          },
+          "module_stat": {
+            "like": {
+              "count": 161576,
+              "status": false
+            },
+            "comment": {
+              "count": 2704
+            },
+            "forward": {
+              "count": 0
+            }
+          }
+        }
+      },
+      {
+        "id_str": "950007",
+        "type": "DYNAMIC_TYPE_AV",
+        "basic": {
+          "comment_id_str": "950007",
+          "comment_type": 17
+        },
+        "modules": {
+          "module_author": {
+            "mid": 383578614,
+            "name": "超Carry的柴西",
+            "uname": "超Carry的柴西",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+            "sign": "国内旅行徒步/互联网脚替",
+            "fans": 2640503,
+            "attribute": 2,
+            "mtime": 1792922400,
+            "pub_ts": 1712739600,
+            "pub_action": "投稿了视频"
+          },
+          "module_dynamic": {
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV1am41167pK",
+                "aid": 1902880397,
+                "title": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+                "cover": "/demo-assets/demo-public-cover-BV1am41167pK.jpg",
+                "duration": 597,
+                "publishedAt": 1712739600,
+                "ownerMid": 383578614,
+                "copyright": 1,
+                "statistics": {
+                  "view": 3537664,
+                  "like": 94031,
+                  "coin": 29534,
+                  "favorite": 22579,
+                  "reply": 1725,
+                  "share": 4895
+                },
+                "parts": [
+                  {
+                    "cid": 1499083034,
+                    "page": 1,
+                    "part": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+                    "duration": 597
+                  }
+                ],
+                "owner": {
+                  "mid": 383578614,
+                  "name": "超Carry的柴西",
+                  "uname": "超Carry的柴西",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+                  "sign": "国内旅行徒步/互联网脚替",
+                  "fans": 2640503,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 3537664,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1am41167pK.jpg",
+                "pubdate": 1712739600,
+                "stat": {
+                  "view": 3537664,
+                  "like": 94031,
+                  "coin": 29534,
+                  "favorite": 22579,
+                  "reply": 1725,
+                  "share": 4895
+                }
+              }
+            }
+          },
+          "module_stat": {
+            "like": {
+              "count": 94031,
+              "status": false
+            },
+            "comment": {
+              "count": 1725
+            },
+            "forward": {
+              "count": 0
+            }
+          }
+        }
+      },
+      {
+        "id_str": "950008",
+        "type": "DYNAMIC_TYPE_AV",
+        "basic": {
+          "comment_id_str": "950008",
+          "comment_type": 17
+        },
+        "modules": {
+          "module_author": {
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
+            "attribute": 2,
+            "mtime": 1792922400,
+            "pub_ts": 1708142400,
+            "pub_action": "投稿了视频"
+          },
+          "module_dynamic": {
+            "major": {
+              "type": "MAJOR_TYPE_ARCHIVE",
+              "archive": {
+                "bvid": "BV1hu4m1P7Mu",
+                "aid": 1300578906,
+                "title": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+                "cover": "/demo-assets/demo-public-cover-BV1hu4m1P7Mu.jpg",
+                "duration": 235,
+                "publishedAt": 1708142400,
+                "ownerMid": 946974,
+                "copyright": 1,
+                "statistics": {
+                  "view": 2265888,
+                  "like": 125367,
+                  "coin": 69404,
+                  "favorite": 43816,
+                  "reply": 2663,
+                  "share": 8789
+                },
+                "parts": [
+                  {
+                    "cid": 1441679309,
+                    "page": 1,
+                    "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+                    "duration": 235
+                  }
+                ],
+                "owner": {
+                  "mid": 946974,
+                  "name": "影视飓风",
+                  "uname": "影视飓风",
+                  "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+                  "sign": "无限进步！",
+                  "fans": 18807244,
+                  "attribute": 2,
+                  "mtime": 1792922400
+                },
+                "views": 2265888,
+                "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1hu4m1P7Mu.jpg",
+                "pubdate": 1708142400,
+                "stat": {
+                  "view": 2265888,
+                  "like": 125367,
+                  "coin": 69404,
+                  "favorite": 43816,
+                  "reply": 2663,
+                  "share": 8789
+                }
+              }
+            }
+          },
+          "module_stat": {
+            "like": {
+              "count": 125367,
+              "status": false
+            },
+            "comment": {
+              "count": 2663
+            },
+            "forward": {
+              "count": 0
             }
           }
         }
@@ -247,195 +862,391 @@
   "/x/web-interface/wbi/search/type": {
     "result": [
       {
-        "bvid": "BV0000000001",
-        "aid": 920001,
-        "title": "去山里，等一场日落",
-        "cover": "/demo-assets/demo-mountain.png",
-        "duration": 260,
-        "publishedAt": 1792922400,
+        "bvid": "BV12qnt6VEM1",
+        "aid": 117489837016867,
+        "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+        "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+        "duration": 1542,
+        "publishedAt": 1792759328,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 4427267,
+          "like": 178495,
+          "coin": 65515,
+          "favorite": 49647,
+          "reply": 3989,
+          "share": 5853
+        },
+        "parts": [
+          {
+            "cid": 42989062102,
+            "page": 1,
+            "part": "拉斯维加斯_上传版_B站流量开头-换源",
+            "duration": 1542
+          }
+        ],
         "owner": {
-          "mid": 910001,
-          "name": "山间放映室",
-          "uname": "山间放映室",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-          "sign": "把沿途的风景，慢慢记录下来。",
-          "fans": 12800,
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 12600,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-        "pubdate": 1792922400,
+        "views": 4427267,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+        "pubdate": 1792759328,
         "stat": {
-          "view": 12600
+          "view": 4427267,
+          "like": 178495,
+          "coin": 65515,
+          "favorite": 49647,
+          "reply": 3989,
+          "share": 5853
         }
       },
       {
-        "bvid": "BV0000000002",
-        "aid": 920002,
-        "title": "从零做一个小工具",
-        "cover": "/demo-assets/demo-code.png",
-        "duration": 728,
-        "publishedAt": 1792918800,
+        "bvid": "BV1rRut6rEGS",
+        "aid": 117053428075107,
+        "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+        "cover": "/demo-assets/demo-public-cover-BV1rRut6rEGS.jpg",
+        "duration": 1745,
+        "publishedAt": 1786094663,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 8313534,
+          "like": 275805,
+          "coin": 98772,
+          "favorite": 85313,
+          "reply": 5053,
+          "share": 10088
+        },
+        "parts": [
+          {
+            "cid": 40682719112,
+            "page": 1,
+            "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车",
+            "duration": 1745
+          }
+        ],
         "owner": {
-          "mid": 910002,
-          "name": "像素笔记",
-          "uname": "像素笔记",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-          "sign": "写点代码，也记录创造的过程。",
-          "fans": 8600,
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 11670,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-code.png",
-        "pubdate": 1792918800,
+        "views": 8313534,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1rRut6rEGS.jpg",
+        "pubdate": 1786094663,
         "stat": {
-          "view": 11670
+          "view": 8313534,
+          "like": 275805,
+          "coin": 98772,
+          "favorite": 85313,
+          "reply": 5053,
+          "share": 10088
         }
       },
       {
-        "bvid": "BV0000000003",
-        "aid": 920003,
-        "title": "给周末留一点空白",
-        "cover": "/demo-assets/demo-waves.png",
-        "duration": 365,
-        "publishedAt": 1792915200,
+        "bvid": "BV1qCrYB4Ekb",
+        "aid": 115881958973309,
+        "title": "人均20万去了趟南极！但…… ｜南极【上】",
+        "cover": "/demo-assets/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "duration": 1806,
+        "publishedAt": 1768223972,
+        "ownerMid": 37029661,
+        "copyright": 1,
+        "statistics": {
+          "view": 2450108,
+          "like": 114576,
+          "coin": 86439,
+          "favorite": 39092,
+          "reply": 2976,
+          "share": 17065
+        },
+        "parts": [
+          {
+            "cid": 35711617240,
+            "page": 1,
+            "part": "20251225_南极cpb_B站3.0换源",
+            "duration": 1806
+          }
+        ],
         "owner": {
-          "mid": 910003,
-          "name": "慢慢观察",
-          "uname": "慢慢观察",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-          "sign": "一些日常，一些不着急的发现。",
-          "fans": 5600,
+          "mid": 37029661,
+          "name": "小鹿Lawrence",
+          "uname": "小鹿Lawrence",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+          "sign": "独立导演 / 摄影师 / 配音演员",
+          "fans": 2300473,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 10740,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-        "pubdate": 1792915200,
+        "views": 2450108,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "pubdate": 1768223972,
         "stat": {
-          "view": 10740
+          "view": 2450108,
+          "like": 114576,
+          "coin": 86439,
+          "favorite": 39092,
+          "reply": 2976,
+          "share": 17065
         }
       },
       {
-        "bvid": "BV0000000004",
-        "aid": 920004,
-        "title": "一扇窗，一整个下午",
-        "cover": "/demo-assets/demo-window.png",
-        "duration": 482,
-        "publishedAt": 1792911600,
+        "bvid": "BV1eDEazVErL",
+        "aid": 114520655663712,
+        "title": "去了一趟世界尽头。",
+        "cover": "/demo-assets/demo-public-cover-BV1eDEazVErL.jpg",
+        "duration": 1290,
+        "publishedAt": 1747454400,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 8485788,
+          "like": 391761,
+          "coin": 132893,
+          "favorite": 82108,
+          "reply": 6703,
+          "share": 25396
+        },
+        "parts": [
+          {
+            "cid": 29999172508,
+            "page": 1,
+            "part": "去了一趟世界尽头。",
+            "duration": 1210
+          },
+          {
+            "cid": 29999236037,
+            "page": 2,
+            "part": "我们把唱片带到了冰川上 MV纯享版",
+            "duration": 80
+          }
+        ],
         "owner": {
-          "mid": 910001,
-          "name": "山间放映室",
-          "uname": "山间放映室",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-          "sign": "把沿途的风景，慢慢记录下来。",
-          "fans": 12800,
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 9810,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-        "pubdate": 1792911600,
+        "views": 8485788,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1eDEazVErL.jpg",
+        "pubdate": 1747454400,
         "stat": {
-          "view": 9810
+          "view": 8485788,
+          "like": 391761,
+          "coin": 132893,
+          "favorite": 82108,
+          "reply": 6703,
+          "share": 25396
         }
       },
       {
-        "bvid": "BV0000000005",
-        "aid": 920005,
-        "title": "把想法变成看得见的东西",
-        "cover": "/demo-assets/demo-code.png",
-        "duration": 930,
-        "publishedAt": 1792908000,
+        "bvid": "BV1SC9mY4Epz",
+        "aid": 114120653282953,
+        "title": "一夜鱼龙舞好看吗？我扛着呢！",
+        "cover": "/demo-assets/demo-public-cover-BV1SC9mY4Epz.jpg",
+        "duration": 1064,
+        "publishedAt": 1741343267,
+        "ownerMid": 37029661,
+        "copyright": 1,
+        "statistics": {
+          "view": 1136577,
+          "like": 25644,
+          "coin": 22287,
+          "favorite": 9232,
+          "reply": 603,
+          "share": 3527
+        },
+        "parts": [
+          {
+            "cid": 28739635657,
+            "page": 1,
+            "part": "一夜鱼龙舞好看吗？我扛着呢！",
+            "duration": 1064
+          }
+        ],
         "owner": {
-          "mid": 910002,
-          "name": "像素笔记",
-          "uname": "像素笔记",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-          "sign": "写点代码，也记录创造的过程。",
-          "fans": 8600,
+          "mid": 37029661,
+          "name": "小鹿Lawrence",
+          "uname": "小鹿Lawrence",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+          "sign": "独立导演 / 摄影师 / 配音演员",
+          "fans": 2300473,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 8880,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-code.png",
-        "pubdate": 1792908000,
+        "views": 1136577,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1SC9mY4Epz.jpg",
+        "pubdate": 1741343267,
         "stat": {
-          "view": 8880
+          "view": 1136577,
+          "like": 25644,
+          "coin": 22287,
+          "favorite": 9232,
+          "reply": 603,
+          "share": 3527
         }
       },
       {
-        "bvid": "BV0000000006",
-        "aid": 920006,
-        "title": "沿着海岸慢慢走",
-        "cover": "/demo-assets/demo-waves.png",
-        "duration": 604,
-        "publishedAt": 1792904400,
+        "bvid": "BV15jmRYqEBf",
+        "aid": 113485836981768,
+        "title": "去了一趟伦敦。",
+        "cover": "/demo-assets/demo-public-cover-BV15jmRYqEBf.jpg",
+        "duration": 1327,
+        "publishedAt": 1731661200,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 3834425,
+          "like": 161576,
+          "coin": 62894,
+          "favorite": 30753,
+          "reply": 2704,
+          "share": 6659
+        },
+        "parts": [
+          {
+            "cid": 26772505883,
+            "page": 1,
+            "part": "去了一趟伦敦。",
+            "duration": 1103
+          },
+          {
+            "cid": 26770605553,
+            "page": 2,
+            "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+            "duration": 224
+          }
+        ],
         "owner": {
-          "mid": 910003,
-          "name": "慢慢观察",
-          "uname": "慢慢观察",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-          "sign": "一些日常，一些不着急的发现。",
-          "fans": 5600,
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 7950,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-        "pubdate": 1792904400,
+        "views": 3834425,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV15jmRYqEBf.jpg",
+        "pubdate": 1731661200,
         "stat": {
-          "view": 7950
+          "view": 3834425,
+          "like": 161576,
+          "coin": 62894,
+          "favorite": 30753,
+          "reply": 2704,
+          "share": 6659
         }
       },
       {
-        "bvid": "BV0000000007",
-        "aid": 920007,
-        "title": "收集城市里的蓝色",
-        "cover": "/demo-assets/demo-window.png",
-        "duration": 351,
-        "publishedAt": 1792900800,
+        "bvid": "BV1am41167pK",
+        "aid": 1902880397,
+        "title": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+        "cover": "/demo-assets/demo-public-cover-BV1am41167pK.jpg",
+        "duration": 597,
+        "publishedAt": 1712739600,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 3537664,
+          "like": 94031,
+          "coin": 29534,
+          "favorite": 22579,
+          "reply": 1725,
+          "share": 4895
+        },
+        "parts": [
+          {
+            "cid": 1499083034,
+            "page": 1,
+            "part": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+            "duration": 597
+          }
+        ],
         "owner": {
-          "mid": 910001,
-          "name": "山间放映室",
-          "uname": "山间放映室",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-          "sign": "把沿途的风景，慢慢记录下来。",
-          "fans": 12800,
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 7020,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-        "pubdate": 1792900800,
+        "views": 3537664,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1am41167pK.jpg",
+        "pubdate": 1712739600,
         "stat": {
-          "view": 7020
+          "view": 3537664,
+          "like": 94031,
+          "coin": 29534,
+          "favorite": 22579,
+          "reply": 1725,
+          "share": 4895
         }
       },
       {
-        "bvid": "BV0000000008",
-        "aid": 920008,
-        "title": "简单一点，也挺好",
-        "cover": "/demo-assets/demo-mountain.png",
-        "duration": 270,
-        "publishedAt": 1792897200,
+        "bvid": "BV1hu4m1P7Mu",
+        "aid": 1300578906,
+        "title": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+        "cover": "/demo-assets/demo-public-cover-BV1hu4m1P7Mu.jpg",
+        "duration": 235,
+        "publishedAt": 1708142400,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 2265888,
+          "like": 125367,
+          "coin": 69404,
+          "favorite": 43816,
+          "reply": 2663,
+          "share": 8789
+        },
+        "parts": [
+          {
+            "cid": 1441679309,
+            "page": 1,
+            "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+            "duration": 235
+          }
+        ],
         "owner": {
-          "mid": 910002,
-          "name": "像素笔记",
-          "uname": "像素笔记",
-          "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-          "sign": "写点代码，也记录创造的过程。",
-          "fans": 8600,
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
           "attribute": 2,
           "mtime": 1792922400
         },
-        "views": 6090,
-        "pic": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-        "pubdate": 1792897200,
+        "views": 2265888,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1hu4m1P7Mu.jpg",
+        "pubdate": 1708142400,
         "stat": {
-          "view": 6090
+          "view": 2265888,
+          "like": 125367,
+          "coin": 69404,
+          "favorite": 43816,
+          "reply": 2663,
+          "share": 8789
         }
       }
     ],
@@ -443,12 +1254,12 @@
     "numResults": 8
   },
   "/x/space/wbi/acc/info": {
-    "mid": 910001,
-    "name": "山间放映室",
-    "uname": "山间放映室",
-    "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-    "sign": "把沿途的风景，慢慢记录下来。",
-    "fans": 12800,
+    "mid": 946974,
+    "name": "影视飓风",
+    "uname": "影视飓风",
+    "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+    "sign": "无限进步！",
+    "fans": 18807244,
     "attribute": 2,
     "mtime": 1792922400
   },
@@ -456,201 +1267,162 @@
     "list": {
       "vlist": [
         {
-          "bvid": "BV0000000001",
-          "aid": 920001,
-          "title": "去山里，等一场日落",
-          "cover": "/demo-assets/demo-mountain.png",
-          "duration": 260,
-          "publishedAt": 1792922400,
+          "bvid": "BV1eDEazVErL",
+          "aid": 114520655663712,
+          "title": "去了一趟世界尽头。",
+          "cover": "/demo-assets/demo-public-cover-BV1eDEazVErL.jpg",
+          "duration": 1290,
+          "publishedAt": 1747454400,
+          "ownerMid": 946974,
+          "copyright": 1,
+          "statistics": {
+            "view": 8485788,
+            "like": 391761,
+            "coin": 132893,
+            "favorite": 82108,
+            "reply": 6703,
+            "share": 25396
+          },
+          "parts": [
+            {
+              "cid": 29999172508,
+              "page": 1,
+              "part": "去了一趟世界尽头。",
+              "duration": 1210
+            },
+            {
+              "cid": 29999236037,
+              "page": 2,
+              "part": "我们把唱片带到了冰川上 MV纯享版",
+              "duration": 80
+            }
+          ],
           "owner": {
-            "mid": 910001,
-            "name": "山间放映室",
-            "uname": "山间放映室",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-            "sign": "把沿途的风景，慢慢记录下来。",
-            "fans": 12800,
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
             "attribute": 2,
             "mtime": 1792922400
           },
-          "views": 12600,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-          "pubdate": 1792922400,
+          "views": 8485788,
+          "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1eDEazVErL.jpg",
+          "pubdate": 1747454400,
           "stat": {
-            "view": 12600
+            "view": 8485788,
+            "like": 391761,
+            "coin": 132893,
+            "favorite": 82108,
+            "reply": 6703,
+            "share": 25396
           }
         },
         {
-          "bvid": "BV0000000002",
-          "aid": 920002,
-          "title": "从零做一个小工具",
-          "cover": "/demo-assets/demo-code.png",
-          "duration": 728,
-          "publishedAt": 1792918800,
+          "bvid": "BV15jmRYqEBf",
+          "aid": 113485836981768,
+          "title": "去了一趟伦敦。",
+          "cover": "/demo-assets/demo-public-cover-BV15jmRYqEBf.jpg",
+          "duration": 1327,
+          "publishedAt": 1731661200,
+          "ownerMid": 946974,
+          "copyright": 1,
+          "statistics": {
+            "view": 3834425,
+            "like": 161576,
+            "coin": 62894,
+            "favorite": 30753,
+            "reply": 2704,
+            "share": 6659
+          },
+          "parts": [
+            {
+              "cid": 26772505883,
+              "page": 1,
+              "part": "去了一趟伦敦。",
+              "duration": 1103
+            },
+            {
+              "cid": 26770605553,
+              "page": 2,
+              "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+              "duration": 224
+            }
+          ],
           "owner": {
-            "mid": 910002,
-            "name": "像素笔记",
-            "uname": "像素笔记",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-            "sign": "写点代码，也记录创造的过程。",
-            "fans": 8600,
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
             "attribute": 2,
             "mtime": 1792922400
           },
-          "views": 11670,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-code.png",
-          "pubdate": 1792918800,
+          "views": 3834425,
+          "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV15jmRYqEBf.jpg",
+          "pubdate": 1731661200,
           "stat": {
-            "view": 11670
+            "view": 3834425,
+            "like": 161576,
+            "coin": 62894,
+            "favorite": 30753,
+            "reply": 2704,
+            "share": 6659
           }
         },
         {
-          "bvid": "BV0000000003",
-          "aid": 920003,
-          "title": "给周末留一点空白",
-          "cover": "/demo-assets/demo-waves.png",
-          "duration": 365,
-          "publishedAt": 1792915200,
+          "bvid": "BV1hu4m1P7Mu",
+          "aid": 1300578906,
+          "title": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+          "cover": "/demo-assets/demo-public-cover-BV1hu4m1P7Mu.jpg",
+          "duration": 235,
+          "publishedAt": 1708142400,
+          "ownerMid": 946974,
+          "copyright": 1,
+          "statistics": {
+            "view": 2265888,
+            "like": 125367,
+            "coin": 69404,
+            "favorite": 43816,
+            "reply": 2663,
+            "share": 8789
+          },
+          "parts": [
+            {
+              "cid": 1441679309,
+              "page": 1,
+              "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+              "duration": 235
+            }
+          ],
           "owner": {
-            "mid": 910003,
-            "name": "慢慢观察",
-            "uname": "慢慢观察",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-            "sign": "一些日常，一些不着急的发现。",
-            "fans": 5600,
+            "mid": 946974,
+            "name": "影视飓风",
+            "uname": "影视飓风",
+            "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+            "sign": "无限进步！",
+            "fans": 18807244,
             "attribute": 2,
             "mtime": 1792922400
           },
-          "views": 10740,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-          "pubdate": 1792915200,
+          "views": 2265888,
+          "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1hu4m1P7Mu.jpg",
+          "pubdate": 1708142400,
           "stat": {
-            "view": 10740
-          }
-        },
-        {
-          "bvid": "BV0000000004",
-          "aid": 920004,
-          "title": "一扇窗，一整个下午",
-          "cover": "/demo-assets/demo-window.png",
-          "duration": 482,
-          "publishedAt": 1792911600,
-          "owner": {
-            "mid": 910001,
-            "name": "山间放映室",
-            "uname": "山间放映室",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-            "sign": "把沿途的风景，慢慢记录下来。",
-            "fans": 12800,
-            "attribute": 2,
-            "mtime": 1792922400
-          },
-          "views": 9810,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-          "pubdate": 1792911600,
-          "stat": {
-            "view": 9810
-          }
-        },
-        {
-          "bvid": "BV0000000005",
-          "aid": 920005,
-          "title": "把想法变成看得见的东西",
-          "cover": "/demo-assets/demo-code.png",
-          "duration": 930,
-          "publishedAt": 1792908000,
-          "owner": {
-            "mid": 910002,
-            "name": "像素笔记",
-            "uname": "像素笔记",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-            "sign": "写点代码，也记录创造的过程。",
-            "fans": 8600,
-            "attribute": 2,
-            "mtime": 1792922400
-          },
-          "views": 8880,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-code.png",
-          "pubdate": 1792908000,
-          "stat": {
-            "view": 8880
-          }
-        },
-        {
-          "bvid": "BV0000000006",
-          "aid": 920006,
-          "title": "沿着海岸慢慢走",
-          "cover": "/demo-assets/demo-waves.png",
-          "duration": 604,
-          "publishedAt": 1792904400,
-          "owner": {
-            "mid": 910003,
-            "name": "慢慢观察",
-            "uname": "慢慢观察",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-            "sign": "一些日常，一些不着急的发现。",
-            "fans": 5600,
-            "attribute": 2,
-            "mtime": 1792922400
-          },
-          "views": 7950,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-          "pubdate": 1792904400,
-          "stat": {
-            "view": 7950
-          }
-        },
-        {
-          "bvid": "BV0000000007",
-          "aid": 920007,
-          "title": "收集城市里的蓝色",
-          "cover": "/demo-assets/demo-window.png",
-          "duration": 351,
-          "publishedAt": 1792900800,
-          "owner": {
-            "mid": 910001,
-            "name": "山间放映室",
-            "uname": "山间放映室",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-            "sign": "把沿途的风景，慢慢记录下来。",
-            "fans": 12800,
-            "attribute": 2,
-            "mtime": 1792922400
-          },
-          "views": 7020,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-          "pubdate": 1792900800,
-          "stat": {
-            "view": 7020
-          }
-        },
-        {
-          "bvid": "BV0000000008",
-          "aid": 920008,
-          "title": "简单一点，也挺好",
-          "cover": "/demo-assets/demo-mountain.png",
-          "duration": 270,
-          "publishedAt": 1792897200,
-          "owner": {
-            "mid": 910002,
-            "name": "像素笔记",
-            "uname": "像素笔记",
-            "face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-            "sign": "写点代码，也记录创造的过程。",
-            "fans": 8600,
-            "attribute": 2,
-            "mtime": 1792922400
-          },
-          "views": 6090,
-          "pic": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-          "pubdate": 1792897200,
-          "stat": {
-            "view": 6090
+            "view": 2265888,
+            "like": 125367,
+            "coin": 69404,
+            "favorite": 43816,
+            "reply": 2663,
+            "share": 8789
           }
         }
       ]
     },
     "page": {
-      "count": 8
+      "count": 3
     }
   },
   "/x/polymer/web-space/seasons_series_list": {
@@ -662,111 +1434,110 @@
       "seasons_list": [
         {
           "meta": {
-            "season_id": 930001,
-            "mid": 910001,
-            "name": "山野之间",
-            "description": "走进山里，也回到生活里。",
-            "cover": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-            "total": 12
+            "season_id": 2046621,
+            "mid": 946974,
+            "name": "合集·样片日记",
+            "description": "",
+            "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-2046621.jpg",
+            "total": 26
           }
         },
         {
           "meta": {
-            "season_id": 930002,
-            "mid": 910001,
-            "name": "海边来信",
-            "description": "关于海风、浪花和漫长的下午。",
-            "cover": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-            "total": 8
+            "season_id": 7039840,
+            "mid": 946974,
+            "name": "合集·百万支票",
+            "description": "",
+            "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-7039840.jpg",
+            "total": 5
+          }
+        },
+        {
+          "meta": {
+            "season_id": 5485575,
+            "mid": 946974,
+            "name": "合集·去了一趟……",
+            "description": "",
+            "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-5485575.jpg",
+            "total": 17
           }
         }
       ],
-      "series_list": [
-        {
-          "meta": {
-            "series_id": 930003,
-            "mid": 910001,
-            "name": "慢旅行日记",
-            "description": "沿途记录，按出发的顺序。",
-            "cover": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-            "total": 16
-          }
-        }
-      ]
+      "series_list": []
     }
   },
   "/x/web-interface/history/cursor": {
     "list": [
       {
-        "title": "去山里，等一场日落",
-        "cover": "https://i0.hdslb.com/bilight-demo/demo-mountain.png",
-        "author_mid": 910001,
-        "author_name": "山间放映室",
-        "author_face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-        "duration": 260,
+        "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+        "cover": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+        "author_mid": 383578614,
+        "author_name": "超Carry的柴西",
+        "author_face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+        "duration": 1542,
         "progress": 41,
         "view_at": 1792922400,
         "history": {
           "business": "archive",
-          "bvid": "BV0000000001",
-          "oid": 920001,
-          "cid": 940001,
+          "bvid": "BV12qnt6VEM1",
+          "oid": 117489837016867,
+          "cid": 42989062102,
           "page": 1,
-          "part": "去山里，等一场日落"
+          "part": "拉斯维加斯_上传版_B站流量开头-换源"
         }
       },
       {
-        "title": "从零做一个小工具",
-        "cover": "https://i0.hdslb.com/bilight-demo/demo-code.png",
-        "author_mid": 910002,
-        "author_name": "像素笔记",
-        "author_face": "https://i0.hdslb.com/bilight-demo/demo-avatar-2.png",
-        "duration": 728,
+        "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+        "cover": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1rRut6rEGS.jpg",
+        "author_mid": 383578614,
+        "author_name": "超Carry的柴西",
+        "author_face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+        "duration": 1745,
         "progress": 123,
         "view_at": 1792918800,
         "history": {
           "business": "archive",
-          "bvid": "BV0000000002",
-          "oid": 920002,
-          "cid": 940002,
+          "bvid": "BV1rRut6rEGS",
+          "oid": 117053428075107,
+          "cid": 40682719112,
           "page": 1,
-          "part": "从零做一个小工具"
+          "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车"
         }
       },
       {
-        "title": "给周末留一点空白",
-        "cover": "https://i0.hdslb.com/bilight-demo/demo-waves.png",
-        "author_mid": 910003,
-        "author_name": "慢慢观察",
-        "author_face": "https://i0.hdslb.com/bilight-demo/demo-avatar-3.png",
-        "duration": 365,
+        "title": "人均20万去了趟南极！但…… ｜南极【上】",
+        "cover": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "author_mid": 37029661,
+        "author_name": "小鹿Lawrence",
+        "author_face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+        "duration": 1806,
         "progress": 65,
         "view_at": 1792915200,
         "history": {
           "business": "archive",
-          "bvid": "BV0000000003",
-          "oid": 920003,
-          "cid": 940003,
+          "bvid": "BV1qCrYB4Ekb",
+          "oid": 115881958973309,
+          "cid": 35711617240,
           "page": 1,
-          "part": "给周末留一点空白"
+          "part": "20251225_南极cpb_B站3.0换源"
         }
       },
       {
-        "title": "一扇窗，一整个下午",
-        "cover": "https://i0.hdslb.com/bilight-demo/demo-window.png",
-        "author_mid": 910001,
-        "author_name": "山间放映室",
-        "author_face": "https://i0.hdslb.com/bilight-demo/demo-avatar-1.png",
-        "duration": 482,
+        "title": "去了一趟世界尽头。",
+        "cover": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1eDEazVErL.jpg",
+        "author_mid": 946974,
+        "author_name": "影视飓风",
+        "author_face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+        "duration": 1290,
         "progress": 218,
         "view_at": 1792911600,
         "history": {
           "business": "archive",
-          "bvid": "BV0000000004",
-          "oid": 920004,
-          "cid": 940004,
+          "bvid": "BV1eDEazVErL",
+          "oid": 114520655663712,
+          "cid": 29999172508,
           "page": 1,
-          "part": "一扇窗，一整个下午"
+          "part": "去了一趟世界尽头。"
         }
       }
     ],
@@ -775,5 +1546,663 @@
       "view_at": 0,
       "business": ""
     }
+  },
+  "_preview": {
+    "creators": {
+      "946974": {
+        "mid": 946974,
+        "name": "影视飓风",
+        "uname": "影视飓风",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+        "sign": "无限进步！",
+        "fans": 18807244,
+        "attribute": 2,
+        "mtime": 1792922400
+      },
+      "37029661": {
+        "mid": 37029661,
+        "name": "小鹿Lawrence",
+        "uname": "小鹿Lawrence",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+        "sign": "独立导演 / 摄影师 / 配音演员",
+        "fans": 2300473,
+        "attribute": 2,
+        "mtime": 1792922400
+      },
+      "383578614": {
+        "mid": 383578614,
+        "name": "超Carry的柴西",
+        "uname": "超Carry的柴西",
+        "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+        "sign": "国内旅行徒步/互联网脚替",
+        "fans": 2640503,
+        "attribute": 2,
+        "mtime": 1792922400
+      }
+    },
+    "videos": {
+      "BV12qnt6VEM1": {
+        "bvid": "BV12qnt6VEM1",
+        "aid": 117489837016867,
+        "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+        "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+        "duration": 1542,
+        "publishedAt": 1792759328,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 4427267,
+          "like": 178495,
+          "coin": 65515,
+          "favorite": 49647,
+          "reply": 3989,
+          "share": 5853
+        },
+        "parts": [
+          {
+            "cid": 42989062102,
+            "page": 1,
+            "part": "拉斯维加斯_上传版_B站流量开头-换源",
+            "duration": 1542
+          }
+        ],
+        "owner": {
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 4427267,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+        "pubdate": 1792759328,
+        "stat": {
+          "view": 4427267,
+          "like": 178495,
+          "coin": 65515,
+          "favorite": 49647,
+          "reply": 3989,
+          "share": 5853
+        },
+        "cid": 42989062102,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 42989062102,
+            "page": 1,
+            "part": "拉斯维加斯_上传版_B站流量开头-换源",
+            "duration": 1542
+          }
+        ]
+      },
+      "BV1rRut6rEGS": {
+        "bvid": "BV1rRut6rEGS",
+        "aid": 117053428075107,
+        "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+        "cover": "/demo-assets/demo-public-cover-BV1rRut6rEGS.jpg",
+        "duration": 1745,
+        "publishedAt": 1786094663,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 8313534,
+          "like": 275805,
+          "coin": 98772,
+          "favorite": 85313,
+          "reply": 5053,
+          "share": 10088
+        },
+        "parts": [
+          {
+            "cid": 40682719112,
+            "page": 1,
+            "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车",
+            "duration": 1745
+          }
+        ],
+        "owner": {
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 8313534,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1rRut6rEGS.jpg",
+        "pubdate": 1786094663,
+        "stat": {
+          "view": 8313534,
+          "like": 275805,
+          "coin": 98772,
+          "favorite": 85313,
+          "reply": 5053,
+          "share": 10088
+        },
+        "cid": 40682719112,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 40682719112,
+            "page": 1,
+            "part": "带美国朋友自驾洛杉矶，吃全世界最古老的麦当劳，落日飞车",
+            "duration": 1745
+          }
+        ]
+      },
+      "BV1qCrYB4Ekb": {
+        "bvid": "BV1qCrYB4Ekb",
+        "aid": 115881958973309,
+        "title": "人均20万去了趟南极！但…… ｜南极【上】",
+        "cover": "/demo-assets/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "duration": 1806,
+        "publishedAt": 1768223972,
+        "ownerMid": 37029661,
+        "copyright": 1,
+        "statistics": {
+          "view": 2450108,
+          "like": 114576,
+          "coin": 86439,
+          "favorite": 39092,
+          "reply": 2976,
+          "share": 17065
+        },
+        "parts": [
+          {
+            "cid": 35711617240,
+            "page": 1,
+            "part": "20251225_南极cpb_B站3.0换源",
+            "duration": 1806
+          }
+        ],
+        "owner": {
+          "mid": 37029661,
+          "name": "小鹿Lawrence",
+          "uname": "小鹿Lawrence",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+          "sign": "独立导演 / 摄影师 / 配音演员",
+          "fans": 2300473,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 2450108,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "pubdate": 1768223972,
+        "stat": {
+          "view": 2450108,
+          "like": 114576,
+          "coin": 86439,
+          "favorite": 39092,
+          "reply": 2976,
+          "share": 17065
+        },
+        "cid": 35711617240,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 35711617240,
+            "page": 1,
+            "part": "20251225_南极cpb_B站3.0换源",
+            "duration": 1806
+          }
+        ]
+      },
+      "BV1eDEazVErL": {
+        "bvid": "BV1eDEazVErL",
+        "aid": 114520655663712,
+        "title": "去了一趟世界尽头。",
+        "cover": "/demo-assets/demo-public-cover-BV1eDEazVErL.jpg",
+        "duration": 1290,
+        "publishedAt": 1747454400,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 8485788,
+          "like": 391761,
+          "coin": 132893,
+          "favorite": 82108,
+          "reply": 6703,
+          "share": 25396
+        },
+        "parts": [
+          {
+            "cid": 29999172508,
+            "page": 1,
+            "part": "去了一趟世界尽头。",
+            "duration": 1210
+          },
+          {
+            "cid": 29999236037,
+            "page": 2,
+            "part": "我们把唱片带到了冰川上 MV纯享版",
+            "duration": 80
+          }
+        ],
+        "owner": {
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 8485788,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1eDEazVErL.jpg",
+        "pubdate": 1747454400,
+        "stat": {
+          "view": 8485788,
+          "like": 391761,
+          "coin": 132893,
+          "favorite": 82108,
+          "reply": 6703,
+          "share": 25396
+        },
+        "cid": 29999172508,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 29999172508,
+            "page": 1,
+            "part": "去了一趟世界尽头。",
+            "duration": 1210
+          },
+          {
+            "cid": 29999236037,
+            "page": 2,
+            "part": "我们把唱片带到了冰川上 MV纯享版",
+            "duration": 80
+          }
+        ]
+      },
+      "BV1SC9mY4Epz": {
+        "bvid": "BV1SC9mY4Epz",
+        "aid": 114120653282953,
+        "title": "一夜鱼龙舞好看吗？我扛着呢！",
+        "cover": "/demo-assets/demo-public-cover-BV1SC9mY4Epz.jpg",
+        "duration": 1064,
+        "publishedAt": 1741343267,
+        "ownerMid": 37029661,
+        "copyright": 1,
+        "statistics": {
+          "view": 1136577,
+          "like": 25644,
+          "coin": 22287,
+          "favorite": 9232,
+          "reply": 603,
+          "share": 3527
+        },
+        "parts": [
+          {
+            "cid": 28739635657,
+            "page": 1,
+            "part": "一夜鱼龙舞好看吗？我扛着呢！",
+            "duration": 1064
+          }
+        ],
+        "owner": {
+          "mid": 37029661,
+          "name": "小鹿Lawrence",
+          "uname": "小鹿Lawrence",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+          "sign": "独立导演 / 摄影师 / 配音演员",
+          "fans": 2300473,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 1136577,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1SC9mY4Epz.jpg",
+        "pubdate": 1741343267,
+        "stat": {
+          "view": 1136577,
+          "like": 25644,
+          "coin": 22287,
+          "favorite": 9232,
+          "reply": 603,
+          "share": 3527
+        },
+        "cid": 28739635657,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 28739635657,
+            "page": 1,
+            "part": "一夜鱼龙舞好看吗？我扛着呢！",
+            "duration": 1064
+          }
+        ]
+      },
+      "BV15jmRYqEBf": {
+        "bvid": "BV15jmRYqEBf",
+        "aid": 113485836981768,
+        "title": "去了一趟伦敦。",
+        "cover": "/demo-assets/demo-public-cover-BV15jmRYqEBf.jpg",
+        "duration": 1327,
+        "publishedAt": 1731661200,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 3834425,
+          "like": 161576,
+          "coin": 62894,
+          "favorite": 30753,
+          "reply": 2704,
+          "share": 6659
+        },
+        "parts": [
+          {
+            "cid": 26772505883,
+            "page": 1,
+            "part": "去了一趟伦敦。",
+            "duration": 1103
+          },
+          {
+            "cid": 26770605553,
+            "page": 2,
+            "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+            "duration": 224
+          }
+        ],
+        "owner": {
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 3834425,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV15jmRYqEBf.jpg",
+        "pubdate": 1731661200,
+        "stat": {
+          "view": 3834425,
+          "like": 161576,
+          "coin": 62894,
+          "favorite": 30753,
+          "reply": 2704,
+          "share": 6659
+        },
+        "cid": 26772505883,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 26772505883,
+            "page": 1,
+            "part": "去了一趟伦敦。",
+            "duration": 1103
+          },
+          {
+            "cid": 26770605553,
+            "page": 2,
+            "part": "《英雄联盟：双城之战》Fortiche主创独家专访",
+            "duration": 224
+          }
+        ]
+      },
+      "BV1am41167pK": {
+        "bvid": "BV1am41167pK",
+        "aid": 1902880397,
+        "title": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+        "cover": "/demo-assets/demo-public-cover-BV1am41167pK.jpg",
+        "duration": 597,
+        "publishedAt": 1712739600,
+        "ownerMid": 383578614,
+        "copyright": 1,
+        "statistics": {
+          "view": 3537664,
+          "like": 94031,
+          "coin": 29534,
+          "favorite": 22579,
+          "reply": 1725,
+          "share": 4895
+        },
+        "parts": [
+          {
+            "cid": 1499083034,
+            "page": 1,
+            "part": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+            "duration": 597
+          }
+        ],
+        "owner": {
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 3537664,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1am41167pK.jpg",
+        "pubdate": 1712739600,
+        "stat": {
+          "view": 3537664,
+          "like": 94031,
+          "coin": 29534,
+          "favorite": 22579,
+          "reply": 1725,
+          "share": 4895
+        },
+        "cid": 1499083034,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 1499083034,
+            "page": 1,
+            "part": "大学生第一次出国，弟弟：下次可以不和3个姐姐出门吗？",
+            "duration": 597
+          }
+        ]
+      },
+      "BV1hu4m1P7Mu": {
+        "bvid": "BV1hu4m1P7Mu",
+        "aid": 1300578906,
+        "title": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+        "cover": "/demo-assets/demo-public-cover-BV1hu4m1P7Mu.jpg",
+        "duration": 235,
+        "publishedAt": 1708142400,
+        "ownerMid": 946974,
+        "copyright": 1,
+        "statistics": {
+          "view": 2265888,
+          "like": 125367,
+          "coin": 69404,
+          "favorite": 43816,
+          "reply": 2663,
+          "share": 8789
+        },
+        "parts": [
+          {
+            "cid": 1441679309,
+            "page": 1,
+            "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+            "duration": 235
+          }
+        ],
+        "owner": {
+          "mid": 946974,
+          "name": "影视飓风",
+          "uname": "影视飓风",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-946974.jpg",
+          "sign": "无限进步！",
+          "fans": 18807244,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "views": 2265888,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1hu4m1P7Mu.jpg",
+        "pubdate": 1708142400,
+        "stat": {
+          "view": 2265888,
+          "like": 125367,
+          "coin": 69404,
+          "favorite": 43816,
+          "reply": 2663,
+          "share": 8789
+        },
+        "cid": 1441679309,
+        "desc": "",
+        "pages": [
+          {
+            "cid": 1441679309,
+            "page": 1,
+            "part": "【杜比视界】激发你设备的极限画质，影视飓风2023-2024免费样片",
+            "duration": 235
+          }
+        ]
+      }
+    },
+    "directories": {
+      "946974": {
+        "items_lists": {
+          "page": {
+            "page_size": 12,
+            "total": 3
+          },
+          "seasons_list": [
+            {
+              "meta": {
+                "season_id": 2046621,
+                "mid": 946974,
+                "name": "合集·样片日记",
+                "description": "",
+                "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-2046621.jpg",
+                "total": 26
+              }
+            },
+            {
+              "meta": {
+                "season_id": 7039840,
+                "mid": 946974,
+                "name": "合集·百万支票",
+                "description": "",
+                "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-7039840.jpg",
+                "total": 5
+              }
+            },
+            {
+              "meta": {
+                "season_id": 5485575,
+                "mid": 946974,
+                "name": "合集·去了一趟……",
+                "description": "",
+                "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-5485575.jpg",
+                "total": 17
+              }
+            }
+          ],
+          "series_list": []
+        }
+      },
+      "37029661": {
+        "items_lists": {
+          "page": {
+            "page_size": 12,
+            "total": 1
+          },
+          "seasons_list": [
+            {
+              "meta": {
+                "season_id": 5222937,
+                "mid": 37029661,
+                "name": "S3·清单人生",
+                "description": "",
+                "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-5222937.jpg",
+                "total": 23
+              }
+            }
+          ],
+          "series_list": []
+        }
+      },
+      "383578614": {
+        "items_lists": {
+          "page": {
+            "page_size": 12,
+            "total": 1
+          },
+          "seasons_list": [
+            {
+              "meta": {
+                "season_id": 9396912,
+                "mid": 383578614,
+                "name": "公路日记",
+                "description": "",
+                "cover": "https://i0.hdslb.com/bilight-demo/demo-public-collection-9396912.jpg",
+                "total": 5
+              }
+            }
+          ],
+          "series_list": []
+        }
+      }
+    }
+  },
+  "/x/web-interface/view": {
+    "bvid": "BV12qnt6VEM1",
+    "aid": 117489837016867,
+    "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+    "cover": "/demo-assets/demo-public-cover-BV12qnt6VEM1.jpg",
+    "duration": 1542,
+    "publishedAt": 1792759328,
+    "ownerMid": 383578614,
+    "copyright": 1,
+    "statistics": {
+      "view": 4427267,
+      "like": 178495,
+      "coin": 65515,
+      "favorite": 49647,
+      "reply": 3989,
+      "share": 5853
+    },
+    "parts": [
+      {
+        "cid": 42989062102,
+        "page": 1,
+        "part": "拉斯维加斯_上传版_B站流量开头-换源",
+        "duration": 1542
+      }
+    ],
+    "owner": {
+      "mid": 383578614,
+      "name": "超Carry的柴西",
+      "uname": "超Carry的柴西",
+      "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+      "sign": "国内旅行徒步/互联网脚替",
+      "fans": 2640503,
+      "attribute": 2,
+      "mtime": 1792922400
+    },
+    "views": 4427267,
+    "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+    "pubdate": 1792759328,
+    "stat": {
+      "view": 4427267,
+      "like": 178495,
+      "coin": 65515,
+      "favorite": 49647,
+      "reply": 3989,
+      "share": 5853
+    },
+    "cid": 42989062102,
+    "desc": "",
+    "pages": [
+      {
+        "cid": 42989062102,
+        "page": 1,
+        "part": "拉斯维加斯_上传版_B站流量开头-换源",
+        "duration": 1542
+      }
+    ]
   }
 }

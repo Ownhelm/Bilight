@@ -3,13 +3,14 @@ import SwiftUI
 
 struct NativePlayer: UIViewControllerRepresentable {
     @ObservedObject var model: PlayerModel
+    var onDanmaku: ((Bool) -> Void)? = nil
     var onQuality: (Int) -> Void
     func makeCoordinator() -> Coordinator { Coordinator(model) }
     func makeUIViewController(context: Context) -> PlayerContainer {
         let controller = AVPlayerViewController()
         controller.player = model.player
         controller.delegate = context.coordinator
-        controller.showsPlaybackControls = true
+        controller.showsPlaybackControls = false
         controller.allowsPictureInPicturePlayback = false
         controller.canStartPictureInPictureAutomaticallyFromInline = false
         controller.updatesNowPlayingInfoCenter = false
@@ -27,8 +28,16 @@ struct NativePlayer: UIViewControllerRepresentable {
         label.layer.cornerRadius = 4
         label.clipsToBounds = true
         label.translatesAutoresizingMaskIntoConstraints = false
+        let controls = PlaybackControls(player: model.player)
         if let overlay = controller.contentOverlayView {
             overlay.isUserInteractionEnabled = true
+            let danmaku = DanmakuOverlay()
+            danmaku.tag = 1744
+            danmaku.isUserInteractionEnabled = false
+            danmaku.clipsToBounds = true
+            danmaku.translatesAutoresizingMaskIntoConstraints = false
+            overlay.insertSubview(danmaku, at: 0)
+            NSLayoutConstraint.activate([danmaku.leadingAnchor.constraint(equalTo: overlay.leadingAnchor), danmaku.trailingAnchor.constraint(equalTo: overlay.trailingAnchor), danmaku.topAnchor.constraint(equalTo: overlay.topAnchor), danmaku.bottomAnchor.constraint(equalTo: overlay.bottomAnchor)])
             overlay.addSubview(label)
             NSLayoutConstraint.activate([
                 label.centerXAnchor.constraint(equalTo: overlay.centerXAnchor),
@@ -51,8 +60,17 @@ struct NativePlayer: UIViewControllerRepresentable {
                 settings.widthAnchor.constraint(equalToConstant: 38),
                 settings.heightAnchor.constraint(equalToConstant: 38),
             ])
+            controls.translatesAutoresizingMaskIntoConstraints = false
+            overlay.addSubview(controls)
+            NSLayoutConstraint.activate([
+                controls.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+                controls.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -64),
+                controls.bottomAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.bottomAnchor, constant: -10),
+                controls.heightAnchor.constraint(equalToConstant: 44),
+            ])
         }
         let container = PlayerContainer(controller: controller, model: model)
+        container.installPlaybackControls(controls)
         context.coordinator.container = container
         return container
     }
@@ -82,34 +100,60 @@ struct NativePlayer: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ container: PlayerContainer, context: Context) {
         let controller = container.controller
+        (controller.contentOverlayView?.viewWithTag(1744) as? DanmakuOverlay)?.update(player: model.player, items: model.danmakuItems, enabled: model.danmakuEnabled, revision: model.danmakuRevision, fontSize: model.danmakuFontSize, opacity: model.danmakuOpacity)
         let label = controller.contentOverlayView?.viewWithTag(1742) as? UILabel
         label?.text = model.subtitleText
         label?.isHidden = model.subtitleText.isEmpty
         if let button = controller.contentOverlayView?.viewWithTag(1743) as? UIButton {
-            let qualities = model.qualityChoices.map { quality in
-                UIAction(title: quality.label, state: model.playback?.quality == quality.id ? .on : .off) { _ in
-                    onQuality(quality.id)
-                }
-            }
-            let rates = [Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2].map { rate in
-                UIAction(title: rate == 1 ? "正常" : "\(rate)×", state: model.rate == rate ? .on : .off) { _ in
-                    model.setRate(rate)
-                }
-            }
-            var sections = [UIMenu(title: "清晰度", children: qualities), UIMenu(title: "播放速度", children: rates)]
-            if !model.subtitleTracks.isEmpty {
-                let off = UIAction(title: "关闭字幕", state: model.selectedSubtitle == nil ? .on : .off) { _ in
-                    model.selectSubtitle(nil)
-                }
-                let tracks = model.subtitleTracks.map { track in
-                    UIAction(title: track.label, state: model.selectedSubtitle == track.id ? .on : .off) { _ in
-                        model.selectSubtitle(track)
-                    }
-                }
-                sections.append(UIMenu(title: "字幕", children: [off] + tracks))
-            }
-            button.menu = UIMenu(children: sections)
+            button.menu = settingsMenu()
         }
+    }
+    func settingsMenu() -> UIMenu {
+        let qualities = model.qualityChoices.map { quality in
+            UIAction(title: quality.label, state: model.playback?.quality == quality.id ? .on : .off) { _ in
+                onQuality(quality.id)
+            }
+        }
+        let rates = [Float(0.5), 0.75, 1, 1.25, 1.5, 1.75, 2].map { rate in
+            UIAction(title: rate == 1 ? "正常" : "\(rate)×", state: model.rate == rate ? .on : .off) { _ in
+                model.setRate(rate)
+            }
+        }
+        var sections = [UIMenu(title: "清晰度", children: qualities), UIMenu(title: "播放速度", children: rates)]
+        if model.subtitleTracks.isEmpty {
+            sections.append(UIMenu(title: "字幕", children: [UIAction(title: "暂无可用字幕", attributes: .disabled) { _ in }]))
+        } else {
+            let off = UIAction(title: "关闭字幕", state: model.selectedSubtitle == nil ? .on : .off) { _ in
+                model.selectSubtitle(nil)
+            }
+            let tracks = model.subtitleTracks.map { track in
+                UIAction(title: track.label, state: model.selectedSubtitle == track.id ? .on : .off) { _ in
+                    model.selectSubtitle(track)
+                }
+            }
+            sections.append(UIMenu(title: "字幕", children: [off] + tracks))
+        }
+        if let onDanmaku {
+            let toggle = UIAction(title: "开启弹幕", state: model.danmakuEnabled ? .on : .off) { _ in
+                onDanmaku(!model.danmakuEnabled)
+            }
+            var controls: [UIMenuElement] = [toggle]
+            if model.danmakuEnabled {
+                let sizes: [(String, CGFloat)] = [("小", 16), ("标准", 20), ("大", 24)]
+                controls.append(UIMenu(title: "字号", children: sizes.map { label, size in
+                    UIAction(title: label, state: model.danmakuFontSize == size ? .on : .off) { _ in
+                        model.danmakuFontSize = size
+                    }
+                }))
+                controls.append(UIMenu(title: "不透明度", children: [CGFloat(0.5), 0.75, 1].map { opacity in
+                    UIAction(title: "\(Int(opacity * 100))%", state: model.danmakuOpacity == opacity ? .on : .off) { _ in
+                        model.danmakuOpacity = opacity
+                    }
+                }))
+            }
+            sections.append(UIMenu(title: "弹幕", children: controls))
+        }
+        return UIMenu(children: sections)
     }
     static func dismantleUIViewController(_ controller: PlayerContainer, coordinator: Coordinator) { controller.shutdown() }
 }
@@ -143,31 +187,6 @@ struct VideoView: View {
                     }
                     PlaybackView(detail: detail, part: part, start: part.page == requestedPage ? startTime : 0).id(
                         part.cid)
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(detail.video.title).font(.system(size: 19, weight: .semibold)).fixedSize(
-                            horizontal: false, vertical: true)
-                        HStack(spacing: 13) {
-                            Text("\(countLabel(detail.video.views)) 播放")
-                            Text(detail.video.bvid)
-                        }.font(.caption2).foregroundStyle(Color.biliMuted)
-                    }.padding(.horizontal, 16)
-                    HStack(spacing: 12) {
-                        Button {
-                            app.open(detail.video.owner)
-                        } label: {
-                            HStack(spacing: 10) {
-                                RemoteImage(url: detail.video.owner.avatar, avatar: true).frame(width: 38, height: 38)
-                                    .clipShape(Circle())
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(detail.video.owner.name).font(.system(size: 14, weight: .medium))
-                                        .foregroundStyle(.primary)
-                                    Text("查看 UP 主主页").font(.caption2).foregroundStyle(Color.biliMuted)
-                                }
-                            }
-                        }.buttonStyle(.plain)
-                        Spacer()
-                        FollowButton(mid: detail.video.owner.mid)
-                    }.padding(.horizontal, 16).padding(.vertical, 10)
                     if detail.parts.count > 1 {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("分 P · \(part.page)/\(detail.parts.count)").font(.subheadline.weight(.semibold))
@@ -188,7 +207,6 @@ struct VideoView: View {
                                     }
                                 }
                             }
-                            Text("选择分 P 后需手动播放").font(.caption2).foregroundStyle(Color.biliMuted)
                         }.padding(.horizontal, 16)
                     }
                     if !detail.description.isEmpty {
@@ -200,7 +218,7 @@ struct VideoView: View {
                     }
                     CommentsView(aid: detail.video.aid).padding(.horizontal, 16)
                 }
-            }.padding(.vertical, 10).padding(.bottom, 20)
+            }.padding(.bottom, 20)
         }.navigationTitle("视频").navigationBarTitleDisplayMode(.inline).task(id: "\(bvid)-\(refresh)") {
             // Returning from native full screen must not refetch metadata and replace the live player view.
             if detail?.video.bvid == bvid && error == nil { return }
@@ -235,33 +253,35 @@ struct PlaybackView: View {
         VStack(spacing: 0) {
             ZStack {
                 Color.black
-                NativePlayer(model: model) { quality in
-                    model.load(
-                        client: app.client, bvid: detail.video.bvid, part: part, quality: quality, preserve: true)
+                NativePlayer(model: model, onDanmaku: { model.setDanmakuEnabled($0, client: app.client, cid: part.cid) }) { quality in
+                    model.selectQuality(quality, client: app.client, bvid: detail.video.bvid, part: part)
                 }
                 if model.busy && model.playback == nil {
                     ProgressView("正在准备视频").tint(.white).foregroundStyle(.white).font(.caption)
                 }
             }.aspectRatio(16 / 9, contentMode: .fit)
-            VideoActionBar(model: model, bvid: detail.video.bvid, onQuality: { quality in
-                model.load(client: app.client, bvid: detail.video.bvid, part: part, quality: quality, preserve: true)
-            }, onDownload: {
-                if app.user == nil { app.showLogin = true } else { showDownload = true }
-            })
             if let error = model.error {
                 FailureBlock(error: error) {
                     model.load(
-                        client: app.client, bvid: detail.video.bvid, part: part,
-                        quality: model.playback?.quality ?? 127, preserve: true)
+                        client: app.client, bvid: detail.video.bvid, part: part, preserve: true)
                 }
             }
             if let error = model.subtitleError {
                 Text("字幕：\(error)").font(.caption2).foregroundStyle(Color.biliMuted).padding(.horizontal, 16)
             }
+            if let error = model.danmakuError {
+                HStack {
+                    Text("弹幕：\(error)")
+                    Button("重试") { model.setDanmakuEnabled(true, client: app.client, cid: part.cid) }
+                }.font(.caption2).foregroundStyle(Color.biliMuted).padding(.horizontal, 16)
+            }
             if let historyError {
                 Text("观看进度未同步：\(historyError)").font(.caption2).foregroundStyle(Color.biliPink).padding(.horizontal, 16)
             }
             HistorySyncStatus(history: app.history).padding(.horizontal, 16)
+            VideoInformationSection(detail: detail, part: part, model: model) {
+                if app.user == nil { app.showLogin = true } else { showDownload = true }
+            }
         }.sheet(isPresented: $showDownload) {
             DownloadOptionsView(video: detail.video, part: part, playback: model.playback).environmentObject(app)
         }.task {

@@ -41,8 +41,13 @@ struct SearchView: View {
                                 }
                                 .overlay(alignment: .top) {
                                     VStack(spacing: 12) {
-                                        Text("想看什么？").font(.system(size: 33, weight: .bold))
-                                        Text("搜你所想，看你所选").font(.system(size: 15))
+                                        HStack(spacing: 8) {
+                                            Image("PlaybackMark").renderingMode(.template).resizable().scaledToFit().frame(width: 36, height: 32)
+                                            Text("bilight").font(.system(size: 36, weight: .bold, design: .rounded))
+                                        }.foregroundStyle(Color.biliPink)
+                                            .accessibilityElement(children: .ignore).accessibilityLabel("Bilight")
+                                            .accessibilityAddTraits(.isHeader)
+                                        Text("搜你所想，看你所选").font(.system(size: 16))
                                             .foregroundStyle(Color.biliMuted).lineLimit(1).minimumScaleFactor(0.85)
                                     }.fixedSize(horizontal: false, vertical: true)
                                         .background {
@@ -53,16 +58,10 @@ struct SearchView: View {
                                         }
                                         .alignmentGuide(.top) { $0[.bottom] + 28 }
                                 }
-                                // The field itself anchors to the window midpoint; title and footer do not affect it.
+                                // The field itself anchors to the window midpoint independently of the logo and caption.
                                 .position(x: centerX, y: centerY)
                         }.frame(width: geometry.size.width, height: height)
                     }.scrollBounceBehavior(.basedOnSize).scrollDismissesKeyboard(.interactively)
-                        .overlay(alignment: .bottom) {
-                            if !focused {
-                                Text("搜索与关注，由你选择。").font(.caption).foregroundStyle(Color.biliMuted.opacity(0.8))
-                                    .padding(.bottom, 35).allowsHitTesting(false)
-                            }
-                        }
                 }
             } else {
                 searchBar.padding(.horizontal, 16).padding(.vertical, 12)
@@ -135,7 +134,8 @@ struct SearchView: View {
             }
             Button("搜索", action: search).font(.system(size: 14, weight: .medium)).foregroundStyle(Color.biliPink)
                 .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-        }.padding(12).background(Color.biliSoft, in: RoundedRectangle(cornerRadius: 11))
+        }.padding(.horizontal, 16).padding(.vertical, 12).frame(minHeight: 48)
+            .background(Color.biliSoft, in: Capsule())
     }
     private func search() {
         let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
