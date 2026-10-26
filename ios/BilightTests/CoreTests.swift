@@ -933,3 +933,52 @@ final class CoreTests: XCTestCase {
         } catch let error as BiliFailure { XCTAssertEqual(error.code, "COLLECTIONS_UNAVAILABLE") }
     }
 }
+
+final class QRLoginTransportTests: XCTestCase {
+    @MainActor func testQRCodeAcceptsBothOfficialLoginHosts() throws {
+        for host in ["account.bilibili.com", "passport.bilibili.com"] {
+            let url = "https://\(host)/h5-app/passport/login/scan?key=isolated-test-key"
+            let (value, key) = try DirectQRLogin.challenge(["url": url, "qrcode_key": "isolated-test-key"])
+            XCTAssertEqual(value, url)
+            XCTAssertEqual(key, "isolated-test-key")
+        }
+    }
+
+    @MainActor func testQRCodeRejectsUnsafeURLsAndMissingKey() {
+        for url in ["http://account.bilibili.com/scan", "https://account.bilibili.com.evil.example/scan",
+                    "https://evil.example/scan", "https://user@account.bilibili.com/scan",
+                    "https://account.bilibili.com:8443/scan"] {
+            XCTAssertThrowsError(try DirectQRLogin.challenge(["url": url, "qrcode_key": "test"]))
+        }
+        XCTAssertThrowsError(try DirectQRLogin.challenge(["url": "https://account.bilibili.com/scan"]))
+    }
+
+    @MainActor func testWaitingStatusAndNoImportedCookies() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockProtocol.self]
+        configuration.httpCookieStorage = nil
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel(); MockProtocol.handler = nil }
+        MockProtocol.handler = { request in
+            XCTAssertNil(request.value(forHTTPHeaderField: "Cookie"))
+            XCTAssertEqual(request.url?.host, "passport.bilibili.com")
+            XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "qrcode_key" })?.value, "isolated-test-key")
+            return ["code": 0, "data": ["code": 86101]]
+        }
+        let (data, cookies) = try await DirectQRLogin { _ in }.request("poll", key: "isolated-test-key", session: session)
+        XCTAssertEqual(data["code"] as? Int, 86101)
+        XCTAssertTrue(cookies.isEmpty)
+    }
+
+    @MainActor func testUpstreamErrorIsNotAnEmptyQRCode() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel(); MockProtocol.handler = nil }
+        MockProtocol.handler = { _ in ["code": -412, "message": "请求被拦截"] }
+        do {
+            _ = try await DirectQRLogin { _ in }.request("generate", session: session)
+            XCTFail("Expected upstream error")
+        } catch { XCTAssertTrue(error.localizedDescription.contains("-412")) }
+    }
+}
