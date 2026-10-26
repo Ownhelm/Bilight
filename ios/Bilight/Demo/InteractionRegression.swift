@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Explicit, offline UI regression fixture. It never restores the user's account.
 enum InteractionRegression {
-    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--interaction-regression") }
+    static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--interaction-regression") || player }
+    static var player: Bool { ProcessInfo.processInfo.arguments.contains("--regression-player") }
     static var grid: Bool { ProcessInfo.processInfo.arguments.contains("--regression-grid") }
     static let imageURL = URL(string: "https://i0.hdslb.com/bilight-regression/tall.png")!
     @MainActor static let image: UIImage = {

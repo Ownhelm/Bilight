@@ -36,6 +36,13 @@ struct Danmaku: Equatable {
     }
 }
 
+enum DanmakuArea: Double, CaseIterable {
+    case quarter = 0.25, half = 0.5, threeQuarters = 0.75, full = 1
+    var title: String {
+        switch self { case .quarter: return "1/4"; case .half: return "1/2"; case .threeQuarters: return "3/4"; case .full: return "全屏" }
+    }
+}
+
 /// Own display link and bounded text layers keep animation out of SwiftUI's page update cycle.
 @MainActor final class DanmakuOverlay: UIView {
     weak var player: AVPlayer?
@@ -44,6 +51,7 @@ struct Danmaku: Equatable {
     private var link: CADisplayLink?
     private var revision: UUID?
     private var fontSize: CGFloat = 20
+    private var area: DanmakuArea = .full
     private var lastTime = Double.nan
     private var lastSize = CGSize.zero
     private weak var safeAreaSource: UIView?
@@ -66,10 +74,11 @@ struct Danmaku: Equatable {
         if let window, safeAreaSource?.window === window { NSLayoutConstraint.activate(safeAreaConstraints) }
         else { NSLayoutConstraint.deactivate(safeAreaConstraints) }
     }
-    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20) {
+    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20, area: DanmakuArea = .full) {
         self.player = player
         let fontSize = min(24, max(16, fontSize))
         if self.fontSize != fontSize { self.fontSize = fontSize; clear() }
+        if self.area != area { self.area = area; lastTime = .nan }
         alpha = 1
         if self.revision != revision { self.revision = revision; self.items = items; lastTime = .nan; clear() }
         isHidden = !enabled
@@ -107,7 +116,12 @@ struct Danmaku: Equatable {
         let ids = Set(visible.map(\.id))
         for id in Array(labels.keys) where !ids.contains(id) { labels.removeValue(forKey: id)?.removeFromSuperview() }
         var occupied = Set<Int>()
-        let lanes = max(1, min(7, Int(bounds.height / 32) - 1))
+        // Ratios cover the upper part of the camera-safe viewport, including bottom-fixed comments.
+        let areaHeight = bounds.height * area.rawValue
+        let lineHeight = ceil(fontSize * 1.5)
+        let padding = min(12, max(2, (areaHeight - lineHeight) / 2))
+        let lanes = min(7, Int(max(0, areaHeight - padding * 2) / lineHeight))
+        guard lanes > 0 else { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; return }
         let scale = max(1, window?.windowScene?.screen.scale ?? traitCollection.displayScale)
         for item in visible {
             let lane = item.id % lanes
@@ -119,16 +133,21 @@ struct Danmaku: Equatable {
             else {
                 label = UILabel(); label.font = .systemFont(ofSize: fontSize, weight: .semibold)
                 label.contentScaleFactor = scale
-                // Keep identical contrast over every scene, including upstream colored comments.
-                label.attributedText = NSAttributedString(string: item.text, attributes: [.font: label.font as Any, .foregroundColor: UIColor.white, .strokeColor: UIColor.black, .strokeWidth: -2])
+                // Stroke attributes cut into thin CJK strokes. Keep the solid glyph fill intact;
+                // a small shadow behind its alpha mask adds contrast without outlining inside it.
+                label.text = item.text; label.textColor = .white
+                label.layer.shadowColor = UIColor.black.cgColor
+                label.layer.shadowOffset = .zero
+                label.layer.shadowRadius = 0.75
+                label.layer.shadowOpacity = 1
                 label.sizeToFit(); addSubview(label); labels[item.id] = label
             }
             let elapsed = time - item.time
             let fixed = item.mode == 4 || item.mode == 5
             let x = fixed ? (bounds.width-label.bounds.width)/2 : item.mode == 6 ? -label.bounds.width+(bounds.width+label.bounds.width)*elapsed/8 : bounds.width-(bounds.width+label.bounds.width)*elapsed/8
-            let y = item.mode == 4 ? bounds.height-CGFloat(lane+1)*30-25 : 12+CGFloat(lane)*30
-            // Keep cached glyphs on physical pixels so movement doesn't soften the stroked edges.
-            label.frame.origin = CGPoint(x: (x * scale).rounded() / scale, y: (max(5, y) * scale).rounded() / scale)
+            let y = item.mode == 4 ? areaHeight-padding-label.bounds.height-CGFloat(lane)*lineHeight : padding+CGFloat(lane)*lineHeight
+            // Keep cached glyphs on physical pixels so movement doesn't soften the text edges.
+            label.frame.origin = CGPoint(x: (x * scale).rounded() / scale, y: (y * scale).rounded() / scale)
         }
     }
     @MainActor private final class WeakTarget: NSObject {

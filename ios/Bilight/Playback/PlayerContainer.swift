@@ -8,11 +8,21 @@ import AVKit
     private var fullscreen: FullscreenContainer?
     private var orientationObserver: NSObjectProtocol?
     private var exitingFullscreen = false
+    private var lifecycleInactive = false
+    private var backgroundPlayback: (AVPlayerItem?, Bool, Float)?
+    private var foregroundRecovery: Task<Void, Never>?
     private var deviceWasLandscape = false
     private var suppressUntilPortrait = false
     private var playbackIntent: (AVPlayerItem?, Bool, Float)?
     private var controlsAutoHide: Task<Void, Never>?
     private var playbackControls: PlaybackControls?
+    private let loadingView = UIView()
+    private let loadingSpinner = UIActivityIndicatorView(style: .medium)
+    private let loadingLabel = UILabel()
+    private var loadingObservations: [NSKeyValueObservation] = []
+    private var loadingItemObservation: NSKeyValueObservation?
+    private var loadingDelay: Task<Void, Never>?
+    private var loadingStopped = false
     private let seekFeedback = UILabel()
     private var seekFeedbackTask: Task<Void, Never>?
     private var fullscreenPullStart = CGPoint.zero
@@ -67,6 +77,34 @@ import AVKit
         Self.attach(controller, to: self)
         controller.view.addGestureRecognizer(seekTap)
         if let overlay = controller.contentOverlayView {
+            loadingView.accessibilityIdentifier = "player-buffering-indicator"
+            loadingView.isAccessibilityElement = true
+            loadingView.isUserInteractionEnabled = false
+            loadingView.backgroundColor = .black.withAlphaComponent(0.65)
+            loadingView.layer.cornerRadius = 12
+            loadingView.isHidden = true
+            loadingView.translatesAutoresizingMaskIntoConstraints = false
+            loadingSpinner.color = UIColor(red: 233.0 / 255, green: 82.0 / 255, blue: 131.0 / 255, alpha: 1)
+            loadingLabel.font = UIFontMetrics(forTextStyle: .caption1).scaledFont(for: .systemFont(ofSize: 14, weight: .medium), maximumPointSize: 22)
+            loadingLabel.adjustsFontForContentSizeCategory = true
+            loadingLabel.textColor = .white
+            let row = UIStackView(arrangedSubviews: [loadingSpinner, loadingLabel])
+            row.spacing = 10; row.alignment = .center; row.translatesAutoresizingMaskIntoConstraints = false
+            loadingView.addSubview(row); overlay.addSubview(loadingView)
+            NSLayoutConstraint.activate([
+                loadingView.centerXAnchor.constraint(equalTo: overlay.centerXAnchor), loadingView.centerYAnchor.constraint(equalTo: overlay.centerYAnchor),
+                loadingView.widthAnchor.constraint(lessThanOrEqualTo: overlay.widthAnchor, constant: -32),
+                row.leadingAnchor.constraint(equalTo: loadingView.leadingAnchor, constant: 16), row.trailingAnchor.constraint(equalTo: loadingView.trailingAnchor, constant: -16),
+                row.topAnchor.constraint(equalTo: loadingView.topAnchor, constant: 12), row.bottomAnchor.constraint(equalTo: loadingView.bottomAnchor, constant: -12),
+            ])
+            loadingObservations = [
+                model.player.observe(\.timeControlStatus, options: [.initial, .new]) { [weak self] _, _ in
+                    Task { @MainActor in self?.updateLoadingIndicator() }
+                },
+                model.player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
+                    Task { @MainActor in self?.observeLoadingItem() }
+                },
+            ]
             seekFeedback.textAlignment = .center
             seekFeedback.font = .monospacedDigitSystemFont(ofSize: 17, weight: .semibold)
             seekFeedback.textColor = .white
@@ -106,10 +144,10 @@ import AVKit
     }
     override func viewDidDisappear(_ animated: Bool) {
         super.viewDidDisappear(animated)
-        if !model.isFullscreen { releaseOrientation() }
+        if !model.isFullscreen && !lifecycleInactive { releaseOrientation() }
     }
     private func deviceOrientationChanged() {
-        guard PlaybackOrientationDelegate.active === self else { return }
+        guard PlaybackOrientationDelegate.active === self, !lifecycleInactive else { return }
         let orientation = UIDevice.current.orientation
         if orientation.isPortrait { suppressUntilPortrait = false }
         if orientation.isLandscape {
@@ -123,7 +161,7 @@ import AVKit
         if fullscreen != nil { exitFullscreen() } else { enterFullscreen() }
     }
     func enterFullscreen(rotate: Bool = true, animated: Bool = false, automatic: Bool = false) {
-        guard fullscreen == nil, !nativeFullscreen, view.window != nil, presentedViewController == nil,
+        guard !lifecycleInactive, fullscreen == nil, !nativeFullscreen, view.window != nil, presentedViewController == nil,
             !isBeingDismissed
         else { return }
         let target = FullscreenContainer()
@@ -137,15 +175,17 @@ import AVKit
         target.modalPresentationStyle = .fullScreen
         target.modalPresentationCapturesStatusBarAppearance = true
         target.onOrientation = { [weak self, weak target] landscape in
-            guard let self, let target else { return }
+            guard let self, let target, !self.lifecycleInactive else { return }
             if landscape {
                 target.hasBeenLandscape = true
             } else if target.hasBeenLandscape && target.exitsOnPortrait {
-                self.finishExit(from: target)
+                self.exitFullscreen()
             }
         }
         target.onDismiss = { [weak self, weak target] in
             guard let self, let target else { return }
+            // A disappearing view during a Home gesture is not a completed modal dismissal.
+            guard !self.lifecycleInactive, !target.isBeingDismissed, target.presentingViewController == nil else { return }
             self.restoreInline(from: target)
         }
         fullscreen = target
@@ -182,7 +222,7 @@ import AVKit
         finishExit(from: target)
     }
     private func finishExit(from target: FullscreenContainer) {
-        guard fullscreen === target, !target.isBeingPresented, !target.isBeingDismissed else { return }
+        guard !lifecycleInactive, fullscreen === target, !target.isBeingPresented, !target.isBeingDismissed else { return }
         if playbackIntent == nil { rememberPlayback() }
         target.dismiss(animated: false) { [weak self, weak target] in
             guard let self, let target else { return }
@@ -218,7 +258,7 @@ import AVKit
             ])
     }
     private func restorePlayback() {
-        guard let intent = playbackIntent else { return }
+        guard !lifecycleInactive, let intent = playbackIntent else { return }
         playbackIntent = nil
         guard model.player.currentItem === intent.0 else { return }
         model.setRate(intent.2)
@@ -257,6 +297,7 @@ import AVKit
         requestOrientation(mask, scene: target.view.window?.windowScene)
     }
     private func requestOrientation(_ mask: UIInterfaceOrientationMask, scene: UIWindowScene?) {
+        guard !lifecycleInactive else { return }
         setNeedsUpdateOfSupportedInterfaceOrientations()
         scene?.requestGeometryUpdate(.iOS(interfaceOrientations: mask)) { _ in }
     }
@@ -310,7 +351,17 @@ import AVKit
     }
     @objc private func doubleTapSeek(_ gesture: UITapGestureRecognizer) {
         guard gesture.state == .ended else { return }
-        let delta = gesture.location(in: controller.view).x < controller.view.bounds.midX ? -10.0 : 10.0
+        handleDoubleTap(at: gesture.location(in: controller.view))
+    }
+    func handleDoubleTap(at point: CGPoint) {
+        let width = controller.view.bounds.width
+        guard width > 0 else { return }
+        // Use proportions of the current player viewport, including after fullscreen rotation.
+        if point.x >= width * 0.4 && point.x < width * 0.6 {
+            playbackControls?.togglePlayback()
+            return
+        }
+        let delta = point.x < width * 0.4 ? -10.0 : 10.0
         let before = model.player.currentTime().seconds
         guard let target = model.seek(delta) else { return }
         showSeekFeedback(before: before, target: target)
@@ -328,7 +379,7 @@ import AVKit
     }
     private func scheduleControlsAutoHide() {
         controlsAutoHide?.cancel()
-        guard fullscreen != nil || playbackControls != nil, !UIAccessibility.isVoiceOverRunning else { return }
+        guard !lifecycleInactive, fullscreen != nil || playbackControls != nil, !UIAccessibility.isVoiceOverRunning else { return }
         controlsAutoHide = Task { @MainActor [weak self] in
             do { try await Task.sleep(for: .milliseconds(1500)) } catch { return }
             guard let self, self.fullscreen != nil || self.playbackControls != nil, !UIAccessibility.isVoiceOverRunning else { return }
@@ -390,7 +441,122 @@ import AVKit
         child.view.removeFromSuperview()
         child.removeFromParent()
     }
+    private var loadingText: String? {
+        guard !lifecycleInactive, model.error == nil else { return nil }
+        if model.busy { return "正在加载…" }
+        guard let item = model.player.currentItem, item.status != .failed else { return nil }
+        if model.player.timeControlStatus == .waitingToPlayAtSpecifiedRate { return "正在缓冲…" }
+        return nil
+    }
+    private func observeLoadingItem() {
+        loadingItemObservation?.invalidate()
+        loadingItemObservation = model.player.currentItem?.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
+            Task { @MainActor in self?.updateLoadingIndicator() }
+        }
+        updateLoadingIndicator()
+    }
+    func updateLoadingIndicator() {
+        guard isViewLoaded, !loadingStopped else { return }
+        guard let text = loadingText else {
+            loadingDelay?.cancel(); loadingDelay = nil
+            loadingView.isHidden = true; loadingSpinner.stopAnimating()
+            return
+        }
+        loadingLabel.text = text; loadingView.accessibilityLabel = text
+        // Ignore very short prerolls to avoid flashing the indicator during healthy playback.
+        guard loadingView.isHidden, loadingDelay == nil else { return }
+        loadingDelay = Task { @MainActor [weak self] in
+            do { try await Task.sleep(for: .milliseconds(200)) } catch { return }
+            guard let self, !self.loadingStopped else { return }
+            self.loadingDelay = nil
+            guard let text = self.loadingText else { return }
+            self.loadingLabel.text = text; self.loadingView.accessibilityLabel = text
+            self.loadingSpinner.startAnimating(); self.loadingView.isHidden = false
+        }
+    }
+    func resignPlaybackActivity() {
+        lifecycleInactive = true
+        updateLoadingIndicator()
+        foregroundRecovery?.cancel()
+        controlsAutoHide?.cancel()
+    }
+    func backgroundPlaybackActivity() {
+        resignPlaybackActivity()
+        guard backgroundPlayback == nil else { return }
+        backgroundPlayback = playbackIntent ?? (model.player.currentItem, model.player.timeControlStatus != .paused, model.player.defaultRate)
+        model.flush()
+        model.player.pause()
+        // Playback is paused before suspension, so the existing render binding can retain
+        // its last frame. Clearing it unconditionally causes a black flash on every return.
+    }
+    func activatePlaybackActivity() {
+        lifecycleInactive = false
+        foregroundRecovery?.cancel()
+        foregroundRecovery = Task { @MainActor [weak self] in
+            // Give UIKit's interrupted presentation/rotation a chance to settle first.
+            await Task.yield()
+            guard let self, !Task.isCancelled, !self.lifecycleInactive else { return }
+            for _ in 0..<20 {
+                if self.fullscreen?.isBeingPresented != true && self.fullscreen?.isBeingDismissed != true { break }
+                do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
+                guard !self.lifecycleInactive else { return }
+            }
+            guard !Task.isCancelled, !self.lifecycleInactive else { return }
+            if let target = self.fullscreen {
+                if target.presentingViewController === self || self.presentedViewController === target {
+                    if self.controller.parent !== target {
+                        Self.detach(self.controller); Self.attach(self.controller, to: target)
+                    }
+                    self.model.isFullscreen = true
+                    if self.exitingFullscreen { self.finishExit(from: target) }
+                } else if !target.isBeingPresented && !target.isBeingDismissed {
+                    self.restoreInline(from: target)
+                }
+            }
+            if self.controller.player !== self.model.player { self.controller.player = self.model.player }
+            self.restorePlayback()
+            if let intent = self.backgroundPlayback {
+                self.backgroundPlayback = nil
+                if self.model.player.currentItem === intent.0 {
+                    self.model.setRate(intent.2)
+                    if intent.1 { self.model.player.play() }
+                    else { self.model.player.pause() }
+                }
+            }
+            self.updateLoadingIndicator()
+            self.refreshOrientationPolicy()
+            self.setFullscreenButtonVisible(true, animated: false)
+            self.scheduleControlsAutoHide()
+            self.deviceOrientationChanged()
+        }
+    }
+    func recordLifecycle(_ stage: NativeStage) {
+        let time = model.player.currentTime().seconds
+        NativeTrace.mark(stage, [
+            "fullscreen": fullscreen == nil ? 0 : 1,
+            "exiting": exitingFullscreen ? 1 : 0,
+            "presented": presentedViewController === fullscreen && fullscreen != nil ? 1 : 0,
+            "presenting": fullscreen?.isBeingPresented == true ? 1 : 0,
+            "dismissing": fullscreen?.isBeingDismissed == true ? 1 : 0,
+            "fullscreenWindow": fullscreen?.viewIfLoaded?.window == nil ? 0 : 1,
+            "inlineWindow": viewIfLoaded?.window == nil ? 0 : 1,
+            "parentFullscreen": fullscreen != nil && controller.parent === fullscreen ? 1 : 0,
+            "parentInline": controller.parent === self ? 1 : 0,
+            "rendererBound": controller.player === model.player ? 1 : 0,
+            "ready": controller.isReadyForDisplay ? 1 : 0,
+            "itemStatus": model.player.currentItem?.status.rawValue ?? -1,
+            "playStatus": model.player.timeControlStatus.rawValue,
+            "positionMs": time.isFinite ? Int(max(0, time) * 1000) : 0,
+        ])
+    }
     func shutdown() {
+        loadingStopped = true
+        loadingDelay?.cancel(); loadingDelay = nil
+        loadingObservations.forEach { $0.invalidate() }; loadingObservations = []
+        loadingItemObservation?.invalidate(); loadingItemObservation = nil
+        loadingView.isHidden = true; loadingSpinner.stopAnimating()
+        foregroundRecovery?.cancel()
+        backgroundPlayback = nil
         playbackControls?.stop()
         controlsAutoHide?.cancel()
         seekFeedbackTask?.cancel()

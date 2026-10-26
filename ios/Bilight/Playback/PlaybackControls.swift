@@ -99,7 +99,8 @@ import AVKit
         remaining.text = timeLabel(duration)
         progress.accessibilityValue = "\(timeLabel(position)) / \(timeLabel(duration))"
     }
-    @objc private func togglePlayback() {
+    @objc func togglePlayback() {
+        guard play.isEnabled else { return }
         if player.timeControlStatus == .paused {
             if duration > 0, player.currentTime().seconds >= duration - 0.1 { player.seek(to: .zero) }
             player.play()

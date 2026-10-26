@@ -35,6 +35,12 @@ if (write) {
   if (existsSync(promotion)) writeFileSync(resolve(promotion, 'Video/public/assets/brand/manifest.json'), JSON.stringify({ ...manifest, sourceHashes: hashes }, null, 2) + '\n');
 }
 const failures = [];
+if (manifest.name !== 'Bilight') failures.push('品牌名称必须统一为 Bilight');
+for (const [path, required] of [
+  ['src/App.tsx', '<span>Bilight</span>'],
+  ['src/Login.tsx', 'Bilight Account'],
+  ['ios/Bilight/Features/SearchView.swift', 'Text("Bilight")'],
+]) if (!readFileSync(resolve(root, path), 'utf8').includes(required)) failures.push(`品牌文字大小写不统一：${path}`);
 for (const [name, path] of targets) if (!existsSync(resolve(root, path)) || digest(readFileSync(resolve(root, path))) !== hashes[name]) failures.push(`旧品牌副本：${path}`);
 const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath)) : {};
 if (JSON.stringify(lock.sourceHashes) !== JSON.stringify(hashes)) failures.push('App 图标生成记录未同步');
@@ -71,7 +77,7 @@ if (existsSync(promotion) && !write) {
     vectorFolders.push(resolve(versionRoot, 'Cover'));
     if (episode.id === '001-introduction') {
       const release = JSON.parse(readFileSync(resolve(versionRoot, 'manifest.json')));
-      const exported = resolve(versionRoot, release.exportDirectory), change = JSON.parse(readFileSync(resolve(exported, 'brand-change.json')));
+      const exported = resolve(versionRoot, release.exportDirectory), change = JSON.parse(readFileSync(resolve(exported, 'Attachments/brand-change.json')));
       if (JSON.stringify(change.sourceHashes) !== JSON.stringify(hashes)) failures.push('当前成片未使用最新品牌源，请重新渲染');
       for (const [name, expected] of Object.entries(change.screenshots ?? {})) if (digest(readFileSync(resolve(promotion, 'Screenshots', name))) !== expected) failures.push(`当前成片还在使用旧截图：${name}`);
     }

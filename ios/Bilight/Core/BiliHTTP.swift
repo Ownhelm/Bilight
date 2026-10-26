@@ -6,6 +6,7 @@ enum NativeStage: String {
     case prepareFailure, playerFailure, segmentReady
     case downloadFinished, downloadFailed
     case offlineReady
+    case playbackResigned, playbackBackgrounded, playbackForegrounding, playbackActivated
     case fullscreenChanged
     case playbackWaiting, playbackRunning
     case supportReady

@@ -43,7 +43,7 @@ struct SearchView: View {
                                     VStack(spacing: 12) {
                                         HStack(spacing: 8) {
                                             Image("PlaybackMark").renderingMode(.template).resizable().scaledToFit().frame(width: 36, height: 32)
-                                            Text("bilight").font(.system(size: 36, weight: .bold, design: .rounded))
+                                            Text("Bilight").font(.system(size: 36, weight: .bold, design: .rounded))
                                         }.foregroundStyle(Color.biliPink)
                                             .accessibilityElement(children: .ignore).accessibilityLabel("Bilight")
                                             .accessibilityAddTraits(.isHeader)

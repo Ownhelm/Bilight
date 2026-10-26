@@ -10,11 +10,22 @@ import SwiftUI
         WindowGroup {
             Group {
                 #if DEBUG
-                    if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
+                    if InteractionRegression.player { PlaybackLifecycleRegressionView() }
+                    else if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
                 #else
                     RootView()
                 #endif
-            }.environmentObject(app).onChange(of: scene) { _, phase in
+            }.environmentObject(app).onChange(of: scene) { old, phase in
+                let stage: NativeStage = phase == .active ? .playbackActivated : (phase == .background ? .playbackBackgrounded : (old == .background ? .playbackForegrounding : .playbackResigned))
+                if let player = PlaybackOrientationDelegate.active {
+                    player.recordLifecycle(stage)
+                    switch phase {
+                    case .inactive: player.resignPlaybackActivity()
+                    case .background: player.backgroundPlaybackActivity()
+                    case .active: player.activatePlaybackActivity()
+                    @unknown default: break
+                    }
+                } else { NativeTrace.mark(stage, ["container": 0]) }
                 if phase == .background { app.downloads.requestBackgroundTime() }
                 if phase == .active, app.user != nil { app.downloads.resumeInterrupted() }
             }.task {

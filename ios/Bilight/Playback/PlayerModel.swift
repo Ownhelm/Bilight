@@ -9,6 +9,10 @@ final class PlaybackPreferences {
         get { defaults.bool(forKey: "bilight.playback.danmaku") }
         set { defaults.set(newValue, forKey: "bilight.playback.danmaku") }
     }
+    var danmakuArea: DanmakuArea {
+        get { DanmakuArea(rawValue: defaults.double(forKey: "bilight.playback.danmakuArea")) ?? .full }
+        set { defaults.set(newValue.rawValue, forKey: "bilight.playback.danmakuArea") }
+    }
     var quality: Int {
         get {
             let value = defaults.integer(forKey: "bilight.playback.quality")
@@ -31,6 +35,9 @@ final class PlaybackPreferences {
     @Published var rate: Float = 1
     @Published var danmakuEnabled = false
     @Published var danmakuFontSize: CGFloat = 20
+    @Published var danmakuArea: DanmakuArea = .full {
+        didSet { preferences.danmakuArea = danmakuArea }
+    }
     @Published var danmakuItems: [Danmaku] = []
     @Published var danmakuRevision = UUID()
     @Published var danmakuError: String?
@@ -56,6 +63,7 @@ final class PlaybackPreferences {
     init(preferences: PlaybackPreferences = PlaybackPreferences()) {
         self.preferences = preferences
         danmakuEnabled = preferences.danmakuEnabled
+        danmakuArea = preferences.danmakuArea
         player.actionAtItemEnd = .pause
         observer = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main

@@ -4,7 +4,7 @@
 
 安装 [RedirectWeb 免费版](https://redirectweb.net/introduction)，在 Safari 设置 → 扩展中启用。免费版只需一条启用规则；不需要购买订阅。当前 Safari 的 DNR 功能仍由扩展作者标为实验功能，必须用下面的例子实际验证。
 
-可将本项目的 [bilight.redirectweb](bilight.redirectweb) 拖进 RedirectWeb 窗口，或通过 File → Import Rules 导入。文件使用[官方规则库的原生导出格式](https://github.com/mshibanami/redirect-web/tree/main/library)和[官方 DNR 示例](https://github.com/mshibanami/redirect-web/blob/main/library/rule-sets/19_youtube_shorts_to_normal_videos/rule-set.json)，只包含一条启用规则。官方公开样例没有显式编码 Raw 选项，因此导入后仍需打开 Advanced，将 Main Frame Redirection 确认为 **Raw**；不要把文件已生成理解为 Safari 中已安装或验收。
+可将本项目的 [Bilight 跳转规则](bilight.redirectweb) 拖进 RedirectWeb 窗口，或通过 File → Import Rules 导入。文件使用[官方规则库的原生导出格式](https://github.com/mshibanami/redirect-web/tree/main/library)和[官方 DNR 示例](https://github.com/mshibanami/redirect-web/blob/main/library/rule-sets/19_youtube_shorts_to_normal_videos/rule-set.json)，只包含一条启用规则。官方公开样例没有显式编码 Raw 选项，因此导入后仍需打开 Advanced，将 Main Frame Redirection 确认为 **Raw**；不要把文件已生成理解为 Safari 中已安装或验收。
 
 也可手动新建规则：Type 选择 **DNR**，URL Pattern 选择 **Regular Expression**，Resource Types 只选 **main_frame**，Main Frame Redirection 选择 **Raw**。只保留这条规则启用，避免免费版一条启用规则的限制。
 

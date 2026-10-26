@@ -257,8 +257,24 @@ final class VideoSupportTests: XCTestCase {
         model.setSubtitlesEnabled(true)
         XCTAssertNil(model.selectedSubtitle)
     }
+    @MainActor func testDanmakuAreaRestoresAcrossPlayersAndInvalidStoredValueFallsBack() throws {
+        let suite = "Bilight-area-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = PlaybackPreferences(defaults: defaults)
+        XCTAssertEqual(preferences.danmakuArea, .full)
+        let model = PlayerModel(preferences: preferences)
+        defer { model.stop() }
+        model.danmakuArea = .quarter
+        let next = PlayerModel(preferences: PlaybackPreferences(defaults: try XCTUnwrap(UserDefaults(suiteName: suite))))
+        defer { next.stop() }
+        XCTAssertEqual(next.danmakuArea, .quarter)
+        defaults.set(0.1, forKey: "bilight.playback.danmakuArea")
+        XCTAssertEqual(preferences.danmakuArea, .full)
+    }
     @MainActor func testPlayerSettingsGroupCaptionsAndMinimalDanmakuControls() throws {
-        let model = PlayerModel()
+        let suite = "Bilight-area-menu-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = PlayerModel(preferences: PlaybackPreferences(defaults: defaults))
         defer { model.stop() }
         let player = NativePlayer(model: model, onDanmaku: { model.danmakuEnabled = $0 }, onQuality: { _ in })
         func section(_ title: String) throws -> UIMenu {
@@ -286,7 +302,16 @@ final class VideoSupportTests: XCTestCase {
         let danmaku = try section("弹幕")
         XCTAssertEqual((danmaku.children[0] as? UIAction)?.state, .on)
         let sizes = try XCTUnwrap(danmaku.children[1] as? UIMenu)
-        XCTAssertEqual(danmaku.children.count, 2)
+        XCTAssertEqual(danmaku.children.count, 3)
+        let area = try XCTUnwrap(danmaku.children[2] as? UIMenu)
+        XCTAssertEqual(area.title, "显示区域")
+        XCTAssertTrue(area.options.contains(.displayInline))
+        XCTAssertTrue(area.options.contains(.singleSelection))
+        XCTAssertEqual(area.children.map(\.title), ["1/4", "1/2", "3/4", "全屏"])
+        perform(try XCTUnwrap(area.children[1] as? UIAction))
+        XCTAssertEqual(model.danmakuArea, .half)
+        let updatedArea = try XCTUnwrap(section("弹幕").children[2] as? UIMenu)
+        XCTAssertEqual((updatedArea.children[1] as? UIAction)?.state, .on)
         perform(try XCTUnwrap(sizes.children.last as? UIAction))
         XCTAssertEqual(model.danmakuFontSize, 24)
         perform(try XCTUnwrap(section("弹幕").children.first as? UIAction))

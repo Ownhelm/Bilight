@@ -34,7 +34,7 @@ export function Login({ onClose, onSuccess }: { onClose: () => void; onSuccess: 
   }, []);
   return <dialog ref={dialog} className="login-dialog" aria-labelledby="login-title" onCancel={onClose} onClick={event => { if (event.target === event.currentTarget) onClose(); }}>
     <div className="login-surface"><button className="icon-button modal-close" aria-label="关闭登录" onClick={onClose}><X /></button>
-      <span className="login-label">BILIGHT ACCOUNT</span><h2 id="login-title">登录你的哔哩哔哩</h2><p className="login-intro">连接账号后，查看你关注的更新。</p>
+      <span className="login-label">Bilight Account</span><h2 id="login-title">登录你的哔哩哔哩</h2><p className="login-intro">连接账号后，查看你关注的更新。</p>
       <div className="login-tabs" role="tablist" aria-label="登录方式"><button role="tab" aria-selected={mode === 'qr'} className={mode === 'qr' ? 'active' : ''} onClick={() => setMode('qr')}><QrCode size={19} />扫码登录</button><button role="tab" aria-selected={mode === 'sms'} className={mode === 'sms' ? 'active' : ''} onClick={() => setMode('sms')}><DeviceMobile size={19} />短信登录</button></div>
       {mode === 'qr' ? <QrLogin onSuccess={onSuccess} /> : <SmsLogin onSuccess={onSuccess} />}
       <p className="login-note">使用哔哩哔哩账号，无需注册新账号。登录凭据只保存在你的本地服务中。</p>

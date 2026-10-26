@@ -45,7 +45,7 @@ export function App() {
   }
   const isHome = location.pathname === '/';
   return <><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
-    <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>bilight</span></Link>
+    <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
     <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following"><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
       {auth?.authenticated && auth.user ? <details className="account-menu"><summary aria-label={`账号：${auth.user.name}`}><img src={auth.user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary><div className="account-popover"><p>{auth.user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span><button onClick={() => void logout()} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button></div></details> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}

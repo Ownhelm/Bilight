@@ -5,6 +5,155 @@ import XCTest
 @testable import Bilight
 
 final class PlayerChromeTests: XCTestCase {
+    @MainActor func testDoubleTapUsesFortyTwentyFortyZonesAtEveryPlayerWidth() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let model = PlayerModel()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        model.playback = Playback(quality: 80, qualities: [], duration: 12, mp4: media)
+        model.player.replaceCurrentItem(with: AVPlayerItem(url: media))
+        let host = UIHostingController(rootView: NativePlayer(model: model, onQuality: { _ in }))
+        window.rootViewController = root; root.addChild(host); root.view.addSubview(host.view); host.didMove(toParent: root); window.makeKeyAndVisible()
+        defer { containers(root).forEach { $0.shutdown() }; model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        try await Task.sleep(for: .milliseconds(100))
+        let container = try XCTUnwrap(containers(root).first)
+        for width: CGFloat in [320, 440, 874] {
+            host.view.frame = CGRect(x: 0, y: 100, width: width, height: 240); host.view.layoutIfNeeded(); container.view.layoutIfNeeded()
+            for (fraction, expected): (CGFloat, Double) in [(0.0, 0), (0.399, 0), (0.4, 5), (0.599, 5), (0.6, 12), (0.999, 12)] {
+                model.player.pause()
+                await model.player.seek(to: CMTime(seconds: 5, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+                container.handleDoubleTap(at: CGPoint(x: container.controller.view.bounds.width * fraction, y: 80))
+                try await Task.sleep(for: .milliseconds(40))
+                XCTAssertEqual(model.player.currentTime().seconds, expected, accuracy: 0.15)
+                if fraction >= 0.4 && fraction < 0.6 {
+                    XCTAssertNotEqual(model.player.timeControlStatus, .paused)
+                    container.handleDoubleTap(at: CGPoint(x: container.controller.view.bounds.midX, y: 80))
+                }
+                XCTAssertEqual(model.player.timeControlStatus, .paused, "Seeking preserves pause; the center toggles playback without seeking")
+            }
+        }
+    }
+    @MainActor func testBackgroundForegroundRebindsSameFullscreenPlayerAndPreservesPausedIntent() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let model = PlayerModel()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        model.player.replaceCurrentItem(with: AVPlayerItem(url: media))
+        let host = UIHostingController(rootView: NativePlayer(model: model, onQuality: { _ in }))
+        window.rootViewController = root; root.addChild(host); root.view.addSubview(host.view); host.didMove(toParent: root)
+        host.view.frame = CGRect(x: 0, y: 100, width: window.bounds.width, height: 240); window.makeKeyAndVisible()
+        defer { containers(root).forEach { $0.shutdown() }; model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        try await Task.sleep(for: .milliseconds(100))
+        let container = try XCTUnwrap(containers(root).first), item = try XCTUnwrap(model.player.currentItem)
+        for playing in [true, false, true] {
+            if playing { model.player.play() } else { model.player.pause() }
+            try await Task.sleep(for: .milliseconds(150))
+            container.enterFullscreen(rotate: false)
+            try await Task.sleep(for: .milliseconds(120))
+            let position = model.player.currentTime().seconds
+            container.resignPlaybackActivity()
+            container.backgroundPlaybackActivity()
+            XCTAssertTrue(container.controller.player === model.player, "Paused background playback retains the last render surface instead of clearing it")
+            XCTAssertTrue(model.player.currentItem === item)
+            XCTAssertEqual(model.player.timeControlStatus, .paused)
+            container.exitFullscreen()
+            XCTAssertNotNil(container.presentedViewController, "Fullscreen dismissal is deferred while inactive")
+            container.activatePlaybackActivity()
+            let deadline = Date().addingTimeInterval(2.5)
+            while Date() < deadline && container.presentedViewController != nil {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertTrue(container.controller.player === model.player)
+            XCTAssertTrue(model.player.currentItem === item)
+            XCTAssertNil(container.presentedViewController)
+            XCTAssertFalse(model.isFullscreen)
+            XCTAssertTrue(container.controller.parent === container)
+            XCTAssertGreaterThanOrEqual(model.player.currentTime().seconds, position - 0.05)
+            if playing { XCTAssertNotEqual(model.player.timeControlStatus, .paused) }
+            else { XCTAssertEqual(model.player.timeControlStatus, .paused) }
+        }
+        // Home can interrupt presentation itself, before UIKit calls its completion.
+        container.enterFullscreen(rotate: false, animated: true)
+        container.resignPlaybackActivity(); container.backgroundPlaybackActivity()
+        container.activatePlaybackActivity()
+        try await Task.sleep(for: .milliseconds(700))
+        XCTAssertTrue(container.controller.player === model.player)
+        XCTAssertTrue(model.player.currentItem === item)
+        XCTAssertNotNil(container.controller.view.window)
+        container.exitFullscreen()
+    }
+    @MainActor func testDanmakuAreaConstrainsAllModesAndUpdatesWhilePausedWithoutReloading() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let overlay = DanmakuOverlay(frame: CGRect(x: 0, y: 60, width: 400, height: 240))
+        window.rootViewController = root; root.view.addSubview(overlay); window.makeKeyAndVisible()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let player = AVPlayer(url: media), revision = UUID()
+        let items = (0..<28).map { Danmaku(id: $0, time: 0, text: "区域边界 \($0)", mode: [1, 4, 5, 6][$0 % 4], color: 0xffffff) }
+        defer { overlay.removeFromSuperview(); player.pause(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        for size in [CGSize(width: 320, height: 180), CGSize(width: 440, height: 240), CGSize(width: 700, height: 320)] {
+            overlay.frame.size = size
+            for fontSize: CGFloat in [16, 20, 24] {
+                for area in DanmakuArea.allCases {
+                    overlay.update(player: player, items: items, enabled: true, revision: revision, fontSize: fontSize, area: area)
+                    try await Task.sleep(for: .milliseconds(40))
+                    let labels = overlay.subviews.compactMap { $0 as? UILabel }
+                    XCTAssertFalse(labels.isEmpty)
+                    for label in labels {
+                        XCTAssertGreaterThanOrEqual(label.frame.minY, 0)
+                        XCTAssertLessThanOrEqual(label.frame.maxY, size.height * area.rawValue + 0.5, "Every mode stays inside the selected upper area")
+                    }
+                    XCTAssertEqual(player.timeControlStatus, .paused)
+                }
+            }
+        }
+        overlay.frame.size = CGSize(width: 400, height: 240)
+        overlay.update(player: player, items: items, enabled: true, revision: revision, area: .full)
+        try await Task.sleep(for: .milliseconds(40))
+        let original = try XCTUnwrap(overlay.subviews.first { ($0 as? UILabel)?.text == "区域边界 0" })
+        overlay.update(player: player, items: items, enabled: true, revision: revision, area: .half)
+        try await Task.sleep(for: .milliseconds(40))
+        XCTAssertTrue(overlay.subviews.contains { $0 === original }, "Changing area repositions cached glyphs, without rebuilding or refetching them")
+    }
+    @MainActor func testDanmakuHasSolidGlyphInteriorsWithoutOverlappingStrokeBoxes() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let overlay = DanmakuOverlay(frame: CGRect(x: 0, y: 0, width: 900, height: 280))
+        window.rootViewController = root; root.view.addSubview(overlay); window.makeKeyAndVisible()
+        defer { overlay.removeFromSuperview(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let player = AVPlayer(url: media)
+        overlay.update(player: player, items: [Danmaku(id: 0, time: 0, text: "所以我现在交的算啥 没事，再给公务员涨点 遥遥领先", mode: 5, color: 0xff0000)], enabled: true, revision: UUID())
+        // Drive the same display-link path as live playback without a network or account.
+        try await Task.sleep(for: .milliseconds(100))
+        let label = try XCTUnwrap(overlay.subviews.first as? UILabel)
+        let reference = UILabel(frame: label.bounds)
+        reference.font = label.font; reference.text = label.text; reference.textColor = .white
+        func pixels(_ view: UIView) -> (UIImage, [UInt8]) {
+            let format = UIGraphicsImageRendererFormat(); format.scale = 3; format.opaque = false
+            let image = UIGraphicsImageRenderer(size: view.bounds.size, format: format).image { context in view.layer.render(in: context.cgContext) }
+            let cg = image.cgImage!, width = cg.width, height = cg.height
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            bytes.withUnsafeMutableBytes { buffer in
+                let context = CGContext(data: buffer.baseAddress, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+                context.draw(cg, in: CGRect(x: 0, y: 0, width: width, height: height))
+            }
+            return (image, bytes)
+        }
+        let (actualImage, actual) = pixels(label), (referenceImage, expected) = pixels(reference)
+        var interiors = 0, damaged = 0
+        for i in stride(from: 0, to: expected.count, by: 4) where expected[i + 3] >= 250 {
+            interiors += 1
+            if actual[i] < 230 || actual[i + 1] < 230 || actual[i + 2] < 230 { damaged += 1 }
+        }
+        for (name, image) in [("danmaku-actual", actualImage), ("danmaku-reference", referenceImage)] {
+            let attachment = XCTAttachment(image: image); attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+        let damage = Double(damaged) / Double(max(1, interiors))
+        print("[danmaku glyph coverage] interiorPixels=\(interiors) darkOrMissing=\(damaged) fraction=\(damage)")
+        XCTAssertGreaterThan(interiors, 1000)
+        XCTAssertLessThan(damage, 0.02, "A black outline must not cut boxes through the solid white glyph interiors")
+    }
     @MainActor func testDanmakuAvoidsCameraAndHomeSafeAreasAcrossFullscreenRotationWhilePaused() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
@@ -112,8 +261,9 @@ final class PlayerChromeTests: XCTestCase {
         let label = try XCTUnwrap(overlay.subviews.first { ($0 as? UILabel)?.text == "密集弹幕 0" } as? UILabel)
         XCTAssertEqual(overlay.alpha, 1, "Danmaku stays opaque over all video backgrounds")
         for text in overlay.subviews.compactMap({ $0 as? UILabel }) {
-            XCTAssertEqual(text.attributedText?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? UIColor, .white)
-            XCTAssertEqual(text.attributedText?.attribute(.strokeColor, at: 0, effectiveRange: nil) as? UIColor, .black)
+            XCTAssertEqual(text.textColor, .white)
+            XCTAssertNil(text.attributedText?.attribute(.strokeWidth, at: 0, effectiveRange: nil))
+            XCTAssertEqual(text.layer.shadowColor, UIColor.black.cgColor)
         }
         XCTAssertLessThanOrEqual(overlay.subviews.count, 7, "Dense input must keep the bounded number of rendered labels")
         try await assertSmoothMotion(label, milliseconds: 1000)

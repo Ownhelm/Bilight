@@ -101,7 +101,8 @@ struct NativePlayer: UIViewControllerRepresentable {
     }
     func updateUIViewController(_ container: PlayerContainer, context: Context) {
         let controller = container.controller
-        (controller.contentOverlayView?.viewWithTag(1744) as? DanmakuOverlay)?.update(player: model.player, items: model.danmakuItems, enabled: model.danmakuEnabled, revision: model.danmakuRevision, fontSize: model.danmakuFontSize)
+        container.updateLoadingIndicator()
+        (controller.contentOverlayView?.viewWithTag(1744) as? DanmakuOverlay)?.update(player: model.player, items: model.danmakuItems, enabled: model.danmakuEnabled, revision: model.danmakuRevision, fontSize: model.danmakuFontSize, area: model.danmakuArea)
         let label = controller.contentOverlayView?.viewWithTag(1742) as? UILabel
         label?.text = model.subtitleText
         label?.isHidden = model.subtitleText.isEmpty
@@ -144,6 +145,12 @@ struct NativePlayer: UIViewControllerRepresentable {
                 controls.append(UIMenu(title: "字号", children: sizes.map { label, size in
                     UIAction(title: label, state: model.danmakuFontSize == size ? .on : .off) { _ in
                         model.danmakuFontSize = size
+                    }
+                }))
+                // Inline choices keep area selection beside the size controls, with no extra menu level.
+                controls.append(UIMenu(title: "显示区域", options: [.displayInline, .singleSelection], children: DanmakuArea.allCases.map { area in
+                    UIAction(title: area.title, state: model.danmakuArea == area ? .on : .off) { _ in
+                        model.danmakuArea = area
                     }
                 }))
             }
@@ -251,9 +258,6 @@ struct PlaybackView: View {
                 Color.black
                 NativePlayer(model: model, onDanmaku: { model.setDanmakuEnabled($0, client: app.client, cid: part.cid) }) { quality in
                     model.selectQuality(quality, client: app.client, bvid: detail.video.bvid, part: part)
-                }
-                if model.busy && model.playback == nil {
-                    ProgressView("正在准备视频").tint(.white).foregroundStyle(.white).font(.caption)
                 }
             }.aspectRatio(16 / 9, contentMode: .fit)
             if let error = model.error {
