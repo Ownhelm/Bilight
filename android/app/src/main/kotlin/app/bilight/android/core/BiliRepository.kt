@@ -84,7 +84,12 @@ class BiliRepository(val http: BiliHttp) {
         if (relationVersion != version) invalidateFollowing()
         val epoch = relationEpoch
         val data = http.request("/x/polymer/web-dynamic/v1/feed/all",mapOf("type" to "all","platform" to "web","features" to "itemOpusStyle,opusBigCover,ugcDelete") + (cursor?.let { mapOf("offset" to it) } ?: emptyMap()))
-        if (!data.has("has_more") || (data.optJSONArray("items") == null && data.optInt("has_more") != 0)) invalid()
+        val more=when(val value=data.opt("has_more")) {
+            is Boolean -> value
+            is Number -> when(value.toDouble()) { 0.0 -> false;1.0 -> true;else -> invalid() }
+            else -> invalid()
+        }
+        if (data.optJSONArray("items") == null && more) invalid()
         val posts = data.rows("items").mapNotNull { Post.parse(it) }.distinctBy { it.id }
         val missing = posts.map { it.author.mid }.distinct().filter { (relationCache[it]?.second ?: 0L) < System.currentTimeMillis() }
         for (batch in missing.chunked(20)) {
@@ -101,7 +106,7 @@ class BiliRepository(val http: BiliHttp) {
         }
         http.check(version)
         if (epoch != relationEpoch) throw CancellationException("关注关系已变化")
-        val more = data.optInt("has_more") == 1; val next = data.text("offset")
+        val next = data.text("offset")
         if (more && (next.isEmpty() || next == cursor)) throw BiliFailure("CURSOR_LOOP","动态分页暂时异常，请下拉刷新。")
         Page(posts.filter { relationCache[it.author.mid]?.first?.following == true },more,next.takeIf { more })
     } } catch (_: TimeoutCancellationException) { throw BiliFailure("FOLLOW_TIMEOUT","关注动态读取超时，请重试。") }

@@ -125,7 +125,12 @@ import kotlinx.coroutines.launch
     var userScrolled by remember { mutableStateOf(false) }
     val connection = remember { object: NestedScrollConnection { override fun onPreScroll(available: Offset,source: NestedScrollSource): Offset { if (source==NestedScrollSource.UserInput && available.y < 0) userScrolled=true; return Offset.Zero } } }
     LaunchedEffect(app.user?.mid) { if (app.user!=null && !app.feedLoaded) app.loadFeed() }
-    LaunchedEffect(list,app.following.size) { snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0 }.collect { last -> if (userScrolled && app.feedMore && !app.feedBusy && last >= app.following.size-2) { userScrolled=false; app.loadFeed() } } }
+    LaunchedEffect(list) {
+        snapshotFlow {
+            userScrolled && app.feedMore && !app.feedBusy && app.feedError==null &&
+                (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1) >= (app.following.size-2).coerceAtLeast(0)
+        }.collect { ready -> if (ready) { userScrolled=false;app.loadFeed() } }
+    }
     DisposableEffect(Unit) { onDispose { if (app.sessionRevision==revision) { app.feedIndex=list.firstVisibleItemIndex; app.feedOffset=list.firstVisibleItemScrollOffset; app.feedAnchor=app.following.getOrNull(list.firstVisibleItemIndex)?.id } } }
     Column(modifier) {
         Text("我的关注",Modifier.padding(horizontal=20.dp,vertical=12.dp),fontSize=25.sp,fontWeight=FontWeight.Bold)
