@@ -92,6 +92,39 @@ class PlaybackControlsTest {
         rule.runOnIdle { model.settings=true }
         capture("01-last-quality")
     }
+    @Test fun fullscreenSeekBarFillsTheControlRowAndDragsAcrossItsWidth() = fixture { _,model ->
+        val original=model.player
+        rule.onNodeWithContentDescription("全屏").performClick()
+        await("Portrait fullscreen did not open") { model.fullscreen && model.portraitFullscreen }
+        fun checkSeekBar(name: String) {
+            rule.runOnIdle { model.controlsVisible=true }
+            val slider=rule.onNodeWithContentDescription("播放进度")
+            val bounds=slider.getUnclippedBoundsInRoot()
+            val play=rule.onNodeWithContentDescription("播放").getUnclippedBoundsInRoot()
+            val exit=rule.onAllNodesWithContentDescription("退出全屏").fetchSemanticsNodes().maxBy { it.boundsInRoot.left }
+            val density=rule.activity.resources.displayMetrics.density
+            // IconButton's semantics can exclude its small outer padding.
+            assertEquals("Seek bar leaves an unused gap after play",play.right.value,bounds.left.value,8f)
+            assertEquals("Seek bar leaves an unused gap before fullscreen",exit.boundsInRoot.left/density,bounds.right.value,8f)
+            slider.performTouchInput { swipe(Offset(width*.08f,centerY),Offset(width*.92f,centerY),600) }
+            rule.runOnIdle {
+                assertEquals("Full-width dragging did not seek near the right edge",model.duration*.92,model.player.currentPosition.toDouble(),model.duration*.06)
+                assertSame(original,model.player); assertTrue(model.fullscreen)
+                assertFalse(model.player.playWhenReady); assertEquals(1.5f,model.player.playbackParameters.speed)
+            }
+            slider.performTouchInput { swipe(Offset(width*.92f,centerY),Offset(width*.08f,centerY),600) }
+            rule.runOnIdle { assertEquals("Full-width dragging did not seek near the left edge",model.duration*.08,model.player.currentPosition.toDouble(),model.duration*.06) }
+            capture(name)
+        }
+        checkSeekBar("03-portrait-seek-width")
+        rule.runOnIdle {
+            model.portraitFullscreen=false
+            rule.activity.requestedOrientation=android.content.pm.ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
+            model.controlsVisible=true
+        }
+        await("Landscape fullscreen did not open") { rule.activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE }
+        checkSeekBar("04-landscape-seek-width")
+    }
     @Test fun nativeQualitySwitchAndDoubleTapZonesPreservePlaybackAndFullscreen() = fixture { _,model ->
         val original=model.player
         rule.onNodeWithContentDescription("全屏").performClick()

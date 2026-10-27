@@ -196,12 +196,10 @@ import kotlin.math.min
             Spacer(Modifier.weight(1f))
             Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
                 IconButton(onClick={ model.toggle(); interaction++ }) { Icon(if (model.playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,if (model.playing) "暂停" else "播放",tint=Color.White) }
-                BoxWithConstraints(Modifier.weight(1f),contentAlignment=Alignment.Center) {
-                    // A compact seek control: keep its touch height without spanning the video width.
-                    val trackWidth=minOf(maxWidth*.65f,240.dp)
+                Box(Modifier.weight(1f)) {
                     Slider(value=if (dragging) dragPosition else model.position.toFloat().coerceIn(0f,model.duration.coerceAtLeast(1).toFloat()),
                         onValueChange={ dragging=true; dragPosition=it },onValueChangeFinished={ model.seek(dragPosition.toLong()); dragging=false; interaction++ },valueRange=0f..model.duration.coerceAtLeast(1).toFloat(),
-                        modifier=Modifier.width(trackWidth).heightIn(min=44.dp).semantics { contentDescription="播放进度"; stateDescription="${clock(model.position/1000)} / ${clock(model.duration/1000)}" },
+                        modifier=Modifier.fillMaxWidth().heightIn(min=44.dp).semantics { contentDescription="播放进度"; stateDescription="${clock(model.position/1000)} / ${clock(model.duration/1000)}" },
                         thumb={ Spacer(Modifier.size(12.dp)) },
                         track={ state -> Canvas(Modifier.fillMaxWidth().height(12.dp)) {
                             val fraction=(state.value/model.duration.coerceAtLeast(1)).coerceIn(0f,1f)
