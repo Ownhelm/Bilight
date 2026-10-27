@@ -38,5 +38,8 @@ jobs:
           cache-dependency-path: |
             android/**/*.gradle.kts
             android/gradle/libs.versions.toml
-      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - uses: android-actions/setup-android@be39fa834029ff78f1a44aa3bb0819b8fc2bd8fd # v4.0.4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          log-accepted-android-sdk-licenses: 'false'
       - run: ./android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain
