@@ -1,6 +1,6 @@
-# Bilight Android（开发中）
+# Bilight Android
 
-Android 客户端使用 Kotlin、Jetpack Compose 和 Media3，直接连接 B 站，不依赖 Mac 后端或 Docker。功能及真机验收仍在进行，完整对照见 `../docs/android-parity.md`；不能把可构建的开发包视为正式发布版。
+Android 客户端使用 Kotlin、Jetpack Compose 和 Media3，直接连接 B 站，不依赖 Mac 后端或 Docker，已提供可安装的签名 APK。支持搜索、关注动态、UP 主投稿与合集、收藏、云端历史、视频播放和离线下载；详细验收记录见 `../docs/android-parity.md`。
 
 ## 预览版安装
 

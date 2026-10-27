@@ -1,9 +1,9 @@
 <p align="center"><img src="branding/project-mark.svg" width="80" alt="Bilight"></p>
 <h1 align="center">Bilight</h1>
 <p align="center"><strong>搜你所想，看你所选。</strong></p>
-<p align="center">一个只保留搜索与关注的 B 站客户端。支持 iPhone、Android 预览版与通过 Docker 本地部署的电脑客户端。</p>
+<p align="center">一个只保留搜索与关注的 B 站客户端。支持手机端（iPhone／安卓）与通过 Docker 本地部署的电脑客户端。</p>
 <p align="center">
-  <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-303440?style=flat-square">
+  <img alt="手机端 · iPhone / 安卓" src="https://img.shields.io/badge/%E6%89%8B%E6%9C%BA%E7%AB%AF-iPhone%20%2F%20Android-303440?style=flat-square">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-本地部署-76b9db?style=flat-square">
   <img alt="MIT" src="https://img.shields.io/badge/License-MIT-ed7a9e?style=flat-square">
 </p>
@@ -23,11 +23,11 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 ## 界面预览
 
-### iOS
+### 手机端
 
 | 首页搜索 | 关注动态 | 我的账号 |
 | :---: | :---: | :---: |
-| <img src="docs/assets/ios-home.png" width="240" alt="iOS 首页搜索"> | <img src="docs/assets/ios-following.png" width="240" alt="iOS 关注动态"> | <img src="docs/assets/ios-account.png" width="240" alt="iOS 我的账号"> |
+| <img src="docs/assets/ios-home.png" width="240" alt="手机端首页搜索"> | <img src="docs/assets/ios-following.png" width="240" alt="手机端关注动态"> | <img src="docs/assets/ios-account.png" width="240" alt="手机端我的账号"> |
 
 ### 网页端
 
@@ -47,17 +47,17 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 | 功能 | iPhone 客户端 | 安卓客户端 | 电脑客户端 |
 | :--- | :--- | :--- | :--- |
-| 搜索视频、UP 主、BV 号或链接 | ✓ | 开发中 | ✓ |
-| 关注内容 | 视频、文字、图文、转发等动态，单列浏览 | 开发中 | 关注视频，多列网格整行加载 |
-| UP 主投稿、合集和列表 | ✓ | 开发中 | ✓ |
-| 关注／取消关注 UP 主 | ✓ | 开发中 | — |
-| 画质、倍速、分 P、字幕 | 横／竖屏全屏、双击快进 | 开发中 | 全屏、键盘快进 |
-| 点赞、投币、收藏 | 独立操作、收藏夹选择、长按点赞三连 | 开发中 | 独立操作、收藏夹选择、长按点赞三连 |
-| 账号入口 | 我的关注的人、我的收藏、我的下载、常访问的 UP 主 | 开发中 | 已登录账号与退出 |
-| 云端观看历史与真实进度同步 | ✓ | 开发中 | ✓ |
-| 视频下载、App 内离线播放与文件导出 | ✓ | 开发中 | — |
-| 评论 | 只读 | 开发中 | 只读 |
-| 弹幕 | 只读，可开关 | 开发中 | 只读，可开关 |
+| 搜索视频、UP 主、BV 号或链接 | ✓ | ✓ | ✓ |
+| 关注内容 | 视频、文字、图文、转发等动态，单列浏览 | 视频、文字、图文、转发等动态，单列浏览 | 关注视频，多列网格整行加载 |
+| UP 主投稿、合集和列表 | ✓ | ✓ | ✓ |
+| 关注／取消关注 UP 主 | ✓ | ✓ | — |
+| 画质、倍速、分 P、字幕 | 横／竖屏全屏、双击快进 | 横／竖屏全屏、双击快进／快退、画质记忆 | 全屏、键盘快进 |
+| 点赞、投币、收藏 | 独立操作、收藏夹选择、长按点赞三连 | 独立操作、收藏夹选择、长按点赞三连 | 独立操作、收藏夹选择、长按点赞三连 |
+| 账号入口 | 我的关注的人、我的收藏、我的下载、常访问的 UP 主 | 我的关注的人、我的收藏、我的下载、常访问的 UP 主 | 已登录账号与退出 |
+| 云端观看历史与真实进度同步 | ✓ | ✓ | ✓ |
+| 视频下载、App 内离线播放与文件导出 | ✓ | ✓ | — |
+| 评论 | 只读 | 只读，支持展开与分页 | 只读 |
+| 弹幕 | 只读，可开关 | 只读，可开关，支持字号、透明度和显示范围设置 | 只读，可开关 |
 
 ## 日常使用
 
@@ -104,7 +104,7 @@ docker compose up -d --build
 
 支持 Android 8.0 及以上。下载 [Android 预览版 APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.3/Bilight-v0.1.3-android-preview.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
 
-当前为开发预览版本，功能与不同机型的兼容性仍在完善。APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
+APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
 
 ## 反馈与参与
 
