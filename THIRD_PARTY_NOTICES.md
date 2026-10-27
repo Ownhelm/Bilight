@@ -13,7 +13,13 @@ Bilight 原创代码与自制演示素材采用 MIT 许可。依赖分别沿用�
 | [ArtPlayer](https://github.com/zhw2590582/ArtPlayer) | 网页播放器与弹幕插件 | MIT |
 | [dash.js](https://github.com/Dash-Industry-Forum/dash.js) | DASH 音视频 | BSD-3-Clause |
 | [Phosphor Icons](https://github.com/phosphor-icons/react) | 网页图标 | MIT |
+| [AndroidX / Jetpack Compose](https://github.com/androidx/androidx) | Android 界面与系统组件 | Apache-2.0 |
+| [Media3](https://github.com/androidx/media) | Android 播放器 | Apache-2.0 |
+| [OkHttp / Okio](https://github.com/square/okhttp) | Android 网络与流式读取 | Apache-2.0 |
+| [Coil](https://github.com/coil-kt/coil) | Android 图片加载 | Apache-2.0 |
+| [ZXing](https://github.com/zxing/zxing) | Android 登录二维码 | Apache-2.0，保留其附带声明 |
+| [Kotlin / kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | Android 运行时与协程 | Apache-2.0 |
 
-锁定的完整依赖树以 `package-lock.json` 为准；其余依赖的许可可查看各包的 LICENSE。Docker 保留 npm 包的上游许可，网页所用的主要依赖许可副本见 `docs/licenses/`。iOS 使用 Apple 系统框架，没有捆绑第三方播放器 SDK。
+网页锁定的完整依赖树以 `package-lock.json` 为准；其余依赖的许可可查看各包的 LICENSE。Docker 保留 npm 包的上游许可，网页所用的主要依赖许可副本见 `docs/licenses/`。Android 依赖版本记录在 Gradle 配置中，主要依赖许可随 APK 打包在 `assets/licenses/`。iOS 使用 Apple 系统框架，没有捆绑第三方播放器 SDK。
 
 [FocuBili](https://github.com/L1Xu4n/FocuBili) 仅作为专注观看的产品参考，未移植其代码。README 布局参考 ArtPlayer 和 Immich 的信息组织方式，未复制其设计素材或代码。

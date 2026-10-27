@@ -5,5 +5,9 @@
     "playback": "e0715ef845eb9814d89fd921aeeb3ba0650f76e8be24c132a48f54f5c8822108",
     "appIcon": "36283013af68219bae0462e902c5ba84d3af352c581e84251b9d536aa43373e0"
   },
-  "appIconPngSha256": "abf422697c9c2a53c5cac2acfe58ba2953c00930a7c2bb5fd8eded76fe65585d"
+  "appIconPngSha256": "abf422697c9c2a53c5cac2acfe58ba2953c00930a7c2bb5fd8eded76fe65585d",
+  "androidPngHashes": {
+    "android/app/src/main/res/drawable-nodpi/brand_playback.png": "48ff3829916377eb71d173cdbc6471ab2fd9a36edab71b1a033e3fbf23d9b16f",
+    "android/app/src/main/res/drawable-nodpi/brand_app_icon.png": "ea80b458d598413ae98a8a2548ccde0622cbf358165738c046a24ebc2f053f21"
+  }
 }

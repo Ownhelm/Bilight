@@ -24,3 +24,19 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: xcodebuild -project ios/Bilight.xcodeproj -scheme Bilight -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath /tmp/bilight-ios CODE_SIGNING_ALLOWED=NO build
+  android:
+    name: Android 编译与隔离回归
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+          cache-dependency-path: |
+            android/**/*.gradle.kts
+            android/gradle/libs.versions.toml
+      - run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+      - run: ./android/gradlew -p android :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --console=plain

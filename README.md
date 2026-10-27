@@ -1,7 +1,7 @@
 <p align="center"><img src="branding/project-mark.svg" width="80" alt="Bilight"></p>
 <h1 align="center">Bilight</h1>
 <p align="center"><strong>搜你所想，看你所选。</strong></p>
-<p align="center">一个只保留搜索与关注的 B 站客户端。支持 iPhone 客户端与通过 Docker 本地部署的电脑客户端。</p>
+<p align="center">一个只保留搜索与关注的 B 站客户端。支持 iPhone、Android 预览版与通过 Docker 本地部署的电脑客户端。</p>
 <p align="center">
   <img alt="iOS 17+" src="https://img.shields.io/badge/iOS-17%2B-303440?style=flat-square">
   <img alt="Docker" src="https://img.shields.io/badge/Docker-本地部署-76b9db?style=flat-square">
@@ -99,6 +99,12 @@ docker compose up -d --build
 手机端使用 App 内官方登录页，**安装后可以独立使用，不需要电脑或 Docker 保持运行。**
 
 可从[发行版](https://github.com/Ownhelm/Bilight/releases)下载完整源码包和未签名 IPA。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
+
+### Android：安装 APK（预览版）
+
+支持 Android 8.0 及以上。下载 [Android 预览版 APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.3/Bilight-v0.1.3-android-preview.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
+
+当前为开发预览版本，功能与不同机型的兼容性仍在完善。APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
 
 ## 反馈与参与
 

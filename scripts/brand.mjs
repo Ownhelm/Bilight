@@ -15,6 +15,10 @@ const targets = [
   ['project', 'docs/assets/logo.svg'],
   ['playback', 'ios/Bilight/Assets.xcassets/PlaybackMark.imageset/playback-mark.svg'],
 ];
+const androidRasters = existsSync(resolve(root, 'android')) ? [
+  ['playback', 'android/app/src/main/res/drawable-nodpi/brand_playback.png', 256],
+  ['appIcon', 'android/app/src/main/res/drawable-nodpi/brand_app_icon.png', 512],
+] : [];
 const promotion = resolve(root, '../Promotion');
 const readmeScreenshots = ["ios-home.png", "ios-following.png", "ios-account.png", "web-home.png", "web-following.png", "web-collections.png"];
 if (existsSync(promotion)) targets.push(
@@ -36,7 +40,11 @@ if (write) {
   writeFileSync(imageset, JSON.stringify({ images: [{ filename: 'playback-mark.svg', idiom: 'universal' }], info: { author: 'xcode', version: 1 }, properties: { 'preserves-vector-representation': true, 'template-rendering-intent': 'template' } }, null, 2) + '\n');
   // AppIcon is a build resource; only this maintenance command needs librsvg.
   execFileSync('rsvg-convert', ['-w', '1024', '-h', '1024', resolve(root, manifest.marks.appIcon), '-o', resolve(root, 'ios/Bilight/Assets.xcassets/AppIcon.appiconset/AppIcon.png')]);
-  writeFileSync(lockPath, JSON.stringify({ revision: manifest.revision, sourceHashes: hashes, appIconPngSha256: digest(readFileSync(resolve(root, 'ios/Bilight/Assets.xcassets/AppIcon.appiconset/AppIcon.png'))) }, null, 2) + '\n');
+  for (const [name, path, size] of androidRasters) {
+    mkdirSync(dirname(resolve(root, path)), { recursive: true });
+    execFileSync('rsvg-convert', ['-w', String(size), '-h', String(size), resolve(root, manifest.marks[name]), '-o', resolve(root, path)]);
+  }
+  writeFileSync(lockPath, JSON.stringify({ revision: manifest.revision, sourceHashes: hashes, appIconPngSha256: digest(readFileSync(resolve(root, 'ios/Bilight/Assets.xcassets/AppIcon.appiconset/AppIcon.png'))), androidPngHashes: Object.fromEntries(androidRasters.map(([, path]) => [path, digest(readFileSync(resolve(root, path)))])) }, null, 2) + '\n');
   if (existsSync(promotion)) writeFileSync(resolve(promotion, 'Video/public/assets/brand/manifest.json'), JSON.stringify({ ...manifest, sourceHashes: hashes }, null, 2) + '\n');
 }
 const failures = [];
@@ -54,6 +62,7 @@ for (const [path, required] of [
 ]) if (!readFileSync(resolve(root, path), 'utf8').includes(required)) failures.push(`品牌文字大小写不统一：${path}`);
 for (const [name, path] of targets) if (!existsSync(resolve(root, path)) || digest(readFileSync(resolve(root, path))) !== hashes[name]) failures.push(`旧品牌副本：${path}`);
 const lock = existsSync(lockPath) ? JSON.parse(readFileSync(lockPath)) : {};
+for (const [, path] of androidRasters) if (!existsSync(resolve(root, path)) || digest(readFileSync(resolve(root, path))) !== lock.androidPngHashes?.[path]) failures.push(`Android 品牌资源未同步：${path}`);
 if (JSON.stringify(lock.sourceHashes) !== JSON.stringify(hashes)) failures.push('App 图标生成记录未同步');
 if (digest(readFileSync(resolve(root, 'ios/Bilight/Assets.xcassets/AppIcon.appiconset/AppIcon.png'))) !== lock.appIconPngSha256) failures.push('AppIcon PNG 与生成记录不符');
 for (const path of ['src/App.tsx', 'src/styles.css', '../Promotion/Video/src/film.tsx', '../Promotion/Video/src/style.css']) {

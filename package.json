@@ -1,6 +1,6 @@
 {
   "name": "bilight",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,10 @@
     "demo": "node scripts/demo.mjs",
     "check:repo": "node scripts/check-repository.mjs",
     "brand:sync": "node scripts/brand.mjs --write",
-    "check:brand": "node scripts/brand.mjs --check"
+    "check:brand": "node scripts/brand.mjs --check",
+    "android:build": "node scripts/android.mjs build",
+    "android:test": "node scripts/android.mjs test",
+    "android:install": "node scripts/android.mjs install"
   },
   "dependencies": {
     "@fastify/cookie": "^11.0.2",

@@ -16,7 +16,8 @@ const denied = files.filter(path => {
   if (/^(?:releases?|Promotion|Local|Legal|video|artifacts|\.secrets)\//i.test(path)) return true;
   if (/^docs\/assets\//.test(path) && !documentationAssets.has(path)) return true;
   if (/^ios\/Bilight\/Demo\/.*\.(?:png|jpe?g|webp)$/i.test(path)) return true;
-  return /\.(?:zip|ipa|dmg|p12|mobileprovision|wav|mp3|m4a|mov|mp4)$/i.test(path)
+  if (/^android\/(?:.*\/)?(?:build|\.gradle|\.kotlin)\//.test(path) || path === 'android/local.properties') return true;
+  return /\.(?:zip|ipa|apk|aab|jks|keystore|dmg|p12|mobileprovision|wav|mp3|m4a|mov|mp4)$/i.test(path)
     && path !== 'ios/BilightTests/Fixtures/fullscreen-motion.mp4';
 });
 if (denied.length) {

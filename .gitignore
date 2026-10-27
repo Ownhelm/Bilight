@@ -61,3 +61,14 @@ ios/ACCEPTANCE.md
 !/ios/BilightTests/Fixtures/fullscreen-motion.mp4
 
 /ios/BilightPreview.xcodeproj/
+
+# Android source only; SDKs, personal signing and APK outputs stay local.
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/**/build/
+android/local.properties
+*.apk
+*.aab
+*.jks
+*.keystore

@@ -1,0 +1,20 @@
+Bilight Android bundles the following third-party components.
+Their licenses apply independently of the Bilight MIT license.
+
+AndroidX / Jetpack Compose / Media3: Apache-2.0 (AndroidX-Media3-LICENSE.txt)
+https://github.com/androidx/androidx
+https://github.com/androidx/media
+
+OkHttp / Okio: Apache-2.0 (OkHttp-LICENSE.txt)
+https://github.com/square/okhttp
+https://github.com/square/okio
+
+Coil: Apache-2.0 (Coil-LICENSE.txt)
+https://github.com/coil-kt/coil
+
+ZXing: Apache-2.0 and included third-party notices (ZXing-LICENSE.txt)
+https://github.com/zxing/zxing
+
+Kotlin and kotlinx.coroutines: Apache-2.0
+https://github.com/JetBrains/kotlin
+https://github.com/Kotlin/kotlinx.coroutines
