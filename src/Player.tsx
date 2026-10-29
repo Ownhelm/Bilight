@@ -6,7 +6,7 @@ import { ChatCircleDots, SpinnerGap } from '@phosphor-icons/react';
 import type { Danmaku, Playback, Subtitle, WatchProgress } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { Failure, Loading, useResource } from './components';
-import { defaultSubtitle, installProgressShortcuts, playbackPosition, qualitySetting, switchPlaybackSource, type PlaybackPosition } from './playback';
+import { defaultSubtitle, installProgressShortcuts, installTemporarySpeed, playbackPosition, qualitySetting, switchPlaybackSource, type PlaybackPosition } from './playback';
 import { observeWatchProgress } from './watchHistory';
 import { playbackPreferences } from './playbackPreferences';
 
@@ -87,7 +87,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     setReady(false); setCreated(false);
     setSelectedPlayback(null); setQuality(undefined);
     if (!source || !mount.current) return;
-    let cancelled = false; let player: Artplayer | undefined; let dash: MediaPlayerClass | undefined; let removeProgressShortcuts: (() => void) | undefined;
+    let cancelled = false; let player: Artplayer | undefined; let dash: MediaPlayerClass | undefined; let removeProgressShortcuts: (() => void) | undefined; let removeTemporarySpeed: (() => void) | undefined;
     setPlayerError(''); setReady(false);
     async function create() {
       try {
@@ -114,6 +114,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
         });
         playerRef.current = player;
         removeProgressShortcuts = installProgressShortcuts(player, document, () => Boolean(qualityRequest.current && resumePosition.current));
+        removeTemporarySpeed = installTemporarySpeed(player, player.template.$player);
         switchPlayback.current = async (next, signal, position) => {
           if (!player) return;
           const url = next.manifestUrl || next.mp4Url;
@@ -147,6 +148,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
       cancelled = true;
       danmakuPluginReady.current = false;
       removeProgressShortcuts?.();
+      removeTemporarySpeed?.();
       qualityRequest.current?.abort(); qualityRequest.current = null; switchPlayback.current = null;
       resumePosition.current = null;
       setQualityBusy(false);

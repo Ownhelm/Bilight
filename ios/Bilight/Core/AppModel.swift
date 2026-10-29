@@ -19,11 +19,11 @@ import SwiftUI
     var videos: [String: Video] = [:]
     var catalogs: [String: CreatorCollection] = [:]
     var dynamics: [String: DynamicPost] = [:]
-    init() {
+    init(client suppliedClient: BiliClient? = nil) {
         #if DEBUG
-            let client = DemoFixtures.enabled || InteractionRegression.enabled ? DemoFixtures.client() : BiliClient()
+            let client = suppliedClient ?? (DemoFixtures.enabled || InteractionRegression.enabled ? DemoFixtures.client() : BiliClient())
         #else
-            let client = BiliClient()
+            let client = suppliedClient ?? BiliClient()
         #endif
         self.client = client
         history = WatchHistory(client: client)

@@ -1,4 +1,34 @@
 import type Artplayer from 'artplayer';
+
+export function installTemporarySpeed(player: Artplayer, surface: HTMLElement, root: Document = document, global: Window = window): () => void {
+  let timer: ReturnType<typeof setTimeout> | undefined, pointer: number | null = null, saved: number | null = null, suppressUntil = 0;
+  let held = false;
+  let origin = { x: 0, y: 0 };
+  const control = (target: EventTarget | null) => Boolean((target as Element | null)?.closest?.('button,input,select,textarea,[role="button"],.art-controls,.art-setting,.art-settings,.art-contextmenus'));
+  const end = () => {
+    clearTimeout(timer); timer = undefined; pointer = null;
+    if (held) { suppressUntil = Date.now() + 500; held = false; }
+    if (saved != null) { if (player.playbackRate === 2) player.playbackRate = saved; saved = null; }
+  };
+  const down = (event: PointerEvent) => {
+    end(); suppressUntil = 0;
+    if (event.button !== 0 || control(event.target)) return;
+    pointer = event.pointerId; origin = { x: event.clientX, y: event.clientY };
+    timer = setTimeout(() => { if (pointer == null) return; held = true; if (!player.video.paused) { saved = player.playbackRate; player.playbackRate = 2; } }, 500);
+  };
+  const move = (event: PointerEvent) => { if (pointer === event.pointerId && Math.hypot(event.clientX - origin.x, event.clientY - origin.y) > 12) end(); };
+  const up = (event: PointerEvent) => { if (pointer === event.pointerId) end(); };
+  const click = (event: Event) => { if (Date.now() <= suppressUntil && !control(event.target)) { suppressUntil = 0; event.preventDefault(); event.stopImmediatePropagation(); } };
+  const context = (event: Event) => { if (held) event.preventDefault(); };
+  surface.addEventListener('pointerdown', down); surface.addEventListener('pointermove', move); surface.addEventListener('click', click, true); surface.addEventListener('contextmenu', context);
+  global.addEventListener('pointerup', up, true); global.addEventListener('pointercancel', up, true); global.addEventListener('blur', end);
+  root.addEventListener('visibilitychange', end); root.addEventListener('fullscreenchange', end); player.video.addEventListener('loadstart', end);
+  return () => {
+    end(); surface.removeEventListener('pointerdown', down); surface.removeEventListener('pointermove', move); surface.removeEventListener('click', click, true); surface.removeEventListener('contextmenu', context);
+    global.removeEventListener('pointerup', up, true); global.removeEventListener('pointercancel', up, true); global.removeEventListener('blur', end);
+    root.removeEventListener('visibilitychange', end); root.removeEventListener('fullscreenchange', end); player.video.removeEventListener('loadstart', end);
+  };
+}
 import type { Setting } from 'artplayer';
 import type { Playback, Subtitle } from '../shared/types';
 

@@ -1,10 +1,154 @@
 import AVKit
+import MediaPlayer
 import SwiftUI
 import XCTest
 
 @testable import Bilight
 
 final class PlayerChromeTests: XCTestCase {
+    @MainActor func testLocalPlaybackPublishesLockScreenInformationAndClearsItOnStop() async throws {
+        let model = PlayerModel()
+        defer { model.stop() }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let video = Video(bvid: "BV12qnt6VEM1", aid: 42, title: "锁屏控制测试", cover: nil, duration: 12,
+            publishedAt: 0, owner: User(mid: 42, name: "隔离测试", avatar: nil), views: 0)
+        let record = DownloadRecord(id: UUID(), video: video, part: VideoPart(cid: 43, page: 1, title: "第一段", duration: 12), quality: 80, qualityLabel: "1080P")
+        model.loadLocal(media, record: record)
+        let deadline = Date().addingTimeInterval(4)
+        while model.player.currentTime().seconds < 0.1 && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let info = try XCTUnwrap(MPNowPlayingInfoCenter.default().nowPlayingInfo, "Background playback must publish a system lock-screen media item")
+        XCTAssertEqual(info[MPMediaItemPropertyTitle] as? String, video.title)
+        XCTAssertEqual(info[MPMediaItemPropertyArtist] as? String, video.owner.name)
+        XCTAssertEqual(info[MPMediaItemPropertyPlaybackDuration] as? Double ?? 0, 12, accuracy: 0.2)
+        XCTAssertTrue(MPRemoteCommandCenter.shared().pauseCommand.isEnabled)
+        XCTAssertTrue(MPRemoteCommandCenter.shared().changePlaybackPositionCommand.isEnabled)
+        let player = model.player
+        model.setRate(1.5)
+        XCTAssertEqual(model.handleRemotePlayback(.pause), .success)
+        model.player.pause()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPNowPlayingInfoPropertyPlaybackRate] as? Double, 0)
+        XCTAssertEqual(model.handleRemotePlayback(.seek(5)), .success)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(player.currentTime().seconds, 5, accuracy: 0.15)
+        XCTAssertEqual(player.timeControlStatus, .paused)
+        XCTAssertEqual(model.handleRemotePlayback(.play), .success)
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(player.rate, 1.5)
+        XCTAssertTrue(player === model.player)
+        XCTAssertEqual(model.handleRemotePlayback(.pause), .success)
+        XCTAssertEqual(model.handleRemotePlayback(.seek(-100)), .success)
+        try await Task.sleep(for: .milliseconds(60))
+        XCTAssertEqual(player.currentTime().seconds, 0, accuracy: 0.1)
+        model.stop()
+        XCTAssertNil(MPNowPlayingInfoCenter.default().nowPlayingInfo)
+        XCTAssertEqual(model.handleRemotePlayback(.play), .noSuchContent)
+    }
+
+    @MainActor func testOldPlayerCannotClearOrControlTheNewSystemMediaItem() async throws {
+        let old = PlayerModel(), next = PlayerModel()
+        defer { old.stop(); next.stop() }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        var video = Video(bvid: "BV12qnt6VEM1", aid: 42, title: "旧视频", cover: nil, duration: 12,
+            publishedAt: 0, owner: User(mid: 42, name: "隔离测试", avatar: nil), views: 0)
+        let part = VideoPart(cid: 43, page: 1, title: "第一段", duration: 12)
+        old.loadLocal(media, record: DownloadRecord(id: UUID(), video: video, part: part, quality: 80, qualityLabel: "1080P"))
+        video.title = "新视频"
+        next.loadLocal(media, record: DownloadRecord(id: UUID(), video: video, part: part, quality: 80, qualityLabel: "1080P"))
+        old.stop()
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertEqual(MPNowPlayingInfoCenter.default().nowPlayingInfo?[MPMediaItemPropertyTitle] as? String, "新视频")
+        XCTAssertEqual(old.handleRemotePlayback(.pause), .noSuchContent)
+        XCTAssertNotNil(next.player.currentItem)
+    }
+
+    @MainActor func testHoldingTemporarilyUsesTwoTimesSpeedInBothContainersAndRestoresOnCancel() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let model = PlayerModel()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        model.player.replaceCurrentItem(with: AVPlayerItem(url: media))
+        let host = UIHostingController(rootView: NativePlayer(model: model, onQuality: { _ in }))
+        window.rootViewController = root; root.addChild(host); root.view.addSubview(host.view); host.didMove(toParent: root)
+        host.view.frame = CGRect(x: 0, y: 100, width: window.bounds.width, height: 240); window.makeKeyAndVisible()
+        defer { containers(root).forEach { $0.shutdown() }; model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        model.player.play()
+        let deadline = Date().addingTimeInterval(3)
+        while (containers(root).isEmpty || model.player.currentTime().seconds < 0.1), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        let container = try XCTUnwrap(containers(root).first)
+        for fullscreen in [false, true] {
+            if fullscreen { container.enterFullscreen(rotate: false); try await Task.sleep(for: .milliseconds(100)) }
+            for rate: Float in [1, 1.5, 2.5] {
+                model.setRate(rate)
+                container.handleSpeedHold(.began)
+                XCTAssertEqual(model.player.rate, 2)
+                XCTAssertEqual(model.rate, rate, "Temporary acceleration cannot overwrite the selected rate")
+                container.handleSpeedHold(.cancelled)
+                XCTAssertEqual(model.player.rate, rate)
+                container.handleSpeedHold(.began); container.handleSpeedHold(.ended)
+                XCTAssertEqual(model.player.defaultRate, rate)
+            }
+        }
+        model.player.pause(); container.handleSpeedHold(.began)
+        XCTAssertEqual(model.player.rate, 0, "Holding a paused video cannot silently start playback")
+        container.handleSpeedHold(.ended)
+        XCTAssertEqual(model.player.audiovisualBackgroundPlaybackPolicy, .continuesIfPossible)
+        XCTAssertTrue((Bundle.main.object(forInfoDictionaryKey: "UIBackgroundModes") as? [String])?.contains("audio") == true)
+    }
+    @MainActor func testOccupiedDanmakuLaneDoesNotRevealAnOldCommentMidScreen() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let overlay = DanmakuOverlay(frame: CGRect(x: 0, y: 60, width: 400, height: 240))
+        window.rootViewController = root; root.view.addSubview(overlay); window.makeKeyAndVisible()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let player = AVPlayer(url: media)
+        defer { overlay.removeFromSuperview(); player.pause(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        overlay.update(player: player, items: [
+            Danmaku(id: 0, time: 0, text: "占用轨道", mode: 5, color: 0xffffff),
+            Danmaku(id: 7, time: 1, text: "不应从中间突然出现", mode: 1, color: 0xffffff),
+            Danmaku(id: 14, time: 4.2, text: "新的正常入场", mode: 1, color: 0xffffff),
+        ], enabled: true, revision: UUID())
+        try await Task.sleep(for: .milliseconds(100))
+        await player.seek(to: CMTime(seconds: 1.1, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(overlay.subviews.contains { ($0 as? UILabel)?.text == "不应从中间突然出现" })
+        await player.seek(to: CMTime(seconds: 4.1, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(overlay.subviews.contains { ($0 as? UILabel)?.text == "不应从中间突然出现" }, "A comment skipped for density must stay skipped when the preceding comment expires")
+        await player.seek(to: CMTime(seconds: 4.2, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        try await Task.sleep(for: .milliseconds(80))
+        let fresh = try XCTUnwrap(overlay.subviews.first { ($0 as? UILabel)?.text == "新的正常入场" })
+        XCTAssertGreaterThanOrEqual(fresh.frame.minX, overlay.bounds.width - 1, "A new scrolling comment starts outside the right edge")
+    }
+    @MainActor func testLateDanmakuStartsAtTheEdgeAndSurvivesStyleAndContainerChanges() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
+        let overlay = DanmakuOverlay(frame: CGRect(x: 0, y: 60, width: 400, height: 240))
+        window.rootViewController = root; root.view.addSubview(overlay); window.makeKeyAndVisible()
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let player = AVPlayer(url: media), revision = UUID()
+        defer { overlay.removeFromSuperview(); player.pause(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        await player.seek(to: CMTime(seconds: 5, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        let items = [Danmaku(id: 0, time: 1, text: "迟到的旧弹幕", mode: 1, color: 0xffffff),
+            Danmaku(id: 1, time: 4.9, text: "边界入场", mode: 1, color: 0xffffff)]
+        overlay.update(player: player, items: items, enabled: true, revision: revision)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertFalse(overlay.subviews.contains { ($0 as? UILabel)?.text == "迟到的旧弹幕" })
+        let label = try XCTUnwrap(overlay.subviews.first { ($0 as? UILabel)?.text == "边界入场" } as? UILabel)
+        XCTAssertEqual(label.frame.minX, 400, accuracy: 0.5)
+        overlay.removeFromSuperview(); root.view.addSubview(overlay)
+        overlay.frame.size = CGSize(width: 800, height: 320)
+        overlay.update(player: player, items: items, enabled: true, revision: revision, fontSize: 24)
+        try await Task.sleep(for: .milliseconds(80))
+        XCTAssertTrue(overlay.subviews.contains { $0 === label }, "Fullscreen moves and font changes keep the admitted comment")
+        XCTAssertEqual(label.font.pointSize, 24)
+        XCTAssertEqual(label.frame.minX, 800, accuracy: 0.5)
+        await player.seek(to: CMTime(seconds: 1, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        try await Task.sleep(for: .milliseconds(80))
+        let replayed = try XCTUnwrap(overlay.subviews.first { ($0 as? UILabel)?.text == "迟到的旧弹幕" })
+        XCTAssertEqual(replayed.frame.minX, 800, accuracy: 0.5, "Seeking backwards allows a new pass starting at the boundary")
+    }
+
     @MainActor func testDoubleTapUsesFortyTwentyFortyZonesAtEveryPlayerWidth() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
@@ -55,7 +199,8 @@ final class PlayerChromeTests: XCTestCase {
             container.backgroundPlaybackActivity()
             XCTAssertTrue(container.controller.player === model.player, "Paused background playback retains the last render surface instead of clearing it")
             XCTAssertTrue(model.player.currentItem === item)
-            XCTAssertEqual(model.player.timeControlStatus, .paused)
+            if playing { XCTAssertNotEqual(model.player.timeControlStatus, .paused, "Background audio keeps playing") }
+            else { XCTAssertEqual(model.player.timeControlStatus, .paused) }
             container.exitFullscreen()
             XCTAssertNotNil(container.presentedViewController, "Fullscreen dismissal is deferred while inactive")
             container.activatePlaybackActivity()

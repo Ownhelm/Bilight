@@ -75,10 +75,17 @@ final class CoreTests: XCTestCase {
         let host = PlayerContainer(controller: controller, model: model), window = UIWindow(windowScene: scene)
         window.rootViewController = host; window.makeKeyAndVisible()
         defer { host.shutdown(); model.stop(); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        let appeared = Date().addingTimeInterval(3)
+        while PlaybackOrientationDelegate.active !== host && Date() < appeared { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(PlaybackOrientationDelegate.active === host, "The root must finish appearing before presenting fullscreen")
         for automatic in [false, true] {
             host.enterFullscreen(automatic: automatic)
-            let landscape = Date().addingTimeInterval(2)
-            while PlayerContainer.orientation(scene)?.isLandscape != true && Date() < landscape { try await Task.sleep(for: .milliseconds(20)) }
+            let landscape = Date().addingTimeInterval(3)
+            while (PlayerContainer.orientation(scene)?.isLandscape != true || host.presentedViewController?.viewIfLoaded?.window == nil || host.presentedViewController?.isBeingPresented == true) && Date() < landscape {
+                try await Task.sleep(for: .milliseconds(20))
+            }
+            XCTAssertTrue(PlayerContainer.orientation(scene)?.isLandscape == true, "The landscape transition must complete before requesting portrait")
+            XCTAssertNotNil(host.presentedViewController?.viewIfLoaded?.window)
             XCTAssertTrue(model.isFullscreen)
             scene.requestGeometryUpdate(.iOS(interfaceOrientations: .portrait)) { _ in }
             let portrait = Date().addingTimeInterval(2)

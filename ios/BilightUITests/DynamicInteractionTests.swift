@@ -1,6 +1,59 @@
 import XCTest
 
 final class DynamicInteractionTests: XCTestCase {
+    func testSystemMediaControlsPauseAndResumeTheBackgroundPlayer() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--regression-player"]; app.launch()
+        defer { app.activate() }
+        let position = app.staticTexts["lifecycle-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 12))
+        let deadline = Date().addingTimeInterval(8)
+        while (Double(position.label) ?? 0) < 0.5 && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        func openControls() {
+            XCUIDevice.shared.press(.home)
+            springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.005))
+                .press(forDuration: 0.1, thenDragTo: springboard.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.6)))
+        }
+        openControls()
+        let title = springboard.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "锁屏控制测试")).firstMatch
+        if !title.waitForExistence(timeout: 5) {
+            let attachment = XCTAttachment(string: springboard.debugDescription); attachment.lifetime = .keepAlways; add(attachment)
+            let folder = springboard.otherElements["cc-root-folder-view"]
+            if folder.exists && folder.descendants(matching: .button).count == 0 {
+                throw XCTSkip("This simulator has an empty Control Center layout; system media controls require a configured tile or a real device")
+            }
+        }
+        XCTAssertTrue(title.exists, "The system media card must show the current video")
+        let pause = springboard.buttons.matching(NSPredicate(format: "identifier == 'PauseButton' OR label == 'Pause' OR label == '暂停'")).firstMatch
+        XCTAssertTrue(pause.waitForExistence(timeout: 3)); pause.tap()
+        app.activate(); XCTAssertTrue(position.waitForExistence(timeout: 5))
+        let paused = Double(position.label) ?? 0
+        Thread.sleep(forTimeInterval: 0.5)
+        XCTAssertEqual(Double(position.label) ?? 0, paused, accuracy: 0.2, "Returning must preserve the system pause")
+        openControls()
+        let play = springboard.buttons.matching(NSPredicate(format: "identifier == 'PlayButton' OR label == 'Play' OR label == '播放'")).firstMatch
+        XCTAssertTrue(play.waitForExistence(timeout: 3)); play.tap()
+        app.activate(); Thread.sleep(forTimeInterval: 0.8)
+        XCTAssertGreaterThan(Double(position.label) ?? 0, paused + 0.4, "System play must resume the same video")
+    }
+    func testAudioPlaybackActuallyAdvancesWhileTheAppIsOnHome() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--regression-player"]; app.launch()
+        let position = app.staticTexts["lifecycle-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 12))
+        let deadline = Date().addingTimeInterval(8)
+        while (Double(position.label) ?? 0) < 0.5 && Date() < deadline { Thread.sleep(forTimeInterval: 0.1) }
+        let before = Double(position.label) ?? 0
+        XCTAssertGreaterThan(before, 0.3)
+        XCUIDevice.shared.press(.home)
+        XCTAssertTrue(app.wait(for: .runningBackground, timeout: 5))
+        Thread.sleep(forTimeInterval: 3)
+        app.activate()
+        XCTAssertTrue(position.waitForExistence(timeout: 5))
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertGreaterThan(Double(position.label) ?? 0, before + 2.5, "Audio must advance during Home, rather than only restart after returning")
+    }
     func testRealDoubleTapZonesWorkInlineAndFullscreen() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--regression-player"]; app.launch()

@@ -112,6 +112,7 @@ struct RootView: View {
     }
     private func tabButton(_ title: String, symbol: String, value: Int) -> some View {
         Button {
+            if value == 1 { app.following.requestEntry() }
             tab = value
             app.path = []
         } label: {

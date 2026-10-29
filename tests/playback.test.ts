@@ -1,13 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Subtitle } from '../shared/types.js';
-import { defaultSubtitle, installProgressShortcuts, qualitySetting } from '../src/playback.js';
+import { defaultSubtitle, installProgressShortcuts, installTemporarySpeed, qualitySetting } from '../src/playback.js';
 import type { SettingOption } from 'artplayer';
 import type Artplayer from 'artplayer';
 import { switchPlaybackSource } from '../src/playback.js';
 import { EventEmitter } from 'node:events';
 
 const subtitle = (id: string, lang: string): Subtitle => ({ id, lang, label: lang, url: `/api/media/${id}/subtitle.vtt` });
+
+test('holding the video temporarily plays at exactly 2x and release, cancellation, fullscreen and cleanup restore the original rate', t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const surface = new EventTarget(), root = new EventTarget(), global = new EventTarget();
+  const video = Object.assign(new EventTarget(), { paused: false });
+  const player = { video, playbackRate: 1.5 };
+  const remove = installTemporarySpeed(player as unknown as Artplayer, surface as HTMLElement, root as Document, global as Window);
+  const send = (target: EventTarget, type: string, extra = {}) => { const event = Object.assign(new Event(type, { cancelable: true }), { button: 0, pointerId: 1, clientX: 30, clientY: 30, ...extra }); target.dispatchEvent(event); return event; };
+  send(surface, 'pointerdown'); t.mock.timers.tick(499); assert.equal(player.playbackRate, 1.5);
+  t.mock.timers.tick(1); assert.equal(player.playbackRate, 2);
+  send(global, 'pointerup'); assert.equal(player.playbackRate, 1.5);
+  assert.equal(send(surface, 'click').defaultPrevented, true);
+  for (const [target, event] of [[global, 'pointercancel'], [global, 'blur'], [root, 'fullscreenchange'], [video, 'loadstart']] as const) {
+    send(surface, 'pointerdown'); t.mock.timers.tick(500); assert.equal(player.playbackRate, 2);
+    send(target, event); assert.equal(player.playbackRate, 1.5);
+  }
+  send(surface, 'pointerdown'); send(surface, 'pointermove', { clientX: 60 }); t.mock.timers.tick(500); assert.equal(player.playbackRate, 1.5);
+  video.paused = true; send(surface, 'pointerdown'); t.mock.timers.tick(500); assert.equal(player.playbackRate, 1.5);
+  send(global, 'pointerup'); assert.equal(send(surface, 'click').defaultPrevented, true, 'Releasing a long hold cannot turn into a click that starts paused playback');
+  video.paused = false; send(surface, 'pointerdown'); t.mock.timers.tick(500); remove(); assert.equal(player.playbackRate, 1.5);
+});
 
 function progressTarget() {
   class TestDocument extends EventTarget { activeElement: unknown = null; modal = false; querySelector() { return this.modal ? {} : null; } }

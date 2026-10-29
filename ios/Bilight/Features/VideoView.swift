@@ -294,7 +294,7 @@ struct PlaybackView: View {
                 } catch { historyError = error.localizedDescription }
             }
             if model.player.currentItem == nil {
-                model.load(client: app.client, bvid: detail.video.bvid, part: part, start: resumePosition ?? start)
+                model.load(client: app.client, bvid: detail.video.bvid, part: part, start: resumePosition ?? start, video: detail.video)
             }
         }.onChange(of: scene) { _, phase in if phase != .active { model.flush() } }.onDisappear {
             let time = model.player.currentTime().seconds

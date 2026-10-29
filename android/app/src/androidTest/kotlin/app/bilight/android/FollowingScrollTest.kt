@@ -1,6 +1,6 @@
 package app.bilight.android
 
-import android.view.ViewGroup
+import androidx.activity.compose.setContent
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.lifecycle.ViewModelProvider
@@ -33,15 +33,14 @@ class FollowingScrollTest {
     private fun fixture(test: (Fixture) -> Unit) {
         val app=ApplicationProvider.getApplicationContext<BilightApplication>()
         check(android.os.Build.HARDWARE in listOf("ranchu","goldfish") && SessionVault(app).load()==null)
-        rule.runOnUiThread { rule.activity.findViewById<ViewGroup>(android.R.id.content).removeAllViews() }
         val f=Fixture(app)
         try {
             await("The isolated account did not restore") { !f.model.restoring }
             rule.runOnIdle { f.model.tab=1 }
-            rule.setContent { MainApp(f.model) }
+            rule.runOnUiThread { rule.activity.setContent { MainApp(f.model) } }
             await("The first real model page did not load") { f.model.feedLoaded && !f.model.feedBusy }
             test(f)
-        } finally { f.gate?.countDown();rule.runOnUiThread { f.store.clear() };f.client.dispatcher.cancelAll() }
+        } finally { f.gate?.countDown();f.firstGate?.countDown();rule.runOnUiThread { f.store.clear() };f.client.dispatcher.cancelAll() }
     }
     @Test fun aUserSwipeAtAnUnmovingFooterLoadsTheNextPageWithoutReloadingOnReturn() = fixture { f ->
         rule.runOnIdle { f.model.open(Route.Downloads) };rule.waitForIdle()
@@ -75,11 +74,47 @@ class FollowingScrollTest {
         await("Explicit retry did not use the unchanged failed cursor") { f.model.following.size==2 }
         assertEquals(listOf("first","next","next"),f.offsets.toList())
     }
+    @Test fun tappingTheFollowingEntryRefreshesOnceAndReturningKeepsItsCache() = fixture { f ->
+        swipe()
+        await("The second page did not load") { f.model.following.size==2 }
+        rule.onNodeWithText("关注",useUnmergedTree=true).performClick()
+        try { await("An entry tap must refresh the first page") { f.offsets.size==3 && !f.model.feedBusy } }
+        catch (e: AssertionError) { throw AssertionError("Entry refresh: offsets=${f.offsets.toList()}, revision=${f.model.feedEntryRevision}, busy=${f.model.feedBusy}",e) }
+        assertEquals(listOf("first","next","first"),f.offsets.toList())
+        rule.onNodeWithText("第101条关注动态").assertIsDisplayed()
+        rule.runOnIdle { f.model.open(Route.Downloads) }; rule.waitForIdle()
+        rule.runOnIdle { f.model.back() }; rule.waitForIdle()
+        assertEquals("Returning repeated the already-consumed tap",3,f.offsets.size)
+    }
+    @Test fun tappingFollowingRevealsTheTopRefreshWindowUntilTheRequestCompletes() = fixture { f ->
+        swipe(); await("Second page did not load") { f.model.following.size==2 }
+        f.firstGate=CountDownLatch(1)
+        rule.onNodeWithText("关注",useUnmergedTree=true).performClick()
+        await("Entry refresh did not start") { f.offsets.size==3 && f.model.feedBusy }
+        rule.onNodeWithContentDescription("正在刷新关注动态").assertIsDisplayed()
+        val indicator=rule.onNodeWithContentDescription("正在刷新关注动态").fetchSemanticsNode().boundsInRoot
+        val card=rule.onNodeWithText("第101条关注动态").fetchSemanticsNode().boundsInRoot
+        assertTrue("The refresh window must leave visible space above the cards",card.top>indicator.bottom)
+        rule.onNodeWithText("关注",useUnmergedTree=true).performClick()
+        assertEquals("Repeated taps must share the refresh request",3,f.offsets.size)
+        f.firstGate!!.countDown()
+        await("Refresh did not finish") { !f.model.feedBusy }
+        rule.onNodeWithContentDescription("正在刷新关注动态").assertDoesNotExist()
+        rule.onNodeWithText("第101条关注动态").assertIsDisplayed()
+        rule.onNodeWithText("搜索",useUnmergedTree=true).performClick()
+        f.firstGate=CountDownLatch(1)
+        rule.onNodeWithText("关注",useUnmergedTree=true).performClick()
+        await("Entering from search did not refresh") { f.offsets.size==4 && f.model.feedBusy }
+        rule.onNodeWithContentDescription("正在刷新关注动态").assertIsDisplayed()
+        f.firstGate!!.countDown()
+        await("Refresh from search did not finish") { !f.model.feedBusy }
+    }
     private inner class Fixture(app: BilightApplication) {
         val offsets=CopyOnWriteArrayList<String>()
         @Volatile var duplicate=false
         @Volatile var fail=false
         @Volatile var gate: CountDownLatch?=null
+        @Volatile var firstGate: CountDownLatch?=null
         val store=ViewModelStore()
         private fun post(id: String)=JSONObject().put("id_str",id).put("type","DYNAMIC_TYPE_WORD").put("modules",JSONObject()
             .put("module_author",JSONObject().put("mid",7).put("name","分页测试作者").put("pub_ts",1700000000))
@@ -92,6 +127,7 @@ class FollowingScrollTest {
                 "/x/relation/relations" -> JSONObject().put("7",JSONObject().put("attribute",2))
                 "/x/polymer/web-dynamic/v1/feed/all" -> {
                     val offset=request.url.queryParameter("offset") ?: "first";offsets+=offset
+                    if(offset=="first") check(firstGate?.await(5,TimeUnit.SECONDS)!=false)
                     if(offset=="next") check(gate?.await(5,TimeUnit.SECONDS)!=false)
                     if(fail && offset=="next") null else {
                         val continued=offset=="first" || offset=="next" && duplicate

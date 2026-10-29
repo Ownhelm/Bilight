@@ -26,6 +26,14 @@ import AVKit
     private let seekFeedback = UILabel()
     private var seekFeedbackTask: Task<Void, Never>?
     private var fullscreenPullStart = CGPoint.zero
+    private lazy var speedHold: UILongPressGestureRecognizer = {
+        let hold = UILongPressGestureRecognizer(target: self, action: #selector(temporarySpeedHeld(_:)))
+        hold.minimumPressDuration = 0.5
+        hold.allowableMovement = 12
+        hold.name = "bilight-hold-double-speed"
+        hold.delegate = self
+        return hold
+    }()
     private lazy var seekTap: UITapGestureRecognizer = {
         let tap = UITapGestureRecognizer(target: self, action: #selector(doubleTapSeek(_:)))
         tap.numberOfTapsRequired = 2
@@ -76,6 +84,9 @@ import AVKit
         view.backgroundColor = .black
         Self.attach(controller, to: self)
         controller.view.addGestureRecognizer(seekTap)
+        controller.view.addGestureRecognizer(speedHold)
+        seekTap.require(toFail: speedHold)
+        fullscreenTap.require(toFail: speedHold)
         if let overlay = controller.contentOverlayView {
             loadingView.accessibilityIdentifier = "player-buffering-indicator"
             loadingView.isAccessibilityElement = true
@@ -246,6 +257,7 @@ import AVKit
         traceFullscreen(active: false)
     }
     private func rememberPlayback() {
+        model.endTemporarySpeed()
         playbackIntent = (model.player.currentItem, model.player.timeControlStatus != .paused, model.player.defaultRate)
     }
     private func traceFullscreen(active: Bool) {
@@ -353,6 +365,11 @@ import AVKit
         guard gesture.state == .ended else { return }
         handleDoubleTap(at: gesture.location(in: controller.view))
     }
+    @objc private func temporarySpeedHeld(_ gesture: UILongPressGestureRecognizer) { handleSpeedHold(gesture.state) }
+    func handleSpeedHold(_ state: UIGestureRecognizer.State) {
+        if state == .began { model.beginTemporarySpeed() }
+        else if state == .ended || state == .cancelled || state == .failed { model.endTemporarySpeed() }
+    }
     func handleDoubleTap(at point: CGPoint) {
         let width = controller.view.bounds.width
         guard width > 0 else { return }
@@ -414,6 +431,7 @@ import AVKit
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         gestureRecognizer !== seekTap && otherGestureRecognizer !== seekTap
+            && gestureRecognizer !== speedHold && otherGestureRecognizer !== speedHold
             && gestureRecognizer !== fullscreenPull && otherGestureRecognizer !== fullscreenPull
     }
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
@@ -475,6 +493,7 @@ import AVKit
         }
     }
     func resignPlaybackActivity() {
+        model.endTemporarySpeed()
         lifecycleInactive = true
         updateLoadingIndicator()
         foregroundRecovery?.cancel()
@@ -485,9 +504,7 @@ import AVKit
         guard backgroundPlayback == nil else { return }
         backgroundPlayback = playbackIntent ?? (model.player.currentItem, model.player.timeControlStatus != .paused, model.player.defaultRate)
         model.flush()
-        model.player.pause()
-        // Playback is paused before suspension, so the existing render binding can retain
-        // its last frame. Clearing it unconditionally causes a black flash on every return.
+        // AVPlayer's background policy and audio session keep audio running on this same item.
     }
     func activatePlaybackActivity() {
         lifecycleInactive = false
@@ -514,15 +531,10 @@ import AVKit
                 }
             }
             if self.controller.player !== self.model.player { self.controller.player = self.model.player }
-            self.restorePlayback()
-            if let intent = self.backgroundPlayback {
+            if self.backgroundPlayback != nil {
                 self.backgroundPlayback = nil
-                if self.model.player.currentItem === intent.0 {
-                    self.model.setRate(intent.2)
-                    if intent.1 { self.model.player.play() }
-                    else { self.model.player.pause() }
-                }
-            }
+                self.playbackIntent = nil
+            } else { self.restorePlayback() }
             self.updateLoadingIndicator()
             self.refreshOrientationPolicy()
             self.setFullscreenButtonVisible(true, animated: false)
@@ -561,6 +573,7 @@ import AVKit
         controlsAutoHide?.cancel()
         seekFeedbackTask?.cancel()
         seekTap.view?.removeGestureRecognizer(seekTap)
+        speedHold.view?.removeGestureRecognizer(speedHold)
         fullscreenTap.view?.removeGestureRecognizer(fullscreenTap)
         fullscreenPull.view?.removeGestureRecognizer(fullscreenPull)
         releaseOrientation()

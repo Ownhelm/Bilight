@@ -10,8 +10,8 @@ android {
     applicationId = "app.bilight.android"
     minSdk = 26
     targetSdk = 36
-    versionCode = 6
-    versionName = "0.1.3"
+    versionCode = 7
+    versionName = "0.1.4"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -85,6 +85,7 @@ dependencies {
   implementation("androidx.media3:media3-exoplayer-dash:1.8.0")
   implementation("androidx.media3:media3-datasource-okhttp:1.8.0")
   implementation("androidx.media3:media3-ui:1.8.0")
+  implementation("androidx.media3:media3-session:1.8.0")
   implementation("androidx.compose.material:material-icons-extended:1.7.8")
   testImplementation("org.json:json:20250517")
   testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")

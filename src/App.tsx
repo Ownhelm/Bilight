@@ -28,7 +28,7 @@ export function App() {
   useEffect(() => {
     const controller = new AbortController();
     api<AuthState>('/api/auth/state', { signal: controller.signal }).then(state => { if (!controller.signal.aborted) setAuth(state); }).catch(error => { if (!isAbort(error)) { setAuth({ authenticated: false }); setAuthError(errorMessage(error)); } });
-    const expired = () => { setAuth({ authenticated: false, needsLogin: true, message: '登录已失效，请重新登录。' }); setAuthGeneration(value => value + 1); };
+    const expired = (event: Event) => { const silent = event instanceof CustomEvent && event.detail?.silent === true; setAuth({ authenticated: false, needsLogin: !silent, message: silent ? undefined : '登录已失效，请重新登录。' }); setAuthGeneration(value => value + 1); };
     window.addEventListener('bilight:session-expired', expired);
     return () => { controller.abort(); window.removeEventListener('bilight:session-expired', expired); };
   }, []);
@@ -47,7 +47,7 @@ export function App() {
   return <><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
     <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
-    <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following"><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
+    <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
       {auth?.authenticated && auth.user ? <details className="account-menu"><summary aria-label={`账号：${auth.user.name}`}><img src={auth.user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary><div className="account-popover"><p>{auth.user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span><button onClick={() => void logout()} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button></div></details> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}
     </nav>
   </header>
@@ -103,11 +103,12 @@ function Following({ auth, onLogin, cache }: { auth: AuthState | null; onLogin: 
   }, [feed.loading, feed.error, feed.cursor, feed.loadMore, videos.length, columns]);
   const loadMore = useRef(requestMore); loadMore.current = requestMore;
   useLayoutEffect(() => {
+    if (feed.entry > 0) { restored.current = true; scrollIntent.current = false; nearEnd.current = false; fillTarget.current = { count: 0, attempts: 0 }; }
     window.scrollTo({ top: cache.scrollTop, behavior: 'instant' });
     const remember = () => { cache.scrollTop = Math.max(0, window.scrollY); };
     window.addEventListener('scroll', remember, { passive: true });
     return () => { window.removeEventListener('scroll', remember); };
-  }, [cache]);
+  }, [cache, feed.entry]);
   useEffect(() => { document.title = '我的关注 · Bilight'; }, []);
   useEffect(() => {
     const target = fillTarget.current;

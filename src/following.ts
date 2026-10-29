@@ -28,8 +28,8 @@ export function useFollowingColumns(): number {
   return columns;
 }
 
-interface FeedState { items: VideoSummary[]; cursor: string | null; loading: boolean; initialized: boolean; error: Error | null }
-const emptyFeed: FeedState = { items: [], cursor: null, loading: false, initialized: false, error: null };
+interface FeedState { items: VideoSummary[]; cursor: string | null; loading: boolean; initialized: boolean; error: Error | null; entry: number }
+const emptyFeed: FeedState = { items: [], cursor: null, loading: false, initialized: false, error: null, entry: 0 };
 
 export class FollowingFeed {
   private state = emptyFeed;
@@ -44,7 +44,16 @@ export class FollowingFeed {
   private publish(state: FeedState) { this.state = state; this.listeners.forEach(listener => listener()); }
   ensureLoaded = () => { if (!this.state.initialized) return this.load('', true); };
   loadMore = () => { if (this.state.cursor && !this.state.error) return this.load(this.state.cursor, false); };
-  refresh = () => this.load('', true);
+  refresh = () => {
+    if (this.active && this.lastRequest.replace) return;
+    this.active?.abort(); this.active = null;
+    return this.load('', true);
+  };
+  enter = () => {
+    this.scrollTop = 0;
+    this.publish({ ...this.state, entry: this.state.entry + 1 });
+    return this.refresh();
+  };
   retry = () => this.load(this.lastRequest.cursor, this.lastRequest.replace);
   clear = () => {
     this.active?.abort(); this.active = null;
@@ -64,7 +73,7 @@ export class FollowingFeed {
       if (replace) this.visited.clear();
       this.visited.add(cursor);
       const next = nextFollowingCursor(page, this.visited);
-      this.publish({ items: mergeFollowing(replace ? [] : this.state.items, page.items), cursor: next, loading: false, initialized: true, error: null });
+      this.publish({ items: mergeFollowing(replace ? [] : this.state.items, page.items), cursor: next, loading: false, initialized: true, error: null, entry: this.state.entry });
     } catch (error) {
       if (this.active !== controller || (isAbort(error) && !timedOut)) return;
       const failure = timedOut ? new Error('B 站响应较慢，请重试。已加载的视频会保留。') : error instanceof Error ? error : new Error(errorMessage(error));

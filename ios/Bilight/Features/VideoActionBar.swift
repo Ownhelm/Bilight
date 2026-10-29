@@ -18,7 +18,7 @@ struct VideoActionBar: View {
     @ScaledMetric(relativeTo: .caption) private var iconGap: CGFloat = 9
     @ScaledMetric(relativeTo: .caption) private var groupGap: CGFloat = 24
     private enum Panel: String, Identifiable { case coin, favorite; var id: String { rawValue } }
-    private var enabled: Bool { !support.busy && !support.refreshRequired }
+    private var enabled: Bool { !support.busy }
     var body: some View {
         VStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
@@ -168,11 +168,11 @@ private struct CoinActionSheet: View {
                     ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("确定") {
+                            dismiss()
                             Task {
-                                let ok = await support.write(client: app.client, bvid: bvid, action: .coin(target: (state?.coins ?? 0) + coins, like: selectLike))
-                                if ok { dismiss() }
+                                _ = await support.write(client: app.client, bvid: bvid, action: .coin(target: (state?.coins ?? 0) + coins, like: selectLike))
                             }
-                        }.disabled(busy || support.busy || support.refreshRequired || remaining == 0)
+                        }.disabled(busy || support.busy || remaining == 0)
                     }
                 }.task {
                     do {
@@ -228,7 +228,7 @@ private struct FavoriteActionSheet: View {
                     ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
                         Button("确定") { Task { if await support.write(client: app.client, bvid: bvid, action: .favorite(selected.sorted())) { dismiss() } } }
-                            .disabled(busy || !changed || support.busy || support.refreshRequired)
+                            .disabled(busy || !changed || support.busy)
                     }
                 }.task { await load() }
                 .alert("新建收藏夹", isPresented: $creating) {

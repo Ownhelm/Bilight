@@ -23,10 +23,11 @@ struct PlaybackLifecycleRegressionView: View {
         }.task {
             do {
                 let url = try await Self.movie()
-                try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
-                model.playback = Playback(quality: 80, qualities: [], duration: 60, mp4: url)
-                model.player.replaceCurrentItem(with: AVPlayerItem(url: url))
-                model.player.play()
+                let video = Video(bvid: "BV12qnt6VEM1", aid: 42, title: "锁屏控制测试", cover: nil, duration: 60,
+                    publishedAt: 0, owner: User(mid: 42, name: "Bilight", avatar: nil), views: 0)
+                let record = DownloadRecord(id: UUID(), video: video,
+                    part: VideoPart(cid: 43, page: 1, title: "离线测试", duration: 60), quality: 80, qualityLabel: "1080P")
+                model.loadLocal(url, record: record)
             } catch { self.error = error.localizedDescription }
         }.onDisappear { if !model.isFullscreen { model.stop() } }
     }
@@ -36,12 +37,17 @@ struct PlaybackLifecycleRegressionView: View {
             try? FileManager.default.removeItem(at: url)
             let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
             let input = AVAssetWriterInput(mediaType: .video, outputSettings: [AVVideoCodecKey: AVVideoCodecType.h264, AVVideoWidthKey: 320, AVVideoHeightKey: 180])
+            let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVNumberOfChannelsKey: 1, AVSampleRateKey: 44100, AVEncoderBitRateKey: 64000])
+            var pcm = AudioStreamBasicDescription(mSampleRate: 44100, mFormatID: kAudioFormatLinearPCM, mFormatFlags: kAudioFormatFlagIsSignedInteger | kAudioFormatFlagIsPacked, mBytesPerPacket: 2, mFramesPerPacket: 1, mBytesPerFrame: 2, mChannelsPerFrame: 1, mBitsPerChannel: 16, mReserved: 0)
+            var audioFormat: CMAudioFormatDescription?
+            guard CMAudioFormatDescriptionCreate(allocator: kCFAllocatorDefault, asbd: &pcm, layoutSize: 0, layout: nil, magicCookieSize: 0, magicCookie: nil, extensions: nil, formatDescriptionOut: &audioFormat) == noErr, let audioFormat else { throw BiliFailure.invalid }
             let adaptor = AVAssetWriterInputPixelBufferAdaptor(assetWriterInput: input, sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA, kCVPixelBufferWidthKey as String: 320, kCVPixelBufferHeightKey as String: 180])
             writer.add(input)
+            writer.add(audio)
             guard writer.startWriting() else { throw writer.error ?? BiliFailure.invalid }
             writer.startSession(atSourceTime: .zero)
             for frame in 0..<300 {
-                while !input.isReadyForMoreMediaData {
+                while !input.isReadyForMoreMediaData || !audio.isReadyForMoreMediaData {
                     if writer.status == .failed { throw writer.error ?? BiliFailure.invalid }
                     try await Task.sleep(for: .milliseconds(2))
                 }
@@ -54,8 +60,16 @@ struct PlaybackLifecycleRegressionView: View {
                 }
                 CVPixelBufferUnlockBaseAddress(buffer, [])
                 guard adaptor.append(buffer, withPresentationTime: CMTime(value: Int64(frame), timescale: 5)) else { throw writer.error ?? BiliFailure.invalid }
+                // A real AAC track lets the system background-audio test exercise the audio pipeline.
+                let silence = Data(count: 8820 * 2)
+                var block: CMBlockBuffer?, sample: CMSampleBuffer?, sampleSize = 2
+                guard CMBlockBufferCreateWithMemoryBlock(allocator: kCFAllocatorDefault, memoryBlock: nil, blockLength: silence.count, blockAllocator: kCFAllocatorDefault, customBlockSource: nil, offsetToData: 0, dataLength: silence.count, flags: 0, blockBufferOut: &block) == noErr, let block else { throw BiliFailure.invalid }
+                let copied = silence.withUnsafeBytes { CMBlockBufferReplaceDataBytes(with: $0.baseAddress!, blockBuffer: block, offsetIntoDestination: 0, dataLength: silence.count) }
+                var timing = CMSampleTimingInfo(duration: CMTime(value: 1, timescale: 44100), presentationTimeStamp: CMTime(value: Int64(frame * 8820), timescale: 44100), decodeTimeStamp: .invalid)
+                guard copied == noErr, CMSampleBufferCreateReady(allocator: kCFAllocatorDefault, dataBuffer: block, formatDescription: audioFormat, sampleCount: 8820, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleSizeEntryCount: 1, sampleSizeArray: &sampleSize, sampleBufferOut: &sample) == noErr, let sample, audio.append(sample) else { throw writer.error ?? BiliFailure.invalid }
             }
             input.markAsFinished()
+            audio.markAsFinished()
             await writer.finishWriting()
             guard writer.status == .completed else { throw writer.error ?? BiliFailure.invalid }
             return url

@@ -48,6 +48,8 @@ enum DanmakuArea: Double, CaseIterable {
     weak var player: AVPlayer?
     private var items: [Danmaku] = []
     private var labels: [Int: UILabel] = [:]
+    private var admittedAt: [Int: Double] = [:]
+    private var considered = Set<Int>()
     private var link: CADisplayLink?
     private var revision: UUID?
     private var fontSize: CGFloat = 20
@@ -77,17 +79,22 @@ enum DanmakuArea: Double, CaseIterable {
     func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20, area: DanmakuArea = .full) {
         self.player = player
         let fontSize = min(24, max(16, fontSize))
-        if self.fontSize != fontSize { self.fontSize = fontSize; clear() }
+        if self.fontSize != fontSize {
+            self.fontSize = fontSize
+            for label in labels.values { label.font = .systemFont(ofSize: fontSize, weight: .semibold); label.sizeToFit() }
+            lastTime = .nan
+        }
         if self.area != area { self.area = area; lastTime = .nan }
         alpha = 1
         if self.revision != revision { self.revision = revision; self.items = items; lastTime = .nan; clear() }
         isHidden = !enabled
-        if enabled && window != nil { start() } else { stop() }
+        if !enabled { stop() } else if window != nil { start() } else { suspend() }
     }
     override func didMoveToWindow() {
         super.didMoveToWindow()
         updateSafeAreaConstraints()
-        if window != nil && !isHidden { start() } else { stop() }
+        // Fullscreen reparents this view through a nil window; preserve admitted comments across that move.
+        if isHidden { stop() } else if window != nil { start() } else { suspend() }
     }
     private func start() {
         guard link == nil, !items.isEmpty else { return }
@@ -98,38 +105,46 @@ enum DanmakuArea: Double, CaseIterable {
         link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: maximum, preferred: maximum)
         link.add(to: .main, forMode: .common); self.link = link
     }
-    private func clear() { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; lastTime = .nan; lastSize = .zero }
-    private func stop() { link?.invalidate(); link = nil; clear() }
+    private func clear() { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; admittedAt = [:]; considered = []; lastTime = .nan; lastSize = .zero }
+    private func suspend() { link?.invalidate(); link = nil }
+    private func stop() { suspend(); clear() }
     fileprivate func tick() {
         guard let time = player?.currentTime().seconds, time.isFinite, bounds.width > 0 else { return }
         if time == lastTime && bounds.size == lastSize { return }
+        // A backwards seek starts a new pass; forward seeks skip old comments instead of spawning them mid-flight.
+        if time < lastTime { clear() }
         lastTime = time; lastSize = bounds.size
         var low = 0, high = items.count
-        while low < high { let middle = (low + high) / 2; if items[middle].time < time - 8 { low = middle + 1 } else { high = middle } }
+        while low < high { let middle = (low + high) / 2; if items[middle].time < time - 8.25 { low = middle + 1 } else { high = middle } }
         var visible: [Danmaku] = []
         var index = low
-        while index < items.count && items[index].time <= time && visible.count < 40 {
+        while index < items.count && items[index].time <= time {
             let item = items[index]
-            if time - item.time < (item.mode == 4 || item.mode == 5 ? 4 : 8) { visible.append(item) }
+            if time - (admittedAt[item.id] ?? item.time) < (item.mode == 4 || item.mode == 5 ? 4 : 8) { visible.append(item) }
             index += 1
         }
         let ids = Set(visible.map(\.id))
-        for id in Array(labels.keys) where !ids.contains(id) { labels.removeValue(forKey: id)?.removeFromSuperview() }
+        for id in Array(labels.keys) where !ids.contains(id) { labels.removeValue(forKey: id)?.removeFromSuperview(); admittedAt[id] = nil }
         var occupied = Set<Int>()
         // Ratios cover the upper part of the camera-safe viewport, including bottom-fixed comments.
         let areaHeight = bounds.height * area.rawValue
         let lineHeight = ceil(fontSize * 1.5)
         let padding = min(12, max(2, (areaHeight - lineHeight) / 2))
         let lanes = min(7, Int(max(0, areaHeight - padding * 2) / lineHeight))
-        guard lanes > 0 else { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; return }
+        guard lanes > 0 else { labels.values.forEach { $0.removeFromSuperview() }; labels = [:]; admittedAt = [:]; return }
         let scale = max(1, window?.windowScene?.screen.scale ?? traitCollection.displayScale)
         for item in visible {
+            let existing = labels[item.id]
+            if existing == nil {
+                // Decide once at arrival. Late data, a seek or an occupied lane must never revive an old comment.
+                guard considered.insert(item.id).inserted, time - item.time <= 0.25 else { continue }
+            }
             let lane = item.id % lanes
             // Bound density in each lane instead of stacking unreadable text.
-            if occupied.contains(lane) { labels.removeValue(forKey: item.id)?.removeFromSuperview(); continue }
+            if occupied.contains(lane) { labels.removeValue(forKey: item.id)?.removeFromSuperview(); admittedAt[item.id] = nil; continue }
             occupied.insert(lane)
             let label: UILabel
-            if let existing = labels[item.id] { label = existing }
+            if let existing { label = existing }
             else {
                 label = UILabel(); label.font = .systemFont(ofSize: fontSize, weight: .semibold)
                 label.contentScaleFactor = scale
@@ -141,8 +156,9 @@ enum DanmakuArea: Double, CaseIterable {
                 label.layer.shadowRadius = 0.75
                 label.layer.shadowOpacity = 1
                 label.sizeToFit(); addSubview(label); labels[item.id] = label
+                admittedAt[item.id] = time
             }
-            let elapsed = time - item.time
+            let elapsed = time - (admittedAt[item.id] ?? time)
             let fixed = item.mode == 4 || item.mode == 5
             let x = fixed ? (bounds.width-label.bounds.width)/2 : item.mode == 6 ? -label.bounds.width+(bounds.width+label.bounds.width)*elapsed/8 : bounds.width-(bounds.width+label.bounds.width)*elapsed/8
             let y = item.mode == 4 ? areaHeight-padding-label.bounds.height-CGFloat(lane)*lineHeight : padding+CGFloat(lane)*lineHeight

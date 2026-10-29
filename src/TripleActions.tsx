@@ -3,11 +3,12 @@ import { ArrowClockwise, Check, Coins, Plus, SpinnerGap, Star, ThumbsUp, X } fro
 import type { AuthState, CoinInfo, EngagementAction, FavoriteFolder, TripleResult, VideoEngagement, VideoInteraction } from '../shared/types';
 import { api, ApiError, errorMessage, isAbort } from './api';
 import { countLabel } from './components';
-import { coinChoices, engagementCounts, favoriteChanged } from './interactionModel';
+import { coinChoices, engagementCounts, favoriteChanged, optimisticEngagement } from './interactionModel';
 import { createLikePress, LIKE_CHARGE_MS } from './likePress';
 
 export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string; auth: AuthState | null; onLogin: () => void; snapshot?: VideoInteraction }) {
   const [state, setState] = useState<VideoEngagement | null>(null);
+  const [optimistic, setOptimistic] = useState<VideoEngagement | null>(null);
   const [busy, setBusy] = useState(false), [working, setWorking] = useState('');
   const [message, setMessage] = useState(''), [error, setError] = useState('');
   const [retryRequired, setRetryRequired] = useState(false);
@@ -21,10 +22,11 @@ export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string;
   const actions = useRef({ like() {}, triple() {}, coin() {}, favorite() {}, canHold: (): boolean => true });
   const press = useRef<ReturnType<typeof createLikePress> | null>(null), origin = useRef({ x: 0, y: 0 });
   if (!press.current) press.current = createLikePress(() => actions.current.like(), () => actions.current.triple(), setHolding, () => actions.current.canHold());
-  const complete = Boolean(state?.liked && state.coins > 0 && state.favorited), counts = engagementCounts(snapshot, baseline.current, state);
+  const displayState = optimistic ?? state;
+  const complete = Boolean(displayState?.liked && displayState.coins > 0 && displayState.favorited), counts = engagementCounts(snapshot, baseline.current, state);
   const choices = coinChoices(coinLimit, state?.coins ?? 0), changed = favoriteChanged(folders, folderIds);
   function updateState(current: VideoEngagement) { baseline.current ??= current; setState(current); }
-  async function readState(signal?: AbortSignal) { const current = await api<VideoEngagement>(`/api/videos/${bvid}/engagement`, { signal }); if (!signal?.aborted) updateState(current); return current; }
+  async function readState(signal?: AbortSignal, silentAuthFailure = false) { const current = await api<VideoEngagement>(`/api/videos/${bvid}/engagement`, { signal, silentAuthFailure }); if (!signal?.aborted) updateState(current); return current; }
   useEffect(() => {
     if (!auth?.authenticated || !mount.current) return;
     const controller = new AbortController(); statusRequest.current = controller; let started = false;
@@ -63,29 +65,32 @@ export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string;
     if (!auth?.authenticated) { onLogin(); return; }
     if (active.current) return;
     if (holding && action === 'like') return;
-    if (retryRequired && action !== 'refresh') { setError('请先刷新互动状态确认上次结果。'); return; }
     if (action === 'triple' && complete) { setMessage('已经三连，感谢支持。'); return; }
     const controller = new AbortController(); active.current = controller;
+    const before = state, silent = action === 'like' || action === 'triple' || (typeof action === 'object' && action.type === 'coin');
+    if (silent) { setOptimistic(optimisticEngagement(state, action)); if (typeof action === 'object') setPanel(null); }
     setBusy(true); setWorking(typeof action === 'string' ? action : action.type); setError(''); setMessage(''); statusRequest.current?.abort();
     try {
+      if (retryRequired && action !== 'refresh') { await readState(controller.signal, silent); if (controller.signal.aborted) return; setRetryRequired(false); }
       if (action === 'refresh') { await readState(controller.signal); if (!controller.signal.aborted) { setRetryRequired(false); setMessage('已更新互动状态。'); } }
       else if (action === 'triple') {
-        if (!baseline.current) await readState(controller.signal);
+        if (!baseline.current) await readState(controller.signal, true);
         if (controller.signal.aborted) return;
-        const result = await api<TripleResult>(`/api/videos/${bvid}/triple`, { method: 'POST', signal: controller.signal });
+        const result = await api<TripleResult>(`/api/videos/${bvid}/triple`, { method: 'POST', signal: controller.signal, silentAuthFailure: true });
         if (controller.signal.aborted) return;
-        updateState(result.state); setCelebrating(result.complete ? 'triple' : '');
-        setMessage(result.complete ? '三连成功，感谢支持 UP 主。' : '部分操作未完成，可刷新状态查看结果。');
+        if (!result.complete) { setState(before); setRetryRequired(true); return; }
+        updateState(result.state); setCelebrating('triple'); setMessage('三连成功，感谢支持 UP 主。');
       } else {
-        const target = action === 'like' ? { type: 'like' as const, liked: !(await readState(controller.signal)).liked } : action;
+        const target = action === 'like' ? { type: 'like' as const, liked: !(await readState(controller.signal, true)).liked } : action;
         if (controller.signal.aborted) return;
-        const result = await api<VideoEngagement>(`/api/videos/${bvid}/interaction`, { method: 'POST', body: target, signal: controller.signal });
+        if (silent) setOptimistic(optimisticEngagement(state, target));
+        const result = await api<VideoEngagement>(`/api/videos/${bvid}/interaction`, { method: 'POST', body: target, signal: controller.signal, silentAuthFailure: silent });
         if (controller.signal.aborted) return;
         updateState(result); setPanel(null); if (target.type === 'like' && result.liked) setCelebrating('like');
         setMessage(target.type === 'like' ? result.liked ? '点赞成功。' : '已取消点赞。' : target.type === 'coin' ? `投币成功，感谢您的支持${target.selectLike && !result.liked ? '；点赞未完成，可单独重试' : ''}。` : result.favorited ? '收藏成功。' : '已取消收藏。');
       }
-    } catch (error) { if (!isAbort(error)) { const uncertain = !(error instanceof ApiError) || ['NETWORK_ERROR', 'UPSTREAM_UNAVAILABLE', 'INTERACTION_UNCONFIRMED', 'TRIPLE_UNCONFIRMED'].includes(error.code); setRetryRequired(uncertain); setError(`${errorMessage(error)}${uncertain ? ' 请先刷新状态确认结果。' : ''}`); } }
-    finally { if (!controller.signal.aborted) { active.current = null; setBusy(false); setWorking(''); } }
+    } catch (error) { if (!isAbort(error)) { const uncertain = !(error instanceof ApiError) || ['NETWORK_ERROR', 'UPSTREAM_UNAVAILABLE', 'INTERACTION_UNCONFIRMED', 'TRIPLE_UNCONFIRMED'].includes(error.code); setRetryRequired(uncertain); if (silent) { setState(before); setError(''); setMessage(''); } else setError(`${errorMessage(error)}${uncertain ? ' 请先刷新状态确认结果。' : ''}`); } }
+    finally { if (!controller.signal.aborted) { setOptimistic(null); active.current = null; setBusy(false); setWorking(''); } }
   }
 
   async function openPanel(next: 'coin' | 'favorite') {
@@ -139,11 +144,11 @@ export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string;
   const disabled = !auth || busy;
   return <div className={`triple-actions${holding ? ' is-holding' : ''}${celebrating ? ` celebrate-${celebrating}` : ''}`} ref={mount} aria-label="支持 UP 主">
     <div className="triple-summary">
-      <button type="button" className={`engagement-button like-button${state?.liked ? ' done' : ''}`} disabled={disabled} aria-label={state?.liked ? '取消点赞' : '点赞'} aria-pressed={Boolean(state?.liked)} aria-describedby={`triple-note-${bvid}`} title={`${state?.liked ? '已点赞' : '点赞'}（Q），长按一键三连`} onPointerDown={start} onPointerMove={move} onPointerUp={() => press.current?.end()} onPointerLeave={() => press.current?.cancel()} onPointerCancel={() => press.current?.cancel()} onBlur={() => press.current?.cancel()} onContextMenu={event => event.preventDefault()} onKeyDown={keyDown} onKeyUp={keyUp} onClick={() => press.current?.click()}>
-        <span className="engagement-icon">{busy && (working === 'triple' || working === 'like') ? <SpinnerGap className="spin" size={28} /> : <ThumbsUp weight={state?.liked ? 'fill' : 'regular'} size={28} />}</span><span>{counts?.likes ? countLabel(counts.likes) : '点赞'}</span>
+      <button type="button" className={`engagement-button like-button${displayState?.liked ? ' done' : ''}`} disabled={disabled} aria-label={displayState?.liked ? '取消点赞' : '点赞'} aria-pressed={Boolean(displayState?.liked)} aria-describedby={`triple-note-${bvid}`} title={`${displayState?.liked ? '已点赞' : '点赞'}（Q），长按一键三连`} onPointerDown={start} onPointerMove={move} onPointerUp={() => press.current?.end()} onPointerLeave={() => press.current?.cancel()} onPointerCancel={() => press.current?.cancel()} onBlur={() => press.current?.cancel()} onContextMenu={event => event.preventDefault()} onKeyDown={keyDown} onKeyUp={keyUp} onClick={() => press.current?.click()}>
+        <span className="engagement-icon"><ThumbsUp weight={displayState?.liked ? 'fill' : 'regular'} size={28} /></span><span>{counts?.likes ? countLabel(counts.likes) : '点赞'}</span>
       </button>
-      <button type="button" className={`engagement-button${state?.coins ? ' done' : ''}`} disabled={disabled} aria-label="投币" title={`投币（W）${state?.coins ? `，已投 ${state.coins} 枚` : ''}`} onClick={() => void openPanel('coin')}><span className="engagement-icon">{ring()}<Coins weight={state?.coins ? 'fill' : 'regular'} size={28} /></span><span>{counts?.coins ? countLabel(counts.coins) : '投币'}</span></button>
-      <button type="button" className={`engagement-button${state?.favorited ? ' done' : ''}`} disabled={disabled} aria-label="收藏" title={`收藏（E）${state?.favorited ? '，已收藏' : ''}`} onClick={() => void openPanel('favorite')}><span className="engagement-icon">{ring()}<Star weight={state?.favorited ? 'fill' : 'regular'} size={28} /></span><span>{counts?.favorites ? countLabel(counts.favorites) : '收藏'}</span></button>
+      <button type="button" className={`engagement-button${displayState?.coins ? ' done' : ''}`} disabled={disabled} aria-label="投币" title={`投币（W）${displayState?.coins ? `，已投 ${displayState.coins} 枚` : ''}`} onClick={() => void openPanel('coin')}><span className="engagement-icon">{ring()}<Coins weight={displayState?.coins ? 'fill' : 'regular'} size={28} /></span><span>{counts?.coins ? countLabel(counts.coins) : '投币'}</span></button>
+      <button type="button" className={`engagement-button${displayState?.favorited ? ' done' : ''}`} disabled={disabled} aria-label="收藏" title={`收藏（E）${displayState?.favorited ? '，已收藏' : ''}`} onClick={() => void openPanel('favorite')}><span className="engagement-icon">{ring()}<Star weight={displayState?.favorited ? 'fill' : 'regular'} size={28} /></span><span>{counts?.favorites ? countLabel(counts.favorites) : '收藏'}</span></button>
     </div>
     <div className="triple-submit">{complete && <span className="triple-complete"><Check size={16} />已三连</span>}<button className="triple-refresh" aria-label="刷新三连状态" title="刷新互动状态" disabled={!auth?.authenticated || busy} onClick={() => void submit('refresh')}><ArrowClockwise className={working === 'refresh' ? 'spin' : ''} size={18} /></button></div>
     <p id={`triple-note-${bvid}`} className="triple-note">长按点赞，圆环蓄满即可一键三连；蓄力中松开或移开取消。投币不可撤回，三连收藏到默认收藏夹。</p>

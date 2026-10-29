@@ -30,21 +30,37 @@ import SwiftUI
         }
     }
     func write(client: BiliClient, bvid: String, action: VideoWrite) async -> Bool {
-        guard !busy, !refreshRequired else { return false }
+        guard !busy else { return false }
         let token = UUID(); operation = token; busy = true; error = nil
+        let before = state
+        var pending = state ?? VideoEngagement(liked: false, coins: 0, favorited: false)
+        let silent: Bool
+        switch action {
+        case .like(let liked): pending.liked = liked; silent = true
+        case .coin(let target, let like): pending.coins = max(pending.coins, target); pending.liked = pending.liked || like; silent = true
+        case .triple: pending.liked = true; pending.coins = max(1, pending.coins); pending.favorited = true; silent = true
+        case .favorite: silent = false
+        }
+        if silent { state = pending }
         defer { if operation == token { busy = false } }
         do {
+            // A new user action may refresh an uncertain result, but never repeats the old write automatically.
+            if refreshRequired { _ = try await client.videoEngagement(bvid) }
+            guard operation == token, !Task.isCancelled else { return false }
             let value = try await client.writeVideo(bvid, action: action)
             guard operation == token, !Task.isCancelled else { return false }
             state = value
             if action == .triple && !value.complete {
-                refreshRequired = true; error = "三连未全部完成，请刷新状态。"
+                state = before; refreshRequired = true
+                return false
             }
+            refreshRequired = false
             if let counts = try? await client.videoStatistics(bvid), operation == token { statistics = counts }
             return !refreshRequired
         } catch {
             guard operation == token, !Task.isCancelled else { return false }
-            self.error = error.localizedDescription; refreshRequired = true
+            state = before
+            self.error = silent ? nil : error.localizedDescription; refreshRequired = true
             return false
         }
     }

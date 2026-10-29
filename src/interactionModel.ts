@@ -1,4 +1,13 @@
-import type { FavoriteFolder, VideoEngagement, VideoInteraction } from '../shared/types';
+import type { EngagementAction, FavoriteFolder, VideoEngagement, VideoInteraction } from '../shared/types';
+
+export function optimisticEngagement(state: VideoEngagement | null, action: 'like' | 'triple' | EngagementAction): VideoEngagement {
+  const pending = { ...(state ?? { liked: false, coins: 0, favorited: false }) };
+  if (action === 'like') pending.liked = !pending.liked;
+  else if (action === 'triple') { pending.liked = true; pending.coins = Math.max(1, pending.coins); pending.favorited = true; }
+  else if (action.type === 'like') pending.liked = action.liked;
+  else if (action.type === 'coin') { pending.coins = Math.max(pending.coins, action.coins); pending.liked ||= Boolean(action.selectLike); }
+  return pending;
+}
 
 export function coinChoices(limit: number, given: number): (1 | 2)[] {
   return ([1, 2] as const).filter(value => value <= Math.max(0, limit - given));

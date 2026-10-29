@@ -4,6 +4,39 @@ import XCTest
 @testable import Bilight
 
 final class VideoSupportTests: XCTestCase {
+    @MainActor func testLikeCoinAndTripleUpdateBeforeTheRequestAndSilentlyRestoreTheExactPriorState() async throws {
+        let (client, http) = fixture { request in
+            XCTAssertEqual(request.httpMethod, "GET", "This test cannot send a real or simulated engagement write")
+            Thread.sleep(forTimeInterval: 0.15)
+            throw URLError(.notConnectedToInternet)
+        }
+        _ = try await http.acceptLogin(cookies)
+        let before = VideoEngagement(liked: true, coins: 1, favorited: false)
+        let actions: [(VideoWrite, VideoEngagement)] = [
+            (.like(false), VideoEngagement(liked: false, coins: 1, favorited: false)),
+            (.coin(target: 2, like: true), VideoEngagement(liked: true, coins: 2, favorited: false)),
+            (.triple, VideoEngagement(liked: true, coins: 1, favorited: true)),
+        ]
+        for (action, expected) in actions {
+            let model = VideoSupportModel()
+            model.reset(VideoStatistics(likes: 10, coins: 20, favorites: 30)); model.state = before
+            let request = Task { await model.write(client: client, bvid: bvid, action: action) }
+            while !model.busy { await Task.yield() }
+            XCTAssertEqual(model.state, expected, "The icon state must change while the read is still pending")
+            XCTAssertEqual(model.statistics?.likes, 10); XCTAssertEqual(model.statistics?.coins, 20)
+            let result = await request.value
+            XCTAssertFalse(result); XCTAssertEqual(model.state, before)
+            XCTAssertNil(model.error); XCTAssertFalse(model.busy)
+            XCTAssertTrue(model.refreshRequired, "An uncertain result still needs a real read before the next write")
+        }
+        let model = VideoSupportModel(); model.state = before
+        let request = Task { await model.write(client: client, bvid: bvid, action: .triple) }
+        while !model.busy { await Task.yield() }
+        model.reset(nil)
+        _ = await request.value
+        XCTAssertNil(model.state, "An old failure cannot restore the previous account's state")
+        XCTAssertNil(model.error)
+    }
     private let bvid = "BV0000000001"
     private var cookies: [HTTPCookie] {
         ["SESSDATA", "bili_jct"].map {

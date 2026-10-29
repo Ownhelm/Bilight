@@ -8,7 +8,7 @@ import java.io.File
 import java.nio.ByteBuffer
 
 /** Generate tiny synthetic media on the test device. No promotional or account-related media is stored in Git. */
-internal fun encodedFixture(file: File, audio: Boolean) {
+internal fun encodedFixture(file: File, audio: Boolean, durationSeconds: Int = 1) {
     val mime=if (audio) "audio/mp4a-latm" else "video/avc"
     val format=if (audio) MediaFormat.createAudioFormat(mime,44100,1).apply {
         setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC)
@@ -28,7 +28,7 @@ internal fun encodedFixture(file: File, audio: Boolean) {
                 val index=codec.dequeueInputBuffer(10000)
                 if (index>=0) {
                     val buffer=codec.getInputBuffer(index)!!; buffer.clear()
-                    if (input>=if (audio) 44 else 10) { codec.queueInputBuffer(index,0,0,if (audio) samples*1_000_000/44100 else 1_000_000,MediaCodec.BUFFER_FLAG_END_OF_STREAM); ended=true }
+                    if (input>=(if (audio) 44 else 10)*durationSeconds) { codec.queueInputBuffer(index,0,0,if (audio) samples*1_000_000/44100 else durationSeconds*1_000_000L,MediaCodec.BUFFER_FLAG_END_OF_STREAM); ended=true }
                     else {
                         val bytes=if (audio) ByteArray(minOf(2048,buffer.remaining())/2*2) { i -> if (i%2==0) ((i/2+samples)%200).toByte() else 0 } else ByteArray(64*64*3/2) { i -> if (i<64*64) (32+input*16).toByte() else 128.toByte() }
                         val pts=if (audio) samples*1_000_000/44100 else input*100000L

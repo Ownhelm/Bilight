@@ -4,7 +4,15 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { TripleActions } from '../src/TripleActions.js';
 import { createLikePress, LIKE_HOLD_MS } from '../src/likePress.js';
-import { coinChoices, engagementCounts, favoriteChanged } from '../src/interactionModel.js';
+import { coinChoices, engagementCounts, favoriteChanged, optimisticEngagement } from '../src/interactionModel.js';
+
+test('optimistic icons preserve the previous state and do not invent public totals', () => {
+  const before = { liked: true, coins: 1, favorited: false };
+  assert.deepEqual(optimisticEngagement(before, 'like'), { ...before, liked: false });
+  assert.deepEqual(optimisticEngagement(before, { type: 'coin', coins: 2, selectLike: true }), { ...before, coins: 2 });
+  assert.deepEqual(optimisticEngagement(before, 'triple'), { liked: true, coins: 1, favorited: true });
+  assert.deepEqual(before, { liked: true, coins: 1, favorited: false });
+});
 
 test('a short press likes once, a long press triples once and does not also click like', t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });

@@ -5,6 +5,49 @@ import XCTest
 @testable import Bilight
 
 final class BufferingIndicatorTests: XCTestCase {
+    @MainActor func testPlaybackFailureAfterStartingExposesAnErrorAndIgnoresOldItems() async throws {
+        let model = PlayerModel()
+        defer { model.stop() }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let item = AVPlayerItem(url: media)
+        model.player.replaceCurrentItem(with: item); model.player.play()
+        try await waitUntil("The sample must play before a midstream failure") { model.player.currentTime().seconds > 0.1 }
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: item,
+            userInfo: [AVPlayerItemFailedToPlayToEndTimeErrorKey: URLError(.networkConnectionLost)])
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNotNil(model.error, "A terminal failure on an already started item must expose the retry path")
+        XCTAssertEqual(model.player.timeControlStatus, .paused)
+        model.error = nil
+        let replacement = AVPlayerItem(url: media)
+        model.player.replaceCurrentItem(with: replacement)
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: item)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(model.error, "An old item's failure cannot affect a replacement source")
+        model.busy = true
+        NotificationCenter.default.post(name: .AVPlayerItemFailedToPlayToEndTime, object: replacement)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertNil(model.error, "The outgoing item's failure cannot overwrite an in-progress quality switch")
+        XCTAssertTrue(model.busy)
+    }
+
+    @MainActor func testUnresolvedBufferingHasAnExitAndPauseCancelsItsDeadline() async throws {
+        let model = PlayerModel(bufferingTimeout: .milliseconds(250))
+        let held = HeldMediaResource()
+        let asset = AVURLAsset(url: URL(string: "bilight-buffering-test://media/timeout.mp4")!)
+        asset.resourceLoader.setDelegate(held, queue: .main)
+        defer { model.stop(); held.cancel(); asset.cancelLoading() }
+        model.player.replaceCurrentItem(with: AVPlayerItem(asset: asset)); model.player.play()
+        try await waitUntil("The unresolved stream must genuinely be waiting") { held.receivedRequest && model.player.timeControlStatus == .waitingToPlayAtSpecifiedRate }
+        model.player.pause()
+        try await Task.sleep(for: .milliseconds(350))
+        XCTAssertNil(model.error, "An intentional pause cannot become a buffering error")
+        model.player.play()
+        try await waitUntil("Resuming must enter a new waiting interval") { model.player.timeControlStatus == .waitingToPlayAtSpecifiedRate }
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNotNil(model.error, "Unresolved media must leave the endless spinner and expose retry")
+        XCTAssertEqual(model.player.timeControlStatus, .paused)
+    }
+
     @MainActor func testPreparingAndFailedSourcesHaveClearLoadingFeedback() async throws {
         let fixture = try await makePlayer()
         defer { fixture.close() }
@@ -22,6 +65,23 @@ final class BufferingIndicatorTests: XCTestCase {
         fixture.model.stop()
         fixture.container.updateLoadingIndicator()
         XCTAssertTrue(indicator.isHidden)
+    }
+
+    @MainActor func testTemporaryBufferingRecoversOnTheSameItemBeforeItsDeadline() async throws {
+        let model = PlayerModel(bufferingTimeout: .seconds(1))
+        let held = HeldMediaResource()
+        let asset = AVURLAsset(url: URL(string: "bilight-buffering-test://media/temporary.mp4")!)
+        asset.resourceLoader.setDelegate(held, queue: .main)
+        defer { model.stop(); held.cancel(); asset.cancelLoading() }
+        let item = AVPlayerItem(asset: asset)
+        model.player.replaceCurrentItem(with: item); model.player.play()
+        try await waitUntil("A temporary interruption really enters waiting") { held.receivedRequest && model.player.timeControlStatus == .waitingToPlayAtSpecifiedRate }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        held.resume(with: try Data(contentsOf: media))
+        try await waitUntil("Restored media must continue using the original player item") { model.player.timeControlStatus == .playing && model.player.currentTime().seconds > 0.1 }
+        try await Task.sleep(for: .milliseconds(1100))
+        XCTAssertTrue(model.player.currentItem === item)
+        XCTAssertNil(model.error, "A cancelled buffering deadline cannot interrupt recovered playback")
     }
 
     @MainActor func testRealWaitingPausingPlaybackAndFullscreenUpdateSameIndicator() async throws {
@@ -124,9 +184,11 @@ final class BufferingIndicatorTests: XCTestCase {
 /// Keeps the real AVFoundation load pending without sockets, credentials or external requests.
 private final class HeldMediaResource: NSObject, AVAssetResourceLoaderDelegate {
     private var requests: [AVAssetResourceLoadingRequest] = []
+    private var media: Data?
     private(set) var receivedRequest = false
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
         receivedRequest = true; requests.append(loadingRequest)
+        if let media { resume(with: media) }
         return true
     }
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, didCancel loadingRequest: AVAssetResourceLoadingRequest) {
@@ -135,5 +197,20 @@ private final class HeldMediaResource: NSObject, AVAssetResourceLoaderDelegate {
     func cancel() {
         let pending = requests; requests = []
         for request in pending where !request.isFinished && !request.isCancelled { request.finishLoading(with: URLError(.cancelled)) }
+    }
+    func resume(with media: Data) {
+        self.media = media
+        let pending = requests; requests = []
+        for request in pending where !request.isFinished && !request.isCancelled {
+            if let info = request.contentInformationRequest {
+                info.contentType = "public.mpeg-4"; info.contentLength = Int64(media.count); info.isByteRangeAccessSupported = true
+            }
+            if let data = request.dataRequest {
+                let start = Int(max(data.currentOffset, data.requestedOffset))
+                let end = data.requestsAllDataToEndOfResource ? media.count : min(media.count, Int(data.requestedOffset) + data.requestedLength)
+                if start < end { data.respond(with: media.subdata(in: start..<end)) }
+            }
+            request.finishLoading()
+        }
     }
 }

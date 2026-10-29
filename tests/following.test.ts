@@ -5,6 +5,25 @@ import { completeFollowingRows, FollowingFeed, followingColumns, mergeFollowing,
 
 const video = (bvid: string, publishedAt: number, title = bvid): VideoSummary => ({ bvid, publishedAt, title, aid: 1, cover: '', duration: 10, owner: { mid: 42, name: '关注的 UP 主', avatar: '' } });
 
+test('following entry resets scroll, replaces an in-flight later page and coalesces a pending refresh', async () => {
+  const requests: string[] = [];
+  let finish!: (page: { items: VideoSummary[]; hasMore: boolean }) => void, laterSignal!: AbortSignal;
+  const cache = new FollowingFeed(async (cursor, signal) => {
+    requests.push(cursor);
+    if (cursor) { laterSignal = signal; return await new Promise(resolve => { finish = resolve; }); }
+    return { items: [video('BV0000000001', 20)], hasMore: true, nextCursor: 'next' };
+  });
+  await cache.ensureLoaded();
+  const later = cache.loadMore(); cache.scrollTop = 900;
+  const fresh = cache.enter(); void cache.enter();
+  assert.equal(laterSignal.aborted, true); assert.equal(cache.scrollTop, 0);
+  await fresh;
+  finish({ items: [video('BV0000000002', 10)], hasMore: false }); await later;
+  assert.deepEqual(requests, ['', 'next', '']);
+  assert.equal(cache.getSnapshot().items.length, 1);
+  assert.equal(cache.getSnapshot().entry, 2);
+});
+
 test('a scrolling following feed merges overlapping pages in publication order without repeating videos', () => {
   const first = [video('BV1xx411c7mD', 30), video('BV17x411w7KC', 20)];
   const original = [...first];

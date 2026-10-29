@@ -3,6 +3,7 @@ package app.bilight.android
 
 import android.net.Uri
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Timeline
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.exoplayer.analytics.PlayerId
@@ -24,12 +25,15 @@ class PlaybackPipelineTest {
         assertEquals(1, manifest.periodCount)
         var windows = 0
         InstrumentationRegistry.getInstrumentation().runOnMainSync {
+            val item = MediaItem.Builder().setUri("https://www.bilibili.com/bilight-manifest.mpd")
+                .setMediaMetadata(MediaMetadata.Builder().setTitle("锁屏DASH测试").build()).build()
             val source = DashMediaSource.Factory(DefaultDataSource.Factory(ApplicationProvider.getApplicationContext()))
-                .createMediaSource(manifest)
+                .createMediaSource(manifest,item)
             val caller = MediaSource.MediaSourceCaller { _, timeline -> windows = timeline.windowCount }
             source.prepareSource(caller, null, PlayerId.UNSET)
             // A sideloaded static manifest publishes its timeline immediately, without a data: URI loader.
             assertEquals(1, windows)
+            assertEquals("锁屏DASH测试",source.mediaItem.mediaMetadata.title)
             source.releaseSource(caller)
         }
     }

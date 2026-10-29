@@ -4,7 +4,7 @@ export class ApiError extends Error {
   constructor(public code: string, message: string, public status = 0) { super(message); this.name = 'ApiError'; }
 }
 
-export async function api<T>(url: string, options: { method?: string; body?: unknown; signal?: AbortSignal; keepalive?: boolean } = {}): Promise<T> {
+export async function api<T>(url: string, options: { method?: string; body?: unknown; signal?: AbortSignal; keepalive?: boolean; silentAuthFailure?: boolean } = {}): Promise<T> {
   let response: Response;
   try {
     const method = options.method ?? 'GET';
@@ -18,9 +18,10 @@ export async function api<T>(url: string, options: { method?: string; body?: unk
     throw new ApiError('NETWORK_ERROR', '暂时连接不到本地服务，请稍后重试。');
   }
   const body: unknown = await response.json().catch((error: unknown) => { if (isAbort(error)) throw error; return null; });
+  if (options.signal?.aborted) throw new DOMException('请求已取消。', 'AbortError');
   if (!response.ok) {
     const error = (body as ApiErrorBody | null)?.error;
-    if (response.status === 401) window.dispatchEvent(new Event('bilight:session-expired'));
+    if (response.status === 401) window.dispatchEvent(new CustomEvent('bilight:session-expired', { detail: { silent: options.silentAuthFailure === true } }));
     throw new ApiError(error?.code ?? String(response.status), error?.message ?? '请求未完成，请稍后重试。', response.status);
   }
   return body as T;

@@ -7,6 +7,8 @@ import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import app.bilight.android.playback.PlaybackModel
 
 sealed interface Route {
@@ -52,6 +54,10 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     var feedIndex = 0
     var feedOffset = 0
     var feedAnchor: String? = null
+    var feedEntryRevision by mutableLongStateOf(0); private set
+    private var handledFeedEntry = 0L
+    private var feedRequest = 0L
+    var feedRefreshing by mutableStateOf(false); private set
     private var feedCursor: String? = null
     private var feedJob: Job? = null
     val relations = mutableStateMapOf<Long,Relation>()
@@ -103,8 +109,8 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
             sessionRevision++; searchRevision++
             currentPlayback?.close(); currentPlayback=null
             downloads.pauseAll()
-            feedJob?.cancel(); accountJobs.forEach(Job::cancel); accountJobs.clear()
-            following.clear(); expandedPosts.clear(); feedLoaded = false; feedMore = false; feedBusy = false; feedError = null
+            feedRequest++; feedJob?.cancel(); accountJobs.forEach(Job::cancel); accountJobs.clear()
+            following.clear(); expandedPosts.clear(); feedLoaded = false; feedMore = false; feedBusy = false; feedRefreshing=false; feedError = null
             feedCursor = null; feedIndex = 0; feedOffset = 0; feedAnchor=null; relations.clear(); followBusy.clear(); routes.clear()
             repository.invalidateFollowing()
             searchJob?.cancel(); searchItems.clear(); searched=false; searchBusy=false; searchIndex=0; searchOffset=0
@@ -121,20 +127,37 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
         viewModelScope.launch { try { update(http.acceptLogin(header)); error = null; showLogin = false; complete(true,null) } catch (e: CancellationException) { throw e } catch (e: Exception) { complete(false,e.message) } finally { if (accountVersion!=http.generation) update(http.user) } }
     fun logout() { viewModelScope.launch { http.logout(); update(null); showAccount = false } }
     fun loadFeed(refresh: Boolean = false) {
-        if (!requireLogin() || feedBusy || (!refresh && feedLoaded && !feedMore)) return
+        if (!requireLogin() || (feedBusy && (!refresh || feedRefreshing)) || (!refresh && feedLoaded && !feedMore)) return
+        val token=++feedRequest
+        feedJob?.cancel(); feedRefreshing=refresh || !feedLoaded
+        val resetting=feedRefreshing
         val version = http.generation
         feedBusy = true; feedError = null
         if (refresh) repository.invalidateFollowing()
         feedJob = viewModelScope.launch {
+            val began=android.os.SystemClock.elapsedRealtime()
             try {
                 val result = repository.following(if (refresh || !feedLoaded) null else feedCursor)
-                http.check(version)
+                http.check(version); if (feedRequest!=token) return@launch
                 if (refresh || !feedLoaded) { following.clear(); feedIndex = 0; feedOffset = 0; feedAnchor=null }
                 val known = following.map { it.id }.toSet(); following.addAll(result.items.filter { it.id !in known })
                 feedLoaded = true; feedMore = result.more; feedCursor = result.cursor
-            } catch (e: CancellationException) { throw e } catch (e: Exception) { if (version == http.generation) feedError = e.message ?: "关注动态读取失败，请重试。" }
-            finally { if (version == http.generation) feedBusy = false }
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { if (version == http.generation && feedRequest==token) feedError = e.message ?: "关注动态读取失败，请重试。" }
+            finally {
+                // Keep fast refreshes visible without issuing another network request.
+                if (resetting && isActive) delay((400-(android.os.SystemClock.elapsedRealtime()-began)).coerceAtLeast(0))
+                if (version == http.generation && feedRequest==token) { feedBusy = false; feedRefreshing=false }
+            }
         }
+    }
+    fun enterFollowing() {
+        tab=1; feedIndex=0; feedOffset=0; feedAnchor=null; feedEntryRevision++
+        if (user!=null) loadFeed(true)
+    }
+    fun consumeFeedEntry(): Boolean {
+        if (handledFeedEntry==feedEntryRevision) return false
+        handledFeedEntry=feedEntryRevision
+        return true
     }
     fun readRelation(mid: Long) {
         if (user == null || user?.mid == mid || relations.containsKey(mid)) return

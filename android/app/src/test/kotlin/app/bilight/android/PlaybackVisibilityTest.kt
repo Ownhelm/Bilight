@@ -5,13 +5,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class PlaybackVisibilityTest {
-    @Test fun duplicateStopCannotReplaceTheOriginalPlayIntentWithTheLifecyclePause() {
+    @Test fun duplicateStopDoesNotRestartPlaybackOnReturn() {
         val state=PlaybackVisibility(); state.leave(true); state.leave(false)
-        assertTrue(state.enter()); assertFalse(state.enter())
+        assertFalse(state.enter()); assertFalse(state.enter())
     }
-    @Test fun aSourcePreparedInTheBackgroundWaitsAndResumesWhenVisible() {
+    @Test fun aSourcePreparedInTheBackgroundKeepsItsAutoplayIntent() {
         val state=PlaybackVisibility(); state.leave(false)
-        assertFalse(state.prepared(true)); assertTrue(state.enter())
+        assertTrue(state.prepared(true)); assertFalse(state.enter())
     }
     @Test fun aUserPausedVideoStaysPausedAcrossHomeAndResume() {
         val state=PlaybackVisibility(); state.leave(false); assertFalse(state.enter())

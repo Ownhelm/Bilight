@@ -1,8 +1,46 @@
 import XCTest
+import SwiftUI
 
 @testable import Bilight
 
 final class DynamicTests: XCTestCase {
+    @MainActor func testProgrammaticRefreshRevealsTheNativeIndicatorAboveTheScrolledFeed() async throws {
+        let gate = DispatchSemaphore(value: 0)
+        var held = false, reads = 0
+        let (client, http) = fixture { request in
+            if request.url!.path == "/x/relation/relations" { return ["code": 0, "data": ["7": ["attribute": 2]]] }
+            reads += 1
+            if held { _ = gate.wait(timeout: .now() + 4) }
+            return ["code": 0, "data": ["items": (1...20).map { self.item(String(1057955152016703500 + $0)) }, "has_more": false]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client); app.user = User(mid: 3, name: "隔离测试", avatar: nil); app.restoring = false
+        let model = app.following; await model.enter(client: client, mid: 3)
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: FollowingView(model: model).environmentObject(app))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { gate.signal(); model.account(nil); window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        func scrolls(_ view: UIView) -> [UIScrollView] { (view as? UIScrollView).map { [$0] } ?? view.subviews.flatMap(scrolls) }
+        try await Task.sleep(for: .milliseconds(150))
+        let scroll = try XCTUnwrap(scrolls(host.view).first)
+        scroll.setContentOffset(CGPoint(x: 0, y: 400), animated: false)
+        held = true; model.requestEntry()
+        try await Task.sleep(for: .milliseconds(450))
+        let control = try XCTUnwrap(scroll.refreshControl)
+        XCTAssertTrue(control.isRefreshing, "An entry refresh must visibly open the native top refresh control")
+        XCTAssertLessThan(scroll.contentOffset.y, -20, "The indicator must be revealed above the feed, rather than merely jumping to its first card")
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "following-refresh-visible"; attachment.lifetime = .keepAlways; add(attachment)
+        model.requestEntry()
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(reads, 2, "Repeated entry taps must share the same refresh")
+        held = false; gate.signal()
+        try await Task.sleep(for: .milliseconds(650))
+        XCTAssertFalse(control.isRefreshing)
+        XCTAssertEqual(model.posts.count, 20)
+    }
+
     private func item(
         _ id: String = "1057955152016703512", mid: Int = 7, type: String = "DYNAMIC_TYPE_WORD", major: JSON? = nil
     ) -> JSON {
@@ -268,6 +306,13 @@ final class DynamicTests: XCTestCase {
         XCTAssertEqual(reads, 4)
         XCTAssertEqual(model.posts.count, 1)
         XCTAssertNil(model.visiblePostID)
+        model.requestEntry()
+        XCTAssertTrue(model.consumeEntry())
+        await model.refreshLatest(client: client, mid: 3)
+        XCTAssertEqual(reads, 5, "An explicit following-entry tap requests one fresh first page")
+        XCTAssertFalse(model.consumeEntry(), "Remounting the view must not consume the same tap twice")
+        await model.enter(client: client, mid: 3)
+        XCTAssertEqual(reads, 5, "Returning from a video after the tap still restores the cache")
         model.account(nil)
         XCTAssertTrue(model.posts.isEmpty)
         XCTAssertFalse(model.initialized)

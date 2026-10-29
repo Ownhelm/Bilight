@@ -14,6 +14,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -75,7 +78,7 @@ import kotlinx.coroutines.launch
         IconButton(onClick={ if (app.requireLogin()) app.open(Route.History) }) { Icon(Icons.Rounded.History,"我的历史",tint=Muted) }
     } },bottomBar={ NavigationBar(containerColor=Color.White) {
         NavigationBarItem(selected=app.tab==0,onClick={ app.tab=0 },icon={ Icon(Icons.Rounded.Search,"搜索") },label={ Text("搜索") },colors=NavigationBarItemDefaults.colors(selectedIconColor=Pink,selectedTextColor=Pink,indicatorColor=Color.Transparent))
-        NavigationBarItem(selected=app.tab==1,onClick={ app.tab=1 },icon={ Icon(painterResource(R.drawable.brand_playback),"关注",Modifier.size(26.dp)) },label={ Text("关注") },colors=NavigationBarItemDefaults.colors(selectedIconColor=Pink,selectedTextColor=Pink,indicatorColor=Color.Transparent))
+        NavigationBarItem(selected=app.tab==1,onClick={ app.enterFollowing() },icon={ Icon(painterResource(R.drawable.brand_playback),"关注",Modifier.size(26.dp)) },label={ Text("关注") },colors=NavigationBarItemDefaults.colors(selectedIconColor=Pink,selectedTextColor=Pink,indicatorColor=Color.Transparent))
     } }) { padding ->
         if (app.tab == 0) SearchScreen(app,Modifier.padding(padding),(padding.calculateBottomPadding()-padding.calculateTopPadding())/2) else key(app.sessionRevision) { FollowingScreen(app,Modifier.padding(padding)) }
     }
@@ -123,11 +126,15 @@ import kotlinx.coroutines.launch
     val revision=app.sessionRevision
     val list = rememberLazyListState(app.feedIndex,app.feedOffset)
     var userScrolled by remember { mutableStateOf(false) }
-    val connection = remember { object: NestedScrollConnection { override fun onPreScroll(available: Offset,source: NestedScrollSource): Offset { if (source==NestedScrollSource.UserInput && available.y < 0) userScrolled=true; return Offset.Zero } } }
+    var scrollEntryRevision by remember { mutableLongStateOf(app.feedEntryRevision) }
+    val refreshState=rememberPullToRefreshState()
+    val refreshInset by animateDpAsState(if (app.feedRefreshing) PullToRefreshDefaults.PositionalThreshold else 0.dp,label="following-refresh-window")
+    LaunchedEffect(app.feedEntryRevision) { if (app.consumeFeedEntry()) { userScrolled=false; list.scrollToItem(0) } }
+    val connection = remember { object: NestedScrollConnection { override fun onPreScroll(available: Offset,source: NestedScrollSource): Offset { if (source==NestedScrollSource.UserInput && available.y < 0) { userScrolled=true; scrollEntryRevision=app.feedEntryRevision }; return Offset.Zero } } }
     LaunchedEffect(app.user?.mid) { if (app.user!=null && !app.feedLoaded) app.loadFeed() }
     LaunchedEffect(list) {
         snapshotFlow {
-            userScrolled && app.feedMore && !app.feedBusy && app.feedError==null &&
+            userScrolled && scrollEntryRevision==app.feedEntryRevision && app.feedMore && !app.feedBusy && app.feedError==null &&
                 (list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1) >= (app.following.size-2).coerceAtLeast(0)
         }.collect { ready -> if (ready) { userScrolled=false;app.loadFeed() } }
     }
@@ -136,11 +143,14 @@ import kotlinx.coroutines.launch
         Text("我的关注",Modifier.padding(horizontal=20.dp,vertical=12.dp),fontSize=25.sp,fontWeight=FontWeight.Bold)
         Box(Modifier.fillMaxWidth().height(8.dp).background(Soft))
         if (app.user == null) { Column(Modifier.fillMaxSize(),Arrangement.Center,Alignment.CenterHorizontally) { Text("登录后查看关注动态",color=Muted); TextButton(onClick={ app.showLogin=true }) { Text("登录B站") } }; return }
-        PullToRefreshBox(isRefreshing=app.feedBusy && app.feedLoaded,onRefresh={ userScrolled=false; app.loadFeed(true) }) {
-            LazyColumn(state=list,modifier=Modifier.fillMaxSize().nestedScroll(connection)) {
+        PullToRefreshBox(state=refreshState,isRefreshing=app.feedRefreshing,onRefresh={ userScrolled=false; app.loadFeed(true) },indicator={
+            PullToRefreshDefaults.Indicator(state=refreshState,isRefreshing=app.feedRefreshing,
+                modifier=Modifier.align(Alignment.TopCenter).semantics { if (app.feedRefreshing) contentDescription="正在刷新关注动态" })
+        }) {
+            LazyColumn(state=list,modifier=Modifier.fillMaxSize().padding(top=refreshInset).nestedScroll(connection)) {
                 items(app.following,key={ it.id }) { PostCard(app,it); Box(Modifier.fillMaxWidth().height(8.dp).background(Soft)) }
                 if (app.feedLoaded && app.following.isEmpty() && !app.feedMore && app.feedError==null) item { Text("暂无关注动态",Modifier.padding(24.dp),color=Muted) }
-                item { PageMore(app.feedBusy,app.feedMore,app.feedError) { userScrolled=false; app.loadFeed() } }
+                if (!app.feedRefreshing) item { PageMore(app.feedBusy,app.feedMore,app.feedError) { userScrolled=false; app.loadFeed() } }
             }
         }
     }

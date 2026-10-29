@@ -72,6 +72,7 @@ import kotlin.math.min
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 @Composable fun VideoScreen(app: AppModel,route: Route.Watch) {
     val model=remember(route,app.http.generation) { app.playback(route) }
+    LaunchedEffect(model) { model.enableBackgroundPlayback() }
     val activity=checkNotNull(LocalActivity.current)
     val scope=rememberCoroutineScope()
     val lifecycle=LocalLifecycleOwner.current.lifecycle
@@ -136,7 +137,7 @@ import kotlin.math.min
         }
         val observer=LifecycleEventObserver { _,event -> when (event) {
             Lifecycle.Event.ON_RESUME -> { active=true; seenLandscape=false; model.foreground(); if (listener.canDetectOrientation()) listener.enable() }
-            Lifecycle.Event.ON_PAUSE -> { active=false; portraitTask?.cancel(); listener.disable(); if (model.fullscreen) keepFullscreenOnReturn=true }
+            Lifecycle.Event.ON_PAUSE -> { model.endTemporarySpeed(); active=false; portraitTask?.cancel(); listener.disable(); if (model.fullscreen) keepFullscreenOnReturn=true }
             Lifecycle.Event.ON_STOP -> model.background()
             else -> Unit
         } }
@@ -183,7 +184,7 @@ import kotlin.math.min
         if (model.controlsVisible) Box(Modifier.matchParentSize().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha=.25f),Color.Transparent,Color.Transparent,Color.Black.copy(alpha=.4f)))))
         val widthPx=with(density) { maxWidth.toPx() }
         val tracker=remember { VelocityTracker() }; var travel by remember { mutableFloatStateOf(0f) }; var horizontal by remember { mutableFloatStateOf(0f) }; var originX by remember { mutableFloatStateOf(0f) }
-        Box(Modifier.matchParentSize().semantics { contentDescription="视频画面"; stateDescription=if (model.error!=null) "播放失败" else if (model.buffering) "正在加载" else if (model.playing) "播放中" else "已暂停" }.pointerInput(widthPx) { detectTapGestures(onTap={ model.controlsVisible=!model.controlsVisible; interaction++ },onDoubleTap={ model.doubleTap(it.x/widthPx); interaction++ }) }.pointerInput(fullscreen,model.portraitFullscreen) {
+        Box(Modifier.matchParentSize().semantics { contentDescription="视频画面"; stateDescription=if (model.error!=null) "播放失败" else if (model.buffering) "正在加载" else if (model.playing) "播放中" else "已暂停" }.pointerInput(widthPx) { detectTapGestures(onTap={ model.controlsVisible=!model.controlsVisible; interaction++ },onDoubleTap={ model.doubleTap(it.x/widthPx); interaction++ },onLongPress={ model.beginTemporarySpeed() },onPress={ try { tryAwaitRelease() } finally { model.endTemporarySpeed() } }) }.pointerInput(fullscreen,model.portraitFullscreen) {
             if (fullscreen && maxHeight>maxWidth) detectVerticalDragGestures(onDragStart={ travel=0f; horizontal=0f; originX=it.x; tracker.resetTracking() },onVerticalDrag={ change,amount -> travel+=amount; horizontal=change.position.x-originX; tracker.addPosition(change.uptimeMillis,change.position) },onDragEnd={ if (travel>kotlin.math.abs(horizontal)*1.35f && (travel>80*density.density || travel>28*density.density && tracker.calculateVelocity().y>700*density.density)) exit() })
         })
         if (model.subtitleText.isNotEmpty()) Text(model.subtitleText,Modifier.align(Alignment.BottomCenter).padding(horizontal=22.dp).padding(bottom=if (model.controlsVisible) 56.dp else 16.dp).background(Color.Black.copy(alpha=.65f)).padding(horizontal=6.dp,vertical=2.dp),color=Color.White,fontSize=15.sp,lineHeight=20.sp,maxLines=2,overflow=TextOverflow.Ellipsis)

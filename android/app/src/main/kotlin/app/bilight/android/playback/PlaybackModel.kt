@@ -47,10 +47,11 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private val context = app.getApplication<android.app.Application>()
     private val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     private val preferences = PlaybackSettings(context)
-    val player = ExoPlayer.Builder(context).setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(12000,35000,1000,1500).setPrioritizeTimeOverSizeThresholds(true).build()).build().apply {
+    val player = ExoPlayer.Builder(context).setSeekBackIncrementMs(10000).setSeekForwardIncrementMs(10000).setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(12000,35000,1000,1500).setPrioritizeTimeOverSizeThresholds(true).build()).build().apply {
         setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true)
         repeatMode=Player.REPEAT_MODE_OFF
         setHandleAudioBecomingNoisy(true)
+        setWakeMode(C.WAKE_MODE_NETWORK)
     }
     var detail by mutableStateOf<Detail?>(null); private set
     var part by mutableStateOf<Part?>(null); private set
@@ -95,6 +96,9 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private var subtitleJob: Job? = null
     private var danmakuJob: Job? = null
     private var bufferJob: Job? = null
+    private var engagementRead: Job? = null
+    private var refreshSupport = false
+    private var temporarySpeed: Float? = null
     private val version=app.http.generation
     private val visibility=PlaybackVisibility()
     private var lastPosition=0L
@@ -141,9 +145,8 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         load()
         scope.launch { while (isActive) {
             delay(if (visibility.background) 1000 else 250)
-            if (visibility.background) continue
             position=player.currentPosition.coerceAtLeast(0); duration=player.duration.takeIf { it>0 } ?: ((playback?.duration ?: 0.0)*1000).toLong()
-            if (player.isPlaying && position-lastPosition in 1..1500) advanced=true
+            if (player.isPlaying && position-lastPosition in 1..(1500*maxOf(1f,speed)).toLong()) advanced=true
             lastPosition=position
             if (advanced && android.os.SystemClock.elapsedRealtime()-lastReport>=15000) flushHistory()
             val seconds=position/1000.0; subtitleText=cues.firstOrNull { seconds>=it.from && seconds<it.to }?.text.orEmpty()
@@ -163,7 +166,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
                 val file=app.downloads.file(item) ?: invalid("离线文件不存在，请重新下载。")
                 detail=Detail(item.video,listOf(item.part),"",2,Statistics(0,0,0)); part=item.part
                 playback=Playback(item.quality,listOf(Quality(item.quality,item.label)),item.part.duration.toDouble(),null,null,null)
-                player.setMediaItem(MediaItem.fromUri(Uri.fromFile(file)),route.progress*1000); player.prepare(); player.playWhenReady=visibility.prepared(true); preparing=false
+                player.setMediaItem(mediaItem(Uri.fromFile(file),item.part),route.progress*1000); player.prepare(); player.playWhenReady=visibility.prepared(true); preparing=false
                 return@launch
             }
             val value=app.repository.detail(route.bvid); app.http.check(version); detail=value
@@ -177,9 +180,10 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         val result=app.repository.playback(route.bvid,selected.cid,preferredQuality); app.http.check(version)
         playback=result
         val sourceFactory=DefaultDataSource.Factory(context,OkHttpDataSource.Factory(mediaClient))
-        val source=if (result.mp4!=null) ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(MediaItem.fromUri(result.mp4)) else {
+        val item=mediaItem(Uri.parse(result.mp4 ?: "https://www.bilibili.com/bilight-manifest.mpd"),selected)
+        val source=if (result.mp4!=null) ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(item) else {
             // Sideload the static MPD: Media3's CMCD URI handling rejects opaque data: URIs.
-            DashMediaSource.Factory(sourceFactory).createMediaSource(parsedDashManifest(result))
+            DashMediaSource.Factory(sourceFactory).createMediaSource(parsedDashManifest(result),item)
         }
         val target=if (preserveCurrent) player.currentPosition else progress
         val intent=if (preserveCurrent) visibility.currentIntent(player.playWhenReady) else autoplay
@@ -188,14 +192,23 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         preparing=false
         if (loadSupport) { loadSubtitles(selected); loadDanmaku() }
     }
+    private fun mediaItem(uri: Uri,selected: Part): MediaItem {
+        val video=detail?.video
+        val metadata=MediaMetadata.Builder().setTitle(video?.title).setArtist(video?.owner?.name)
+            .setAlbumTitle("P${selected.page} · ${selected.title}").setMediaType(MediaMetadata.MEDIA_TYPE_VIDEO)
+            .setIsPlayable(true).setIsBrowsable(false).setArtworkUri(video?.cover?.let(Uri::parse)).build()
+        return MediaItem.Builder().setMediaId("${route.bvid}:${selected.cid}").setUri(uri).setMediaMetadata(metadata).build()
+    }
     fun retry() { if (offline || detail==null || part==null) load() else selectPart(part ?: return,position) }
     fun selectPart(selected: Part,progress: Long = 0) {
+        endTemporarySpeed()
         if (offline) return
         flushHistory(); player.pause(); prepareJob?.cancel(); subtitleJob?.cancel(); danmakuJob?.cancel()
         part=selected; playback=null; tracks=emptyList(); subtitle=null; subtitleError=null; subtitleText=""; cues=emptyList(); danmakuItems=emptyList(); hasFrame=false; preparing=true; error=null; advanced=false; lastPosition=player.currentPosition; refreshedMedia=false
         prepareJob=scope.launch { try { prepare(selected,progress,true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
     fun chooseQuality(id: Int) {
+        endTemporarySpeed()
         if (offline) return
         if (playback?.qualities?.none { it.id==id } != false) return
         preferences.quality=id
@@ -205,7 +218,9 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         prepareJob?.cancel(); error=null; preparing=true; refreshedMedia=false
         prepareJob=scope.launch { try { prepare(selected,progress,autoplay,loadSupport=false,preserveCurrent=true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
-    fun speed(value: Float) { speed=value; player.setPlaybackSpeed(value) }
+    fun speed(value: Float) { speed=value; if (temporarySpeed!=null) temporarySpeed=value else player.setPlaybackSpeed(value) }
+    fun beginTemporarySpeed() { if (temporarySpeed==null && player.playWhenReady && playback!=null) { temporarySpeed=speed; player.setPlaybackSpeed(2f) } }
+    fun endTemporarySpeed() { val value=temporarySpeed ?: return; temporarySpeed=null; player.setPlaybackSpeed(value) }
     fun toggle() {
         if (error!=null) { retry(); return }; if (playback==null) return
         // Ended players can retain playWhenReady=true; replay must explicitly request playback.
@@ -224,7 +239,8 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         when (tapZone(fraction)) { TapZone.TOGGLE -> toggle(); TapZone.BACKWARD -> { seek(position-10000); seekHint="后退10秒 · ${clock(position/1000)}" }; TapZone.FORWARD -> { seek(position+10000); seekHint="前进10秒 · ${clock(position/1000)}" } }
         scope.launch { delay(700); seekHint=null }
     }
-    fun background() { visibility.leave(player.playWhenReady); flushHistory(); player.pause(); waiting=false; bufferJob?.cancel() }
+    fun enableBackgroundPlayback() { PlaybackService.attach(context,this) }
+    fun background() { endTemporarySpeed(); visibility.leave(player.playWhenReady); flushHistory() }
     fun foreground() { val resume=visibility.enter(); if (!closed && resume && error==null) player.playWhenReady=true }
     private fun flushHistory() {
         if (!advanced) return
@@ -236,15 +252,28 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         commentsBusy=true; commentsError=null
         scope.launch { try { val page=app.repository.comments("${d.video.aid}",cursor=commentCursor); app.http.check(version); val known=comments.map { it.id }.toSet(); comments.addAll(page.items.filter { it.id !in known }); commentsMore=page.more; commentCursor=page.cursor } catch (e: CancellationException) { throw e } catch (e: Exception) { commentsError=e.message } finally { commentsBusy=false } }
     }
-    fun readEngagement() { if (app.user==null) return; scope.launch { try { engagement=app.repository.engagement(route.bvid,true); supportError=null } catch (e: Exception) { supportError=e.message } } }
+    fun readEngagement() { if (app.user==null || actionBusy) return; engagementRead?.cancel(); engagementRead=scope.launch { try { val value=app.repository.engagement(route.bvid,true); app.http.check(version); if (!actionBusy) { engagement=value; refreshSupport=false; supportError=null } } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } } }
     fun write(action: VideoWrite) {
         if (!app.requireLogin() || actionBusy) return
-        val d=detail ?: return; actionBusy=true
+        val d=detail ?: return; actionBusy=true; engagementRead?.cancel()
+        val before=engagement; val pending=before ?: Engagement(false,0,false)
+        val silent=action !is VideoWrite.Favorite
+        engagement=when (action) {
+            is VideoWrite.Like -> pending.copy(liked=action.selected)
+            is VideoWrite.Coin -> pending.copy(coins=maxOf(pending.coins,action.target),liked=pending.liked || action.like)
+            VideoWrite.Triple -> pending.copy(liked=true,coins=maxOf(1,pending.coins),favorite=true)
+            is VideoWrite.Favorite -> before
+        }
+        supportError=null
         scope.launch { try {
-            engagement=app.repository.write(d,action); app.http.check(version); supportError=null
+            if (refreshSupport) app.repository.engagement(route.bvid,true)
+            app.http.check(version)
+            val value=app.repository.write(d,action); app.http.check(version); engagement=value; refreshSupport=false
             try { val fresh=app.repository.detail(route.bvid); app.http.check(version); detail=fresh }
-            catch (e: CancellationException) { throw e } catch (e: Exception) { supportError="互动已更新，计数暂时无法刷新：${e.message}" }
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } finally { actionBusy=false } }
+            catch (e: CancellationException) { throw e } catch (e: Exception) { if (!silent) supportError="互动已更新，计数暂时无法刷新：${e.message}" }
+        } catch (e: CancellationException) { if (!closed && app.http.generation==version) engagement=before; throw e }
+        catch (e: Exception) { if (!closed && app.http.generation==version) { engagement=before; refreshSupport=true; supportError=if (silent) null else e.message } }
+        finally { actionBusy=false } }
     }
     private fun loadSubtitles(selected: Part) {
         subtitleJob?.cancel(); subtitleError=null; cues=emptyList(); subtitleText=""; subtitle=null
@@ -268,7 +297,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         val cid=part?.cid ?: return; if (!danmaku) return
         danmakuJob=scope.launch { try { val bytes=app.http.bytes("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid"); val values=withContext(Dispatchers.Default) { Danmaku.parse(bytes) }; app.http.check(version); danmakuItems=values } catch (e: CancellationException) { throw e } catch (e: Exception) { danmakuError=e.message } }
     }
-    fun close() { if (closed) return; flushHistory(); closed=true; scope.cancel(); player.release(); mediaClient.dispatcher.cancelAll() }
+    fun close() { if (closed) return; endTemporarySpeed(); flushHistory(); closed=true; PlaybackService.detach(context,this); scope.cancel(); player.release(); mediaClient.dispatcher.cancelAll() }
 }
 
 private fun xml(value: String): String = value.replace("&","&amp;").replace("\"","&quot;").replace("<","&lt;").replace(">","&gt;")
