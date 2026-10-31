@@ -11,6 +11,8 @@ struct NativePlayer: UIViewControllerRepresentable {
         controller.player = model.player
         controller.delegate = context.coordinator
         controller.showsPlaybackControls = false
+        // AVKit's paused-frame Live Text layer otherwise covers our scrubber and fullscreen button.
+        controller.allowsVideoFrameAnalysis = false
         controller.allowsPictureInPicturePlayback = false
         controller.canStartPictureInPictureAutomaticallyFromInline = false
         controller.updatesNowPlayingInfoCenter = false

@@ -6,6 +6,53 @@ import XCTest
 
 /// Opt-in, anonymous and read-only. Never borrows the Mac or iPhone account's cookies.
 final class LiveSmokeTests: XCTestCase {
+    @MainActor func testReportedCCTVVideoHasPlayableSourceAndDecodedFrames() async throws {
+        guard ProcessInfo.processInfo.environment["BILIGHT_LIVE_SMOKE"] == "1" else { throw XCTSkip("Opt-in reported-video check") }
+        let client = BiliClient(http: BiliHTTP(vault: MemoryVault()))
+        let results = try await client.search("时政Vlog 老朋友来了 德国总统访华", users: false, page: 1)
+        let video = try XCTUnwrap(results.videos.first {
+            $0.owner.name == "央视新闻" && $0.title.contains("老朋友来了") && $0.title.contains("德国总统访华")
+        }, "The reported public video must be found; never replace it with a different sample")
+        let detail = try await client.video(video.bvid, known: video)
+        let part = try XCTUnwrap(detail.parts.first)
+        let model = PlayerModel()
+        defer { model.stop() }
+        model.load(client: client, bvid: video.bvid, part: part)
+        let deadline = Date().addingTimeInterval(50)
+        while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(model.busy, "Reported video preparation timed out")
+        XCTAssertNil(model.error, model.error ?? "")
+        let item = try XCTUnwrap(model.player.currentItem)
+        while item.status == .unknown && Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertEqual(item.status, .readyToPlay)
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: [
+            kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA
+        ])
+        item.add(output)
+        var colors = 0
+        let frameDeadline = Date().addingTimeInterval(15)
+        while colors <= 100 && Date() < frameDeadline {
+            if let frame = output.copyPixelBuffer(forItemTime: output.itemTime(forHostTime: CACurrentMediaTime()), itemTimeForDisplay: nil) {
+                colors = uniqueColors(frame)
+            }
+            if colors <= 100 { try await Task.sleep(for: .milliseconds(100)) }
+        }
+        XCTAssertGreaterThan(colors, 100, "The reported video must decode actual picture content")
+        let playingDeadline = Date().addingTimeInterval(10)
+        while model.player.currentTime().seconds <= 0.5 && Date() < playingDeadline {
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        XCTAssertGreaterThan(model.player.currentTime().seconds, 0.5)
+        let audio = try await item.asset.loadTracks(withMediaType: .audio)
+        XCTAssertFalse(audio.isEmpty)
+        model.player.pause()
+        let before = model.player.currentTime().seconds
+        model.seek(5)
+        try await Task.sleep(for: .seconds(1))
+        XCTAssertEqual(model.player.rate, 0)
+        XCTAssertEqual(model.player.currentTime().seconds, min(before + 5, part.duration), accuracy: 0.5)
+        print("[reported video smoke] decoded=\(colors) quality=\(model.playback?.quality ?? 0) mp4=\(model.playback?.mp4 != nil)")
+    }
     @MainActor func testRealSegmentedDASHVideoAudioAndSeeking() async throws {
         guard ProcessInfo.processInfo.environment["BILIGHT_LIVE_SMOKE"] == "1" else { throw XCTSkip("Opt-in live media check") }
         let client = BiliClient(http: BiliHTTP(vault: MemoryVault()))

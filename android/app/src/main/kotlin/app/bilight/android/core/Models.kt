@@ -25,6 +25,12 @@ fun mediaUrl(raw: String): String? = secureUrl(raw)?.takeIf { value ->
     val host = value.toHttpUrlOrNull()!!.host
     listOf("hdslb.com", "bilivideo.com", "bilivideo.cn").any { host == it || host.endsWith(".$it") }
 }
+// A rejected primary CDN URL does not invalidate the same file's safe upstream backups.
+internal fun JSONObject.mediaSourceUrl(vararg primaryKeys: String): String? =
+    (primaryKeys.map { text(it) } + listOf("backupUrl", "backup_url").flatMap { key ->
+        val values = optJSONArray(key)
+        (0 until (values?.length() ?: 0)).map { values!!.optString(it) }
+    }).firstNotNullOfOrNull(::mediaUrl)
 fun duration(raw: String): Long = if (raw.contains(':')) raw.split(':').fold(0L) { sum, v -> sum * 60 + (v.toLongOrNull() ?: 0) } else raw.toDoubleOrNull()?.toLong() ?: 0
 fun clock(seconds: Long): String = seconds.coerceAtLeast(0).let { if (it >= 3600) "%d:%02d:%02d".format(it / 3600, it / 60 % 60, it % 60) else "%d:%02d".format(it / 60, it % 60) }
 fun count(value: Long): String = when { value >= 100000000 -> String.format(Locale.CHINA, "%.1f亿", value / 1e8); value >= 10000 -> String.format(Locale.CHINA, "%.1f万", value / 1e4); else -> value.toString() }
@@ -79,7 +85,7 @@ data class Post(val id: String, val author: User, val published: Long, val actio
 }
 data class Track(val id: Int, val url: String, val codecs: String, val bandwidth: Long, val width: Int, val height: Int, val initialization: String, val indexRange: String) {
     companion object { fun parse(r: JSONObject): Track? {
-        val url = mediaUrl(r.text("baseUrl", r.text("base_url"))) ?: return null
+        val url = r.mediaSourceUrl("baseUrl", "base_url") ?: return null
         val segment = r.optJSONObject("SegmentBase") ?: r.obj("segment_base")
         val init = segment.text("Initialization", segment.text("initialization")); val index = segment.text("indexRange", segment.text("index_range"))
         if (!Regex("^\\d+-\\d+$").matches(init) || !Regex("^\\d+-\\d+$").matches(index)) return null

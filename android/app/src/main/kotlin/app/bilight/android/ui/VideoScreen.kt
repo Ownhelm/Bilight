@@ -10,7 +10,6 @@ import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -34,9 +33,6 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.LayoutDirection
 
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.changedToUpIgnoreConsumed
@@ -55,7 +51,6 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -305,9 +300,6 @@ import kotlin.math.min
     val detail=model.detail ?: return; val scope=rememberCoroutineScope()
     var folders by remember { mutableStateOf<List<Folder>?>(null) }; var selected by remember { mutableStateOf(emptySet<Long>()) }; var error by remember { mutableStateOf<String?>(null) }; var title by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
-    val titleRequester=remember { BringIntoViewRequester() }; var titleFocused by remember { mutableStateOf(false) }
-    val keyboardHeight=WindowInsets.ime.getBottom(LocalDensity.current)
-    LaunchedEffect(titleFocused,keyboardHeight) { if (titleFocused) { withFrameNanos { }; titleRequester.bringIntoView() } }
     LaunchedEffect(detail.video.aid) {
         // Deliver network completion on the main looper, independent of dialog frame dispatch.
         withContext(Dispatchers.Main.immediate) {
@@ -317,14 +309,24 @@ import kotlin.math.min
             } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message ?: "收藏夹暂时无法读取，请重新打开重试。" }
         }
     }
-    AlertDialog(onDismissRequest=close,modifier=Modifier.safeDrawingPadding().imePadding(),properties=DialogProperties(decorFitsSystemWindows=false),title={ Text("收藏到（${selected.size}）") },text={ Column(Modifier.fillMaxWidth().heightIn(max=460.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) {
-        ErrorNotice(error)
-        if (folders==null && error==null) Loading()
-        TextButton(onClick={ selected=emptySet() },enabled=selected.isNotEmpty()) { Text("取消全部") }
-        Column(Modifier.heightIn(max=260.dp).verticalScroll(androidx.compose.foundation.rememberScrollState())) { folders.orEmpty().forEach { folder -> Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(folder.id in selected,onCheckedChange={ checked -> selected=if (checked) selected+folder.id else selected-folder.id },enabled=folder.selected || folder.count<folder.capacity); Column { Text(folder.title); Text("${folder.count}/${folder.capacity}${if (folder.private) " · 私密" else ""}",fontSize=11.sp,color=Muted) } } } }
-        OutlinedTextField(title,onValueChange={ title=it },label={ Text("新建公开收藏夹",maxLines=1,overflow=TextOverflow.Ellipsis) },singleLine=true,modifier=Modifier.fillMaxWidth().bringIntoViewRequester(titleRequester).onFocusChanged { titleFocused=it.isFocused })
-        TextButton(onClick={ if (!creating) { creating=true; scope.launch { try { val folder=app.repository.createFolder(title); folders=folders.orEmpty()+folder; selected=selected+folder.id; title="" } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message } finally { creating=false } } } },enabled=title.isNotBlank() && !creating) { Text(if (creating) "正在新建" else "新建并勾选") }
-    } },confirmButton={ TextButton(onClick={ model.write(VideoWrite.Favorite(selected)); close() },enabled=folders!=null && selected!=folders!!.filter { it.selected }.map { it.id }.toSet()) { Text("确定") } },dismissButton={ TextButton(onClick=close) { Text("取消") } })
+    FavoriteSheet(
+        folders=folders, selected=selected, error=error, title=title, creating=creating,
+        onSelection={ selected=it }, onTitle={ title=it }, close=close,
+        confirm={ model.write(VideoWrite.Favorite(selected)); close() },
+        create={
+            if (!creating) {
+                creating=true
+                scope.launch {
+                    try {
+                        val folder=app.repository.createFolder(title)
+                        folders=folders.orEmpty()+folder; selected=selected+folder.id; title=""; error=null
+                    } catch (e: CancellationException) { throw e }
+                    catch (e: Exception) { error=e.message }
+                    finally { creating=false }
+                }
+            }
+        }
+    )
 }
 @Composable private fun PlayerSettings(model: PlaybackModel) {
     ModalBottomSheet(onDismissRequest={ model.settings=false },sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),dragHandle=null) { LazyColumn(modifier=Modifier.weight(1f,fill=false).navigationBarsPadding(),contentPadding=PaddingValues(20.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {

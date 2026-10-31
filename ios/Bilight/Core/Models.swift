@@ -202,8 +202,8 @@ struct StreamTrack {
     static func map(_ data: JSON?) -> StreamTrack? {
         guard let data else { return nil }
         let candidates =
-            [data["baseUrl"] ?? data["base_url"]]
-            + (data["backupUrl"] as? [Any] ?? data["backup_url"] as? [Any] ?? []).map(Optional.some)
+            [data["baseUrl"], data["base_url"]]
+            + (["backupUrl", "backup_url"].flatMap { data[$0] as? [Any] ?? [] }).map(Optional.some)
         guard let url = candidates.compactMap({ secureURL($0) }).first(where: MediaLoader.allowed) else { return nil }
         let segment = obj(data["SegmentBase"] ?? data["segment_base"])
         return StreamTrack(

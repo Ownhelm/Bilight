@@ -13,6 +13,7 @@ import AVKit
     private var itemStatus: NSKeyValueObservation?
     private var itemDuration: NSKeyValueObservation?
     private var scrubbing = false
+    private var pendingSeek: (id: UUID, item: AVPlayerItem, target: Double)?
     var onActivity: (() -> Void)?
     var isInteracting: Bool { scrubbing || progress.isTracking }
 
@@ -61,15 +62,16 @@ import AVKit
         status = player.observe(\.timeControlStatus, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.refresh() }
         }
-        item = player.observe(\.currentItem, options: [.initial, .new]) { [weak self] _, _ in
+        item = player.observe(\.currentItem, options: [.new]) { [weak self] _, _ in
             Task { @MainActor in self?.bindItem() }
         }
-        refresh()
+        bindItem()
     }
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     private func bindItem() {
         itemStatus?.invalidate(); itemDuration?.invalidate()
         scrubbing = false
+        pendingSeek = nil
         if let current = player.currentItem {
             itemStatus = current.observe(\.status, options: [.initial, .new]) { [weak self] _, _ in
                 Task { @MainActor in self?.refresh() }
@@ -91,7 +93,12 @@ import AVKit
         play.isEnabled = player.currentItem != nil && player.currentItem?.status != .failed
         progress.isEnabled = duration > 0
         guard !scrubbing else { return }
-        let value = player.currentTime().seconds
+        // AVPlayer may still report the old time until an asynchronous seek completes.
+        let value = pendingSeek.flatMap { $0.item === player.currentItem ? $0.target : nil }
+            ?? player.currentTime().seconds
+        displayProgress(value)
+    }
+    private func displayProgress(_ value: Double) {
         let position = value.isFinite ? min(duration, max(0, value)) : 0
         progress.maximumValue = Float(max(1, duration))
         progress.value = Float(position)
@@ -110,17 +117,27 @@ import AVKit
     }
     @objc private func beginScrubbing() { scrubbing = true; onActivity?() }
     @objc private func moveScrubber() {
-        elapsed.text = timeLabel(Double(progress.value))
+        displayProgress(Double(progress.value))
         // VoiceOver/keyboard changes have no touch-down/up sequence.
         if !scrubbing { seek(); onActivity?() }
     }
     @objc private func endScrubbing() { scrubbing = false; seek(); onActivity?() }
     @objc private func cancelScrubbing() { scrubbing = false; refresh(); onActivity?() }
     private func seek() {
-        guard duration > 0 else { return }
+        guard duration > 0, let current = player.currentItem else { pendingSeek = nil; refresh(); return }
         let target = min(duration, max(0, Double(progress.value)))
+        let id = UUID()
+        pendingSeek = (id, current, target)
+        displayProgress(target)
         // AVPlayer preserves play/pause intent; no extra play or rate assignment is needed.
-        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+        player.seek(to: CMTime(seconds: target, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] _ in
+            Task { @MainActor in
+                // A newer seek, item replacement or shutdown invalidates this completion.
+                guard let self, self.pendingSeek?.id == id else { return }
+                self.pendingSeek = nil
+                self.refresh()
+            }
+        }
     }
     func setVisible(_ visible: Bool, animated: Bool) {
         isUserInteractionEnabled = visible
@@ -130,6 +147,8 @@ import AVKit
         }
     }
     func stop() {
+        pendingSeek = nil
+        scrubbing = false
         if let observer { player.removeTimeObserver(observer); self.observer = nil }
         status?.invalidate(); status = nil
         item?.invalidate(); item = nil

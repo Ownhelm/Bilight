@@ -9,6 +9,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
@@ -123,8 +125,22 @@ class BiliRepository(val http: BiliHttp) {
         return Detail(video,parts,data.text("desc"),if (data.optInt("copyright") in listOf(1,3)) 2 else 1,Statistics(stat.optLong("like"),stat.optLong("coin"),stat.optLong("favorite")))
     }
     suspend fun playback(bvid: String, cid: Long, preferred: Int): Playback {
-        val data = http.request("/x/player/wbi/playurl",mapOf("bvid" to bvid,"cid" to "$cid","qn" to "$preferred","fnval" to "4048","fnver" to "0","fourk" to "1"),wbi=true,referer="https://www.bilibili.com/video/$bvid")
-        return mapPlayback(data,preferred)
+        val version = http.generation
+        val query = mapOf("bvid" to bvid,"cid" to "$cid","qn" to "$preferred","fnver" to "0","fourk" to "1")
+        suspend fun read(format: String): JSONObject {
+            currentCoroutineContext().ensureActive(); http.check(version)
+            try {
+                return http.request("/x/player/wbi/playurl",query + ("fnval" to format),wbi=true,referer="https://www.bilibili.com/video/$bvid").also { http.check(version) }
+            } catch (e: BiliFailure) { http.check(version); throw e }
+        }
+        val data = read("4048")
+        val result = try { mapPlayback(data,preferred) } catch (e: BiliFailure) {
+            if (e.code != "PLAYBACK_UNAVAILABLE") throw e
+            // One official MP4 read when DASH has no usable AVC/AAC source. Upstream errors propagate.
+            mapPlayback(read("1"),preferred)
+        }
+        currentCoroutineContext().ensureActive(); http.check(version)
+        return result
     }
     companion object {
         fun mapPlayback(data: JSONObject, preferred: Int): Playback {
@@ -134,13 +150,17 @@ class BiliRepository(val http: BiliHttp) {
                 val quality = selectQuality(video.map { it.id },preferred)
                 val track = video.filter { it.id == quality }.maxBy { it.bandwidth }
                 val audio = dash.rows("audio").filter { it.text("codecs").startsWith("mp4a") }.mapNotNull(Track::parse).maxByOrNull { it.bandwidth }
-                if (dash.rows("audio").isNotEmpty() && audio == null) invalid("没有可用的AAC音频轨道。")
+                if (dash.rows("audio").isNotEmpty() && audio == null) throw BiliFailure("PLAYBACK_UNAVAILABLE","B站返回的播放源没有可用的AAC音频轨道，请重试。")
                 val ids = data.optJSONArray("accept_quality"); val descriptions = data.optJSONArray("accept_description")
                 val qualities = video.map { it.id }.distinct().sortedDescending().map { id -> val i = (0 until (ids?.length() ?: 0)).firstOrNull { ids!!.optInt(it) == id }; Quality(id,i?.let { descriptions?.optString(it) } ?: "$id") }
                 return Playback(quality,qualities,dash.optDouble("duration"),track,audio,null)
             }
-            val entries = data.rows("durl"); val direct = entries.singleOrNull()?.text("url")?.let(::mediaUrl) ?: throw BiliFailure("PLAYBACK_UNAVAILABLE","账号暂时没有可用的AVC视频轨道，请检查权限或重试。")
-            val actual = data.optInt("quality"); return Playback(actual,listOf(Quality(actual,"当前画质")),data.optDouble("timelength")/1000,null,null,direct)
+            val direct = data.rows("durl").singleOrNull()?.mediaSourceUrl("url")
+            val actual = data.optInt("quality")
+            if (direct == null || actual <= 0 || !(data.text("format").startsWith("mp4",ignoreCase=true) || Regex("\\.mp4(?:\\?|$)",RegexOption.IGNORE_CASE).containsMatchIn(direct))) {
+                throw BiliFailure("PLAYBACK_UNAVAILABLE","B站返回的播放源没有可用的AVC/AAC轨道或完整MP4，请重试。")
+            }
+            return Playback(actual,listOf(Quality(actual,"当前画质")),data.optDouble("timelength")/1000,null,null,direct)
         }
     }
     suspend fun subtitles(bvid: String, cid: Long): List<Subtitle> = http.request("/x/player/wbi/v2",mapOf("bvid" to bvid,"cid" to "$cid"),wbi=true).obj("subtitle").rows("subtitles").mapNotNull { r -> mediaUrl(r.text("subtitle_url"))?.let { Subtitle(r.optLong("id"),r.text("lan"),r.text("lan_doc"),it) } }

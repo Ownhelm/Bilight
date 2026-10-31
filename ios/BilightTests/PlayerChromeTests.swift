@@ -6,6 +6,124 @@ import XCTest
 @testable import Bilight
 
 final class PlayerChromeTests: XCTestCase {
+    @MainActor func testScrubberKeepsSelectedProgressWhileSeekIsPending() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        progress.sendActions(for: .touchDown)
+        progress.value = 8
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        for position in [1.0, 1.2, 1.5] {
+            player.reportedPosition = position
+            controls.refresh()
+            XCTAssertEqual(progress.value, 8, "An unfinished seek must not flash the old player position")
+            XCTAssertEqual(progress.accessibilityValue, "0:08 / 0:12")
+        }
+        player.completeSeek(0, at: 8)
+        try await Task.sleep(for: .milliseconds(20))
+        player.reportedPosition = 8.5
+        controls.refresh()
+        XCTAssertEqual(progress.value, 8.5, accuracy: 0.01, "The slider must follow playback again after completion")
+        XCTAssertEqual(player.timeControlStatus, .paused)
+    }
+
+    @MainActor func testScrubberIgnoresOldCompletionDuringAnotherDragOrSeek() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        for target: Float in [8, 4] {
+            progress.sendActions(for: .touchDown)
+            progress.value = target
+            progress.sendActions(for: .valueChanged)
+            progress.sendActions(for: .touchUpInside)
+        }
+        player.completeSeek(0, at: 1, finished: false)
+        try await Task.sleep(for: .milliseconds(20))
+        controls.refresh()
+        XCTAssertEqual(progress.value, 4, "An interrupted older seek cannot clear the latest target")
+        progress.sendActions(for: .touchDown)
+        progress.value = 9
+        progress.sendActions(for: .valueChanged)
+        player.completeSeek(1, at: 4)
+        try await Task.sleep(for: .milliseconds(20))
+        controls.refresh()
+        XCTAssertEqual(progress.value, 9, "A previous completion cannot move an active drag")
+        progress.sendActions(for: .touchCancel)
+        XCTAssertEqual(progress.value, 4)
+        XCTAssertEqual(player.seekRequests.count, 2, "Cancelling a drag must not submit its target")
+    }
+
+    @MainActor func testScrubberAccessibilitySeekRecoversWhenInterrupted() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        progress.value = 6
+        progress.sendActions(for: .valueChanged)
+        controls.refresh()
+        XCTAssertEqual(progress.value, 6, "VoiceOver changes also need to retain their pending target")
+        player.completeSeek(0, at: 1.5, finished: false)
+        try await Task.sleep(for: .milliseconds(20))
+        controls.refresh()
+        XCTAssertEqual(progress.value, 1.5)
+        XCTAssertEqual(player.timeControlStatus, .paused)
+    }
+
+    @MainActor func testScrubberCancellingAnotherDragKeepsThePendingSeek() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        progress.sendActions(for: .touchDown)
+        progress.value = 6
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        progress.sendActions(for: .touchDown)
+        progress.value = 9
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchCancel)
+        controls.refresh()
+        XCTAssertEqual(progress.value, 6, "Cancelling a new drag must retain the previously submitted target")
+        XCTAssertEqual(player.seekRequests.count, 1)
+        player.completeSeek(0, at: 6)
+        try await Task.sleep(for: .milliseconds(20))
+        player.reportedPosition = 6.5
+        controls.refresh()
+        XCTAssertEqual(progress.value, 6.5)
+    }
+
+    @MainActor func testScrubberDiscardsPendingTargetWhenItemChanges() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        progress.sendActions(for: .touchDown)
+        progress.value = 8
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        let asset = try XCTUnwrap(player.currentItem?.asset)
+        player.reportedPosition = 2
+        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        let deadline = Date().addingTimeInterval(4)
+        repeat { try await Task.sleep(for: .milliseconds(20)) }
+        while player.currentItem?.status != .readyToPlay && Date() < deadline
+        controls.refresh()
+        XCTAssertEqual(progress.value, 2, "A new item cannot inherit the previous item's pending target")
+        player.completeSeek(0, at: 2, finished: false)
+        try await Task.sleep(for: .milliseconds(20))
+        player.reportedPosition = 2.5
+        controls.refresh()
+        XCTAssertEqual(progress.value, 2.5)
+    }
+
+    @MainActor private func deferredScrubber() async throws -> (DeferredSeekPlayer, PlaybackControls, UISlider) {
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let player = DeferredSeekPlayer(url: media)
+        let controls = PlaybackControls(player: player)
+        let deadline = Date().addingTimeInterval(4)
+        while player.currentItem?.status != .readyToPlay && Date() < deadline {
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        controls.refresh()
+        let progress = try XCTUnwrap(descendants(controls).first { $0.accessibilityIdentifier == "player-seek-slider" } as? UISlider)
+        XCTAssertTrue(progress.isEnabled)
+        XCTAssertEqual(progress.maximumValue, 12, accuracy: 0.1)
+        return (player, controls, progress)
+    }
+
     @MainActor func testLocalPlaybackPublishesLockScreenInformationAndClearsItOnStop() async throws {
         let model = PlayerModel()
         defer { model.stop() }
@@ -501,6 +619,13 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertTrue(progress.isEnabled)
         play.sendActions(for: .touchUpInside)
         XCTAssertEqual(model.player.timeControlStatus, .paused)
+        let container = try XCTUnwrap(containers(root).first)
+        XCTAssertFalse(container.controller.allowsVideoFrameAnalysis, "Paused-frame Live Text must not intercept custom playback controls")
+        for control in [progress, play, settings] {
+            let center = control.convert(CGPoint(x: control.bounds.midX, y: control.bounds.midY), to: window)
+            let hit = window.hitTest(center, with: nil)
+            XCTAssertTrue(hit === control || hit?.isDescendant(of: control) == true, "A paused player must deliver touches to \(control.accessibilityIdentifier ?? control.accessibilityLabel ?? "playback control")")
+        }
         progress.sendActions(for: .touchDown)
         progress.value = 3
         progress.sendActions(for: .valueChanged)
@@ -514,12 +639,24 @@ final class PlayerChromeTests: XCTestCase {
         play.sendActions(for: .touchUpInside)
         try await Task.sleep(for: .milliseconds(150))
         XCTAssertEqual(model.player.timeControlStatus, .playing)
-        let container = try XCTUnwrap(containers(root).first)
         let currentItem = model.player.currentItem
         container.enterFullscreen(rotate: false)
         try await Task.sleep(for: .milliseconds(250))
         XCTAssertTrue(model.isFullscreen)
         XCTAssertTrue(model.player.currentItem === currentItem)
+        let transport = try XCTUnwrap(descendants(container.controller.view).first { $0 is PlaybackControls } as? PlaybackControls)
+        progress.sendActions(for: .touchDown)
+        progress.value = 5
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        for _ in 0..<10 {
+            transport.refresh()
+            XCTAssertGreaterThanOrEqual(progress.value, 4.99, "A playing fullscreen slider must not flash back while seeking")
+            try await Task.sleep(for: .milliseconds(20))
+        }
+        XCTAssertTrue(model.isFullscreen)
+        XCTAssertTrue(model.player.currentItem === currentItem)
+        XCTAssertEqual(model.player.timeControlStatus, .playing)
         let fullscreenSettings = settings.convert(settings.bounds, to: window)
         for control in descendants(container.controller.view).compactMap({ $0 as? UIControl }).filter(visible) where control !== settings {
             XCTAssertFalse(control.convert(control.bounds, to: window).intersects(fullscreenSettings), "Fullscreen controls must not overlap settings")
@@ -543,6 +680,24 @@ final class PlayerChromeTests: XCTestCase {
             current = item.superview
         }
         return view.bounds.width > 0 && view.bounds.height > 0
+    }
+}
+
+/// Keep AVPlayer's real item/duration, but deliberately delay seek completion to expose UI races.
+private final class DeferredSeekPlayer: AVPlayer, @unchecked Sendable {
+    var reportedPosition = 1.0
+    var seekRequests: [(time: CMTime, completion: (@Sendable (Bool) -> Void)?)] = []
+    override func currentTime() -> CMTime { CMTime(seconds: reportedPosition, preferredTimescale: 600) }
+    override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime) {
+        seekRequests.append((time, nil))
+    }
+    override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime,
+                       completionHandler: @escaping @Sendable (Bool) -> Void) {
+        seekRequests.append((time, completionHandler))
+    }
+    func completeSeek(_ index: Int, at position: Double, finished: Bool = true) {
+        reportedPosition = position
+        seekRequests[index].completion?(finished)
     }
 }
 

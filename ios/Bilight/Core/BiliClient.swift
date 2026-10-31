@@ -482,43 +482,50 @@ actor BiliClient {
             coinLimit: [1, 3].contains(int(data["copyright"])) ? 2 : 1, statistics: try? VideoStatistics.map(obj(data["stat"])))
     }
     func playback(_ bvid: String, cid: Int, quality: Int = 127, allowNative: Bool = true) async throws -> Playback {
+        let version = await http.version()
         let data = try await http.request(
             "/x/player/wbi/playurl",
             query: ["bvid": bvid, "cid": "\(cid)", "qn": "\(quality)", "fnval": "4048", "fnver": "0", "fourk": "1"],
             wbi: true, referer: "https://www.bilibili.com/video/\(bvid)")
         // Prefer a complete native MP4 only when its actual quality meets the best returned DASH track.
-        let dashQuality = (try? Self.mapPlayback(data, native: nil, quality: quality))?.quality ?? 0
-        let native =
-            !allowNative || dashQuality >= 112
-            ? nil
-            : try? await http.request(
-                "/x/player/wbi/playurl",
-                query: ["bvid": bvid, "cid": "\(cid)", "qn": "\(quality)", "fnval": "1", "fnver": "0", "fourk": "1"],
-                wbi: true, referer: "https://www.bilibili.com/video/\(bvid)")
-        try Task.checkCancellation()
+        try Task.checkCancellation(); try await http.check(version)
+        let original = try? Self.mapPlayback(data, native: nil, quality: quality)
+        var native: JSON?
+        if allowNative && original?.mp4 == nil && (original?.quality ?? 0) < 112 {
+            do {
+                native = try await http.request(
+                    "/x/player/wbi/playurl",
+                    query: ["bvid": bvid, "cid": "\(cid)", "qn": "\(quality)", "fnval": "1", "fnver": "0", "fourk": "1"],
+                    wbi: true, referer: "https://www.bilibili.com/video/\(bvid)")
+            } catch {
+                try Task.checkCancellation(); try await http.check(version)
+                // When MP4 is the only remaining option, retain its actual network/permission error.
+                if original == nil { throw error }
+            }
+        }
+        try Task.checkCancellation(); try await http.check(version)
         return try Self.mapPlayback(data, native: native, quality: quality)
     }
     static func mapPlayback(_ data: JSON, native: JSON?, quality: Int) throws -> Playback {
         let dash = obj(data["dash"])
-        let videos = list(dash["video"]).filter { ($0["codecs"] as? String ?? "").hasPrefix("avc") }
-        let audios = list(dash["audio"]).filter { ($0["codecs"] as? String ?? "").hasPrefix("mp4a") }
+        let videos = list(dash["video"]).filter { ($0["codecs"] as? String ?? "").hasPrefix("avc") }.compactMap { StreamTrack.map($0) }
+        let audios = list(dash["audio"]).filter { ($0["codecs"] as? String ?? "").hasPrefix("mp4a") }.compactMap { StreamTrack.map($0) }
         let sorted = videos.sorted {
-            int($0["id"]) == int($1["id"]) ? int($0["bandwidth"]) > int($1["bandwidth"]) : int($0["id"]) > int($1["id"])
+            $0.id == $1.id ? $0.bandwidth > $1.bandwidth : $0.id > $1.id
         }
-        let lowest = sorted.last.map { int($0["id"]) }
-        let selected = sorted.first { int($0["id"]) <= quality } ?? sorted.first { int($0["id"]) == lowest }
+        let lowest = sorted.last?.id
+        let selected = sorted.first { $0.id <= quality } ?? sorted.first { $0.id == lowest }
         let accepted = data["accept_quality"] as? [Int] ?? []
         let labels = data["accept_description"] as? [String] ?? []
-        var qualities = Set(videos.map { int($0["id"]) }).sorted(by: >).map { id -> Quality in
+        let usableDASH = selected != nil && (list(dash["audio"]).isEmpty || !audios.isEmpty)
+        var qualities = Set(videos.map(\.id)).sorted(by: >).map { id -> Quality in
             let index = accepted.firstIndex(of: id)
             return Quality(id: id, label: index.flatMap { $0 < labels.count ? clean(labels[$0]) : nil } ?? "\(id)")
         }
-        if let native, (native["format"] as? String ?? "").hasPrefix("mp4") {
-            let entries = list(native["durl"])
+        if let native {
             let actual = int(native["quality"])
-            let candidates = [entries.first?["url"]] + (entries.first?["backup_url"] as? [Any] ?? []).map(Optional.some)
-            if entries.count == 1, actual > 0, actual <= quality, actual >= int(selected?["id"]),
-                let url = candidates.compactMap({ secureURL($0) }).first(where: MediaLoader.allowed)
+            if actual > 0, !usableDASH || (actual <= quality && actual >= (selected?.id ?? 0)),
+                let url = mp4URL(native)
             {
                 let ids = native["accept_quality"] as? [Int] ?? []
                 let descriptions = native["accept_description"] as? [String] ?? []
@@ -537,15 +544,16 @@ actor BiliClient {
                     quality: actual, qualities: qualities, duration: num(native["timelength"]) / 1000, mp4: url)
             }
         }
-        if let video = StreamTrack.map(selected) {
-            let audio = StreamTrack.map(audios.sorted { int($0["bandwidth"]) > int($1["bandwidth"]) }.first)
-            if !audios.isEmpty && audio == nil { throw BiliFailure.invalid }
+        if let video = selected {
+            let audio = audios.max { $0.bandwidth < $1.bandwidth }
+            if !list(dash["audio"]).isEmpty && audio == nil {
+                throw BiliFailure(code: "PLAYBACK_UNAVAILABLE", message: "B站返回的播放源没有可用的 AAC 音频轨道，请重试。")
+            }
             return Playback(
                 quality: video.id, qualities: qualities, duration: num(dash["duration"]), video: video, audio: audio)
         }
-        let direct = list(data["durl"])
-        guard direct.count == 1, let url = secureURL(direct.first?["url"]), MediaLoader.allowed(url) else {
-            throw BiliFailure(code: "PLAYBACK_UNAVAILABLE", message: "账号暂时没有可用的 AVC 视频轨道，请检查权限或稍后重试。")
+        guard int(data["quality"]) > 0, let url = mp4URL(data) else {
+            throw BiliFailure(code: "PLAYBACK_UNAVAILABLE", message: "B站返回的播放源没有可用的 AVC/AAC 轨道或完整 MP4，请重试。")
         }
         let actual = int(data["quality"])
         return Playback(
@@ -555,6 +563,16 @@ actor BiliClient {
                     id: actual,
                     label: accepted.firstIndex(of: actual).flatMap { $0 < labels.count ? labels[$0] : nil } ?? "当前画质")
             ], duration: num(data["timelength"]) / 1000, mp4: url)
+    }
+    private static func mp4URL(_ data: JSON) -> URL? {
+        let entries = list(data["durl"])
+        guard entries.count == 1, let entry = entries.first else { return nil }
+        let candidates = [entry["url"]]
+            + (["backup_url", "backupUrl"].flatMap { entry[$0] as? [Any] ?? [] }).map(Optional.some)
+        let isMP4 = (data["format"] as? String ?? "").lowercased().hasPrefix("mp4")
+        return candidates.compactMap { secureURL($0) }.first {
+            MediaLoader.allowed($0) && (isMP4 || $0.path.lowercased().hasSuffix(".mp4"))
+        }
     }
     func subtitles(_ bvid: String, cid: Int) async throws -> [SubtitleTrack] {
         let data = try await http.request("/x/player/wbi/v2", query: ["bvid": bvid, "cid": "\(cid)"], wbi: true)

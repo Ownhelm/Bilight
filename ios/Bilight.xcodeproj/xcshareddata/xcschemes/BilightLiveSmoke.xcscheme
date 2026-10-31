@@ -66,6 +66,9 @@
             </BuildableReference>
             <SelectedTests>
                <Test
+                  Identifier = "LiveSmokeTests/testReportedCCTVVideoHasPlayableSourceAndDecodedFrames">
+               </Test>
+               <Test
                   Identifier = "LiveSmokeTests/testRealNativeAVCAACPlaybackAndSeeking">
                </Test>
                <Test

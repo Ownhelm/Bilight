@@ -10,8 +10,8 @@ android {
     applicationId = "app.bilight.android"
     minSdk = 26
     targetSdk = 36
-    versionCode = 7
-    versionName = "0.1.4"
+    versionCode = 8
+    versionName = "0.1.5"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 

@@ -1,6 +1,68 @@
 import XCTest
 
 final class DynamicInteractionTests: XCTestCase {
+    func testRealScrubbingPreservesPositionAndPlaybackStateInlineAndFullscreen() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--regression-player"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"
+        app.launch()
+        defer { XCUIDevice.shared.orientation = .portrait; app.terminate() }
+        let position = app.staticTexts["lifecycle-position"]
+        XCTAssertTrue(position.waitForExistence(timeout: 12))
+        let ready = Date().addingTimeInterval(8)
+        while (Double(position.label) ?? 0) < 0.5 && Date() < ready { Thread.sleep(forTimeInterval: 0.1) }
+        XCTAssertGreaterThan(Double(position.label) ?? 0, 0.3)
+        let progress = app.sliders["player-seek-slider"]
+        let play = app.buttons["player-play-pause"]
+        func revealControls() {
+            if !progress.isHittable {
+                app.buttons["播放设置"].coordinate(withNormalizedOffset: CGVector(dx: -3, dy: 2)).tap()
+            }
+            XCTAssertTrue(progress.waitForExistence(timeout: 3))
+            XCTAssertTrue(progress.isHittable)
+        }
+        func seconds() -> Double {
+            let raw = (progress.value as? String ?? "").components(separatedBy: "/")[0]
+                .trimmingCharacters(in: .whitespaces)
+            let pieces = raw.split(separator: ":").compactMap { Double($0) }
+            XCTAssertEqual(pieces.count, 2, "The actual scrubber must expose elapsed time")
+            return pieces.count == 2 ? pieces[0] * 60 + pieces[1] : 0
+        }
+        func drag(to target: Double, playing: Bool) {
+            revealControls()
+            let thumbInset = min(0.2, 15 / progress.frame.width)
+            func point(_ time: Double) -> XCUICoordinate {
+                progress.coordinate(withNormalizedOffset: CGVector(
+                    dx: thumbInset + (1 - thumbInset * 2) * min(1, max(0, time / 60)), dy: 0.5))
+            }
+            point(seconds()).press(forDuration: 0.1, thenDragTo: point(target))
+            let released = seconds()
+            XCTAssertEqual(released, target, accuracy: 3, "Releasing a real drag must retain its selected position")
+            Thread.sleep(forTimeInterval: 0.2)
+            revealControls()
+            XCTAssertEqual(seconds(), released, accuracy: playing ? 3 : 1,
+                           "The released scrubber must stay at the new position rather than return to the old one")
+            XCTAssertEqual(play.label, playing ? "暂停" : "播放")
+            print("[real scrub] target=\(target) released=\(released) settled=\(seconds()) playing=\(playing)")
+        }
+        for fullscreen in [false, true] {
+            revealControls()
+            if fullscreen {
+                app.buttons["player-fullscreen-toggle"].tap()
+                Thread.sleep(forTimeInterval: 0.6)
+                revealControls()
+            }
+            if play.label == "暂停" { play.tap() }
+            XCTAssertEqual(play.label, "播放")
+            drag(to: 35, playing: false)
+            drag(to: 12, playing: false)
+            revealControls(); play.tap()
+            XCTAssertEqual(play.label, "暂停")
+            drag(to: 25, playing: true)
+        }
+    }
+
     func testSystemMediaControlsPauseAndResumeTheBackgroundPlayer() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--regression-player"]; app.launch()

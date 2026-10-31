@@ -389,6 +389,111 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(nativeRequests, 0, "A lower-quality native probe must not delay 4K preparation")
         XCTAssertLessThan(Date().timeIntervalSince(start), 0.25)
     }
+    private func playbackFixture(_ respond: @escaping (URLRequest) throws -> JSON) -> (BiliClient, BiliHTTP, MemoryVault) {
+        fixture { request in
+            if request.url!.path.hasSuffix("/nav") {
+                return ["code": 0, "data": ["wbi_img": [
+                    "img_url": "https://i0.hdslb.com/" + String(repeating: "a", count: 32) + ".png",
+                    "sub_url": "https://i0.hdslb.com/" + String(repeating: "b", count: 32) + ".png",
+                ]]]
+            }
+            XCTAssertEqual(request.httpMethod, "GET")
+            return try respond(request)
+        }
+    }
+    func testPlaybackIgnoresInvalidHigherTracksAndKeepsTheSafeLowerAVC() throws {
+        let data: JSON = ["dash": ["duration": 60, "video": [
+            ["id": 120, "codecs": "avc1.640033", "baseUrl": "https://untrusted.example/4k.m4s"],
+            ["id": 80, "codecs": "avc1.640028", "baseUrl": "https://cdn.bilivideo.com/video.m4s"],
+        ], "audio": []]]
+        let source = try BiliClient.mapPlayback(data, native: nil, quality: 127)
+        XCTAssertEqual(source.quality, 80)
+        XCTAssertEqual(source.qualities.map(\.id), [80])
+        XCTAssertEqual(source.video?.url.host, "cdn.bilivideo.com")
+    }
+    func testPlaybackMissingAVCReadsTheSamePartAsOfficialMP4Once() async throws {
+        var formats: [String] = []
+        let (client, _, _) = playbackFixture { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(query.first { $0.name == "bvid" }?.value, "BV0000000001")
+            XCTAssertEqual(query.first { $0.name == "cid" }?.value, "42")
+            XCTAssertEqual(query.first { $0.name == "qn" }?.value, "120")
+            let format = query.first { $0.name == "fnval" }!.value!
+            formats.append(format)
+            if format == "4048" { return ["code": 0, "data": ["dash": ["video": [["id": 80, "codecs": "hev1.1.6.L120.90"]]]]] }
+            return ["code": 0, "data": ["format": "mp4", "quality": 64, "timelength": 60_000,
+                "durl": [["url": "https://cdn.bilivideo.com:4483/video.mp4", "backupUrl": ["https://backup.bilivideo.com/video.mp4"]]]]]
+        }
+        let source = try await client.playback("BV0000000001", cid: 42, quality: 120)
+        XCTAssertEqual(formats, ["4048", "1"])
+        XCTAssertEqual(source.quality, 64)
+        XCTAssertEqual(source.mp4?.host, "backup.bilivideo.com")
+    }
+    func testPlaybackRequiredMP4FailureRetainsTheActualUpstreamError() async throws {
+        for failingFormat in ["4048", "1"] {
+            var formats: [String] = []
+            let (client, _, _) = playbackFixture { request in
+                let format = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!.first { $0.name == "fnval" }!.value!
+                formats.append(format)
+                if format == failingFormat { return ["code": -10403, "message": "真实权限错误"] }
+                return ["code": 0, "data": ["dash": ["video": []]]]
+            }
+            do {
+                _ = try await client.playback("BV0000000001", cid: 42)
+                XCTFail("Expected the actual permission error")
+            } catch let error as BiliFailure {
+                XCTAssertEqual(error.code, "-10403")
+                XCTAssertTrue(error.message.contains("真实权限错误"))
+            }
+            XCTAssertEqual(formats, failingFormat == "4048" ? ["4048"] : ["4048", "1"])
+        }
+    }
+    func testPlaybackMP4NetworkFailureIsNotReplacedByAnAccountError() async throws {
+        var reads = 0
+        let (client, _, _) = playbackFixture { _ in
+            reads += 1
+            if reads == 2 { throw URLError(.notConnectedToInternet) }
+            return ["code": 0, "data": ["dash": ["video": []]]]
+        }
+        do {
+            _ = try await client.playback("BV0000000001", cid: 42)
+            XCTFail("Expected the network failure")
+        } catch let error as URLError { XCTAssertEqual(error.code, .notConnectedToInternet) }
+        XCTAssertEqual(reads, 2)
+    }
+    func testPlaybackOptionalMP4ErrorCannotBreakAUsableDASHSource() async throws {
+        let (client, _, _) = playbackFixture { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            if query.first(where: { $0.name == "fnval" })?.value == "1" { return ["code": -10403, "message": "MP4 unavailable"] }
+            return ["code": 0, "data": ["dash": ["duration": 60, "video": [
+                ["id": 80, "codecs": "avc1.640028", "baseUrl": "https://cdn.bilivideo.com/video.m4s"]
+            ], "audio": []]]]
+        }
+        let source = try await client.playback("BV0000000001", cid: 42)
+        XCTAssertEqual(source.quality, 80); XCTAssertNotNil(source.video)
+    }
+    func testPlaybackUnusableAudioCanUseLowerMP4ButCannotBecomeSilentDASH() throws {
+        let data: JSON = ["dash": ["duration": 60, "video": [
+            ["id": 80, "codecs": "avc1.640028", "baseUrl": "https://cdn.bilivideo.com/video.m4s"]
+        ], "audio": [["id": 30251, "codecs": "fLaC", "baseUrl": "https://cdn.bilivideo.com/audio.m4s"]]]]
+        XCTAssertThrowsError(try BiliClient.mapPlayback(data, native: nil, quality: 80))
+        let native: JSON = ["format": "mp4", "quality": 64, "timelength": 60_000,
+            "durl": [["url": "https://cdn.bilivideo.com/video.mp4"]]]
+        let source = try BiliClient.mapPlayback(data, native: native, quality: 80)
+        XCTAssertEqual(source.quality, 64); XCTAssertNotNil(source.mp4)
+    }
+    func testPlaybackRejectsFLVAndPartialMP4WithoutBlamingTheAccount() throws {
+        for data: JSON in [
+            ["format": "flv", "quality": 64, "durl": [["url": "https://cdn.bilivideo.com/file.flv"]]],
+            ["format": "mp4", "quality": 64, "durl": [["url": "https://cdn.bilivideo.com/one.mp4"], ["url": "https://cdn.bilivideo.com/two.mp4"]]],
+            ["dash": ["video": []]],
+        ] {
+            XCTAssertThrowsError(try BiliClient.mapPlayback(data, native: nil, quality: 80)) { error in
+                XCTAssertEqual((error as? BiliFailure)?.code, "PLAYBACK_UNAVAILABLE")
+                XCTAssertFalse(error.localizedDescription.contains("账号"))
+            }
+        }
+    }
     func testAccountPeoplePreserveUpstreamAttentionOrderAndPagination() async throws {
         let (client, http, _) = fixture { request in
             if request.url!.path.hasSuffix("/nav") { return ["code": 0, "data": ["isLogin": true, "mid": 3, "uname": "Viewer"]] }
