@@ -5,8 +5,20 @@ import SwiftUI
 enum InteractionRegression {
     static var enabled: Bool { ProcessInfo.processInfo.arguments.contains("--interaction-regression") || player }
     static var player: Bool { ProcessInfo.processInfo.arguments.contains("--regression-player") }
+    static var gallery: Bool { ProcessInfo.processInfo.arguments.contains("--regression-gallery") }
     static var grid: Bool { ProcessInfo.processInfo.arguments.contains("--regression-grid") }
     static let imageURL = URL(string: "https://i0.hdslb.com/bilight-regression/tall.png")!
+    @MainActor static func galleryImage(_ url: URL) -> UIImage {
+        guard gallery else { return image }
+        let index = Int(URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "index" }?.value ?? "0") ?? 0
+        let size = index < 4 ? CGSize(width: 800, height: 800) : (index.isMultiple(of: 2) ? CGSize(width: 800, height: 300) : CGSize(width: 200, height: 800))
+        let format = UIGraphicsImageRendererFormat(); format.scale = 1
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            (index.isMultiple(of: 2) ? UIColor.systemPink : UIColor.systemBlue).setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            ("图片 \(index + 1)" as NSString).draw(at: CGPoint(x: 20, y: 80), withAttributes: [.font: UIFont.systemFont(ofSize: 50), .foregroundColor: UIColor.white])
+        }
+    }
     @MainActor static let image: UIImage = {
         let format = UIGraphicsImageRendererFormat(); format.scale = 1
         return UIGraphicsImageRenderer(size: CGSize(width: 80, height: 800), format: format).image { context in
@@ -21,7 +33,7 @@ enum InteractionRegression {
 struct InteractionRegressionView: View {
     @State private var ready = false
     private var post: DynamicPost {
-        let images = (0..<(InteractionRegression.grid ? 4 : 1)).map { index in
+        let images = (0..<(InteractionRegression.gallery ? 8 : InteractionRegression.grid ? 4 : 1)).map { index in
             PostImage(url: URL(string: InteractionRegression.imageURL.absoluteString + "?index=\(index)")!, width: 80, height: 800)
         }
         return DynamicPost(id: "123456789", author: User(mid: 7, name: "测试作者", avatar: nil), publishedAt: 0,

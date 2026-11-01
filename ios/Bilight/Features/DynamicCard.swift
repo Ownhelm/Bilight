@@ -75,11 +75,11 @@ struct DynamicCard: View {
                         Button {
                             app.open(post)
                         } label: {
-                            Label(post.comments > 0 ? "动态 · " + countLabel(post.comments) : "查看动态", systemImage: "text.bubble")
+                            Label(countLabel(post.comments), systemImage: "text.bubble")
                                 .frame(minHeight: 44).contentShape(Rectangle())
                         }.accessibilityLabel("查看动态详情，共\(post.comments)条评论").accessibilityIdentifier("dynamic-open-\(post.id)")
                     } else {
-                        Label(post.comments > 0 ? countLabel(post.comments) : "评论", systemImage: "text.bubble")
+                        Label(countLabel(post.comments), systemImage: "text.bubble")
                     }
                     Spacer()
                     Button { app.toggleDynamicLike(post) } label: {
@@ -195,14 +195,19 @@ private struct PostGallery: View {
     var body: some View {
         ZStack(alignment: .top) {
             Color.black.ignoresSafeArea()
-            TabView(selection: $selection) {
-                ForEach(Array(images.enumerated()), id: \.element.id) { index, image in
-                    // Only the selected image and its neighbours are requested, even in a long gallery.
-                    Group {
-                        if abs(index - selection) <= 1 { PostGalleryImage(image: image) } else { Color.black }
-                    }.tag(index)
-                }
-            }.tabViewStyle(.page(indexDisplayMode: .never))
+            GeometryReader { geometry in
+                ScrollView(.horizontal) {
+                    LazyHStack(spacing: 0) {
+                        ForEach(images.indices, id: \.self) { index in
+                            // Stable, viewport-sized pages keep image dimensions and page changes out of the drag.
+                            PostGalleryImage(image: images[index])
+                                .frame(width: geometry.size.width, height: geometry.size.height)
+                                .clipped().id(index)
+                        }
+                    }.scrollTargetLayout()
+                }.scrollTargetBehavior(.paging).scrollIndicators(.hidden)
+                    .scrollPosition(id: Binding<Int?>(get: { selection }, set: { if let index = $0 { selection = index } }))
+            }
             HStack {
                 Text("\(selection + 1) / \(images.count)").font(.subheadline.monospacedDigit())
                 Spacer()
@@ -222,8 +227,7 @@ private struct PostGalleryImage: View {
     @State private var error = false
     @State private var retry = 0
     var body: some View {
-        ZStack {
-            Color.black
+        Color.black.overlay {
             if let value {
                 Image(uiImage: value).resizable().scaledToFit()
             } else if error {

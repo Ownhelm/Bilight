@@ -285,6 +285,36 @@ final class DynamicInteractionTests: XCTestCase {
             XCTAssertGreaterThan(Double(position.label) ?? 0, start + 0.3, "Playback must advance after foregrounding")
         }
     }
+    func testGalleryPagesFollowSlowDragsAndKeepTheSelectedPage() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--interaction-regression", "--regression-gallery"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        let first = app.buttons["查看第1张图片，共8张"]
+        XCTAssertTrue(first.waitForExistence(timeout: 10)); first.tap()
+        XCTAssertTrue(app.staticTexts["1 / 8"].waitForExistence(timeout: 3))
+        func drag(_ from: CGFloat, _ to: CGFloat) {
+            app.coordinate(withNormalizedOffset: CGVector(dx: from, dy: 0.5))
+                .press(forDuration: 0.05, thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: to, dy: 0.5)), withVelocity: .slow, thenHoldForDuration: 0.2)
+        }
+        // A short, slow drag returns to the same page; a deliberate drag advances just one.
+        drag(0.7, 0.55)
+        XCTAssertTrue(app.staticTexts["1 / 8"].exists)
+        for page in 2...8 {
+            drag(0.85, 0.15)
+            XCTAssertTrue(app.staticTexts["\(page) / 8"].waitForExistence(timeout: 2))
+        }
+        for page in stride(from: 7, through: 1, by: -1) {
+            drag(0.15, 0.85)
+            XCTAssertTrue(app.staticTexts["\(page) / 8"].waitForExistence(timeout: 2))
+        }
+        app.buttons["关闭图片"].tap()
+        app.buttons["查看第6张图片，共8张"].tap()
+        XCTAssertTrue(app.staticTexts["6 / 8"].waitForExistence(timeout: 3), "Opening any thumbnail must retain its initial page")
+    }
+
     func testExpandDoesNotOpenPictureAndShowsFullText() throws {
         try assertExpand(grid: false)
     }

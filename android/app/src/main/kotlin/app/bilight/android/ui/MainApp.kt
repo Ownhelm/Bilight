@@ -205,14 +205,14 @@ import androidx.compose.ui.platform.testTag
             else if (!detail) TextButton(onClick={ app.open(Route.Dynamic(post)) }) { Text("查看动态") }
         } }
         if (!nested) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
-            TextButton(onClick=::share) { Icon(Icons.Rounded.Share,"分享动态链接",Modifier.size(17.dp),tint=Muted); Text(if (post.forwards>0) count(post.forwards) else "分享",color=Muted,fontSize=12.sp) }
+            TextButton(onClick=::share) { Icon(Icons.Rounded.Share,"分享动态链接",Modifier.size(17.dp),tint=Muted); Text(if (post.forwards>0) count(post.forwards) else "分享",Modifier.padding(start=5.dp),color=Muted,fontSize=12.sp) }
             Spacer(Modifier.weight(1f))
-            if (detail) Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ChatBubbleOutline,"${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) count(post.comments) else "评论",color=Muted,fontSize=12.sp) }
-            else TextButton(onClick={ app.open(Route.Dynamic(post)) },modifier=Modifier.testTag("dynamic-open-${post.id}")) { Icon(Icons.Rounded.ChatBubbleOutline,"查看动态详情，共${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) "动态 · ${count(post.comments)}" else "查看动态",color=Muted,fontSize=12.sp) }
+            if (detail) Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ChatBubbleOutline,"${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(count(post.comments),Modifier.padding(start=5.dp),color=Muted,fontSize=12.sp) }
+            else TextButton(onClick={ app.open(Route.Dynamic(post)) },modifier=Modifier.testTag("dynamic-open-${post.id}")) { Icon(Icons.Rounded.ChatBubbleOutline,"查看动态详情，共${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(count(post.comments),Modifier.padding(start=5.dp),color=Muted,fontSize=12.sp) }
             Spacer(Modifier.weight(1f))
             TextButton(onClick={ app.toggleDynamicLike(post) },enabled=!app.dynamicLikePending.containsKey(post.id),modifier=Modifier.heightIn(min=44.dp).testTag("dynamic-like-${post.id}").semantics(mergeDescendants=true) { contentDescription=(if(selected) "取消动态点赞" else "点赞动态")+"，${like.likes}赞"+(if(app.dynamicLikePending.containsKey(post.id)) "，正在处理" else "") }) {
                 Icon(if(selected) Icons.Rounded.ThumbUp else Icons.Rounded.ThumbUpOffAlt,null,Modifier.size(17.dp),tint=if(selected) Pink else Muted)
-                Text(if(like.likes>0) count(like.likes) else "赞",Modifier.padding(start=5.dp),color=if(selected) Pink else Muted,fontSize=12.sp)
+                Text(count(like.likes),Modifier.padding(start=5.dp),color=if(selected) Pink else Muted,fontSize=12.sp)
             }
         }
     }

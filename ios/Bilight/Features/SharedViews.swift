@@ -18,7 +18,7 @@ actor ImageRepository {
         #if DEBUG
             if InteractionRegression.enabled {
                 guard url.host == InteractionRegression.imageURL.host, url.path == InteractionRegression.imageURL.path else { throw BiliFailure.invalid }
-                return await InteractionRegression.image
+                return await InteractionRegression.galleryImage(url)
             }
             if DemoFixtures.enabled {
                 guard let image = DemoFixtures.image(url) else { throw BiliFailure.invalid }
