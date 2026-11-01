@@ -21,6 +21,11 @@ import java.util.concurrent.TimeUnit
 
 class PlaybackSettings(context: Context) {
     private val store = context.getSharedPreferences("playback-preferences",Context.MODE_PRIVATE)
+    var speed: Float
+        get() = store.getFloat("speed",1f).takeIf { it.isFinite() && it in .25f..4f } ?: 1f
+        set(value) { if (value.isFinite() && value in .25f..4f) store.edit().putFloat("speed",value).apply() }
+    var subtitlesEnabled: Boolean get() = store.getBoolean("subtitlesEnabled",true); set(value) { store.edit().putBoolean("subtitlesEnabled",value).apply() }
+    var subtitleLanguage: String? get() = store.getString("subtitleLanguage",null); set(value) { store.edit().putString("subtitleLanguage",value).apply() }
     var quality: Int get() = store.getInt("quality",127); set(value) { store.edit().putInt("quality",value).apply() }
     var danmaku: Boolean get() = store.getBoolean("danmaku",false); set(value) { store.edit().putBoolean("danmaku",value).apply() }
     var font: Int get() = store.getInt("danmakuFont",20); set(value) { store.edit().putInt("danmakuFont",value).apply() }
@@ -49,6 +54,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private val preferences = PlaybackSettings(context)
     val player = ExoPlayer.Builder(context).setSeekBackIncrementMs(10000).setSeekForwardIncrementMs(10000).setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(12000,35000,1000,1500).setPrioritizeTimeOverSizeThresholds(true).build()).build().apply {
         setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true)
+        setPlaybackSpeed(preferences.speed)
         repeatMode=Player.REPEAT_MODE_OFF
         setHandleAudioBecomingNoisy(true)
         setWakeMode(C.WAKE_MODE_NETWORK)
@@ -63,7 +69,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     val buffering get() = preparing || waiting || (!hasFrame && playback!=null && player.playWhenReady && player.playbackState!=Player.STATE_ENDED && error==null)
     var position by mutableLongStateOf(route.progress*1000); private set
     var duration by mutableLongStateOf(0); private set
-    var speed by mutableFloatStateOf(1f); private set
+    var speed by mutableFloatStateOf(preferences.speed); private set
     var error by mutableStateOf<String?>(null); private set
     var supportError by mutableStateOf<String?>(null); private set
     var subtitleError by mutableStateOf<String?>(null); private set
@@ -93,6 +99,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     var commentsExpanded by mutableStateOf(true)
     private var commentCursor: String? = null
     private var prepareJob: Job? = null
+    private var subtitleTracksJob: Job? = null
     private var subtitleJob: Job? = null
     private var danmakuJob: Job? = null
     private var bufferJob: Job? = null
@@ -203,7 +210,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     fun selectPart(selected: Part,progress: Long = 0) {
         endTemporarySpeed()
         if (offline) return
-        flushHistory(); player.pause(); prepareJob?.cancel(); subtitleJob?.cancel(); danmakuJob?.cancel()
+        flushHistory(); player.pause(); prepareJob?.cancel(); subtitleTracksJob?.cancel(); subtitleJob?.cancel(); danmakuJob?.cancel()
         part=selected; playback=null; tracks=emptyList(); subtitle=null; subtitleError=null; subtitleText=""; cues=emptyList(); danmakuItems=emptyList(); hasFrame=false; preparing=true; error=null; advanced=false; lastPosition=player.currentPosition; refreshedMedia=false
         prepareJob=scope.launch { try { prepare(selected,progress,true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
@@ -218,7 +225,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         prepareJob?.cancel(); error=null; preparing=true; refreshedMedia=false
         prepareJob=scope.launch { try { prepare(selected,progress,autoplay,loadSupport=false,preserveCurrent=true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
-    fun speed(value: Float) { speed=value; if (temporarySpeed!=null) temporarySpeed=value else player.setPlaybackSpeed(value) }
+    fun speed(value: Float) { if (!value.isFinite() || value !in .25f..4f) return; preferences.speed=value; speed=value; if (temporarySpeed!=null) temporarySpeed=value else player.setPlaybackSpeed(value) }
     fun beginTemporarySpeed() { if (temporarySpeed==null && player.playWhenReady && playback!=null) { temporarySpeed=speed; player.setPlaybackSpeed(2f) } }
     fun endTemporarySpeed() { val value=temporarySpeed ?: return; temporarySpeed=null; player.setPlaybackSpeed(value) }
     fun toggle() {
@@ -276,17 +283,28 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         finally { actionBusy=false } }
     }
     private fun loadSubtitles(selected: Part) {
-        subtitleJob?.cancel(); subtitleError=null; cues=emptyList(); subtitleText=""; subtitle=null
-        subtitleJob=scope.launch { try {
-            val result=app.repository.subtitles(route.bvid,selected.cid); tracks=result
-            val best=result.firstOrNull { it.language.startsWith("zh") || it.language.startsWith("ai-zh") } ?: result.firstOrNull()
-            if (best!=null) { subtitle=best; cues=app.repository.cues(best) }
+        subtitleTracksJob?.cancel(); subtitleJob?.cancel(); tracks=emptyList(); subtitleError=null; cues=emptyList(); subtitleText=""; subtitle=null
+        subtitleTracksJob=scope.launch { try {
+            val result=app.repository.subtitles(route.bvid,selected.cid)
+            ensureActive(); tracks=result
+            if (preferences.subtitlesEnabled) {
+                val best=result.firstOrNull { it.language==preferences.subtitleLanguage }
+                    ?: result.firstOrNull { it.language.startsWith("zh") || it.language.startsWith("ai-zh") } ?: result.firstOrNull()
+                applySubtitle(best)
+            }
         } catch (e: CancellationException) { throw e } catch (e: Exception) { subtitleError=e.message } }
     }
     fun subtitle(track: Subtitle?) {
         if (track!=null && track !in tracks) return
+        preferences.subtitlesEnabled=track!=null
+        if (track!=null) preferences.subtitleLanguage=track.language
+        applySubtitle(track)
+    }
+    private fun applySubtitle(track: Subtitle?) {
         subtitleJob?.cancel(); subtitle=track; cues=emptyList(); subtitleText=""; subtitleError=null
-        if (track!=null) subtitleJob=scope.launch { try { cues=app.repository.cues(track) } catch (e: CancellationException) { throw e } catch (e: Exception) { subtitleError=e.message } }
+        if (track!=null) subtitleJob=scope.launch { try {
+            val result=app.repository.cues(track); ensureActive(); cues=result
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { subtitleError=e.message } }
     }
     fun danmaku(value: Boolean) { danmaku=value; preferences.danmaku=value; loadDanmaku() }
     fun font(value: Int) { danmakuFont=value; preferences.font=value }

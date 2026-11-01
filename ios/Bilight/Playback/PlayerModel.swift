@@ -14,6 +14,22 @@ final class PlaybackPreferences {
         get { DanmakuArea(rawValue: defaults.double(forKey: "bilight.playback.danmakuArea")) ?? .full }
         set { defaults.set(newValue.rawValue, forKey: "bilight.playback.danmakuArea") }
     }
+    var subtitlesEnabled: Bool {
+        get { defaults.object(forKey: "bilight.playback.subtitlesEnabled") as? Bool ?? true }
+        set { defaults.set(newValue, forKey: "bilight.playback.subtitlesEnabled") }
+    }
+    var subtitleLanguage: String? {
+        get { defaults.string(forKey: "bilight.playback.subtitleLanguage") }
+        set { defaults.set(newValue, forKey: "bilight.playback.subtitleLanguage") }
+    }
+    var rate: Float {
+        get { let value = defaults.float(forKey: "bilight.playback.rate"); return value.isFinite && (0.25...4).contains(value) ? value : 1 }
+        set { if newValue.isFinite && (0.25...4).contains(newValue) { defaults.set(newValue, forKey: "bilight.playback.rate") } }
+    }
+    var fontSize: CGFloat {
+        get { let value = defaults.double(forKey: "bilight.playback.fontSize"); return [16.0, 20, 24].contains(value) ? CGFloat(value) : 20 }
+        set { if [CGFloat(16), 20, 24].contains(newValue) { defaults.set(Double(newValue), forKey: "bilight.playback.fontSize") } }
+    }
     var quality: Int {
         get {
             let value = defaults.integer(forKey: "bilight.playback.quality")
@@ -35,7 +51,9 @@ final class PlaybackPreferences {
     @Published var subtitleText = ""
     @Published var rate: Float = 1
     @Published var danmakuEnabled = false
-    @Published var danmakuFontSize: CGFloat = 20
+    @Published var danmakuFontSize: CGFloat = 20 {
+        didSet { preferences.fontSize = danmakuFontSize }
+    }
     @Published var danmakuArea: DanmakuArea = .full {
         didSet { preferences.danmakuArea = danmakuArea }
     }
@@ -50,7 +68,8 @@ final class PlaybackPreferences {
     private var stream: SegmentedStream?
     private var request: Task<Void, Never>?
     private var subtitleRequest: Task<Void, Never>?
-    private var preferredSubtitle: Int?
+    private var subtitleTracksRequest: Task<Void, Never>?
+    private let subtitleConfiguration: URLSessionConfiguration
     private var itemStatus: NSKeyValueObservation?
     private var playStatus: NSKeyValueObservation?
     private var defaultRateStatus: NSKeyValueObservation?
@@ -72,12 +91,17 @@ final class PlaybackPreferences {
     private var previous = 0.0, progress = 0.0, watched = false, dirty = false, lastSaved = Date.distantPast
     var onWatch: ((Double, Bool) -> Void)?
     var isFullscreen = false
-    init(preferences: PlaybackPreferences = PlaybackPreferences(), bufferingTimeout: Duration = .seconds(30)) {
+    init(preferences: PlaybackPreferences = PlaybackPreferences(), bufferingTimeout: Duration = .seconds(30), subtitleConfiguration: URLSessionConfiguration = .ephemeral) {
         self.preferences = preferences
         self.bufferingTimeout = bufferingTimeout
+        self.subtitleConfiguration = subtitleConfiguration
         danmakuEnabled = preferences.danmakuEnabled
         danmakuArea = preferences.danmakuArea
+        danmakuFontSize = preferences.fontSize
+        rate = preferences.rate
+        player.defaultRate = rate
         player.actionAtItemEnd = .pause
+        player.preventsDisplaySleepDuringVideoPlayback = true
         player.audiovisualBackgroundPlaybackPolicy = .continuesIfPossible
         observer = player.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -95,11 +119,11 @@ final class PlaybackPreferences {
             }
         }
         rateStatus = player.observe(\.rate) { [weak self] _, _ in
-            Task { @MainActor in self?.publishNowPlaying() }
+            Task { @MainActor in self?.restorePlaybackSpeed(); self?.publishNowPlaying() }
         }
-        defaultRateStatus = player.observe(\.defaultRate) { [weak self] player, _ in
+        defaultRateStatus = player.observe(\.defaultRate) { [weak self] _, _ in
             Task { @MainActor in
-                if self?.temporaryRate == nil, self?.rate != player.defaultRate { self?.rate = player.defaultRate }
+                self?.restorePlaybackSpeed()
             }
         }
         jump = NotificationCenter.default.addObserver(
@@ -432,23 +456,32 @@ final class PlaybackPreferences {
         }
         remoteTargets = []
     }
+    /// Only an explicit settings choice may replace the saved speed. AVKit also changes defaultRate
+    /// while mounting and tearing down players, so its KVO events are not preference changes.
     func setRate(_ value: Float) {
-        if temporaryRate != nil { temporaryRate = value; rate = value; publishNowPlaying(); return }
+        guard value.isFinite, (0.25...4).contains(value) else { return }
+        preferences.rate = value
+        if temporaryRate != nil { temporaryRate = value }
         if rate != value { rate = value }
-        if player.defaultRate != value { player.defaultRate = value }
-        if player.rate > 0, player.rate != value { player.rate = value }
+        restorePlaybackSpeed()
         publishNowPlaying()
+    }
+    func restorePlaybackSpeed() {
+        let desired: Float = temporaryRate == nil ? rate : 2
+        if player.defaultRate != desired { player.defaultRate = desired }
+        // A paused or stopped player must stay paused when its preferred speed is restored.
+        if player.rate > 0, player.rate != desired { player.rate = desired }
     }
     func beginTemporarySpeed() {
         guard temporaryRate == nil, player.currentItem != nil, player.timeControlStatus != .paused else { return }
         temporaryRate = rate
-        player.defaultRate = 2
-        if player.rate > 0 { player.rate = 2 }
+        restorePlaybackSpeed()
     }
     func endTemporarySpeed() {
-        guard let value = temporaryRate else { return }
+        guard temporaryRate != nil else { return }
         temporaryRate = nil
-        setRate(value)
+        restorePlaybackSpeed()
+        publishNowPlaying()
     }
     private func updateBufferingWatch() {
         bufferingWatch?.cancel(); bufferingWatch = nil
@@ -509,6 +542,7 @@ final class PlaybackPreferences {
         flush()
         request?.cancel()
         subtitleRequest?.cancel()
+        subtitleTracksRequest?.cancel()
         bufferingWatch?.cancel(); bufferingWatch = nil
         retryIntent = nil
         version = UUID()
@@ -548,37 +582,43 @@ final class PlaybackPreferences {
         }
     }
     private func loadSubtitles(client: BiliClient, bvid: String, cid: Int) {
+        subtitleTracksRequest?.cancel()
         subtitleRequest?.cancel()
         subtitleTracks = []
         selectedSubtitle = nil
-        preferredSubtitle = nil
         cues = []
         subtitleText = ""
         subtitleError = nil
-        subtitleRequest = Task {
+        subtitleTracksRequest = Task {
             do {
                 let tracks = try await client.subtitles(bvid, cid: cid)
                 try Task.checkCancellation()
                 subtitleTracks = tracks
-                if let track = tracks.first(where: { $0.language.contains("zh") }) ?? tracks.first {
-                    selectSubtitle(track)
-                }
+                if preferences.subtitlesEnabled { applySubtitle(preferredTrack(in: tracks)) }
                 NativeTrace.mark(.subtitleReady, ["tracks": tracks.count, "enabled": selectedSubtitle == nil ? 0 : 1])
-            } catch is CancellationError {} catch { subtitleError = error.localizedDescription }
+            } catch is CancellationError {} catch { if !Task.isCancelled { subtitleError = error.localizedDescription } }
         }
     }
+    private func preferredTrack(in tracks: [SubtitleTrack]) -> SubtitleTrack? {
+        tracks.first { $0.language == preferences.subtitleLanguage }
+            ?? tracks.first { $0.language.contains("zh") } ?? tracks.first
+    }
     func selectSubtitle(_ track: SubtitleTrack?) {
+        preferences.subtitlesEnabled = track != nil
+        if let track { preferences.subtitleLanguage = track.language }
+        applySubtitle(track)
+    }
+    private func applySubtitle(_ track: SubtitleTrack?) {
         subtitleRequest?.cancel()
         selectedSubtitle = track?.id
         cues = []
         subtitleText = ""
         subtitleError = nil
         guard let track else { return }
-        preferredSubtitle = track.id
         subtitleRequest = Task {
             do {
                 guard MediaLoader.allowed(track.url) else { throw BiliFailure.invalid }
-                let config = URLSessionConfiguration.ephemeral
+                let config = subtitleConfiguration.copy() as! URLSessionConfiguration
                 config.httpShouldSetCookies = false
                 config.httpCookieStorage = nil
                 let session = URLSession(configuration: config)
@@ -594,14 +634,13 @@ final class PlaybackPreferences {
                     SubtitleCue(from: num($0["from"]), to: num($0["to"]), text: clean($0["content"]))
                 }
                 subtitleError = nil
-            } catch is CancellationError {} catch { subtitleError = error.localizedDescription }
+            } catch is CancellationError {} catch { if !Task.isCancelled { subtitleError = error.localizedDescription } }
         }
     }
     func setSubtitlesEnabled(_ enabled: Bool) {
         guard enabled else { selectSubtitle(nil); return }
-        let track = subtitleTracks.first { $0.id == preferredSubtitle }
-            ?? subtitleTracks.first { $0.language.contains("zh") } ?? subtitleTracks.first
-        selectSubtitle(track)
+        preferences.subtitlesEnabled = true
+        applySubtitle(preferredTrack(in: subtitleTracks))
     }
     deinit {
         artworkRequest?.cancel()
@@ -617,6 +656,7 @@ final class PlaybackPreferences {
         bufferingWatch?.cancel()
         request?.cancel()
         subtitleRequest?.cancel()
+        subtitleTracksRequest?.cancel()
         danmakuRequest?.cancel()
     }
 }

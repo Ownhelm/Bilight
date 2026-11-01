@@ -40,6 +40,7 @@ import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -71,6 +72,11 @@ import kotlin.math.min
     val activity=checkNotNull(LocalActivity.current)
     val scope=rememberCoroutineScope()
     val lifecycle=LocalLifecycleOwner.current.lifecycle
+    val hostView=LocalView.current
+    DisposableEffect(hostView,lifecycle,model.player) {
+        val screenAwake=PlaybackScreenAwake(hostView,model.player,lifecycle)
+        onDispose { screenAwake.close() }
+    }
     val landscape=LocalConfiguration.current.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE
     val currentLandscape by rememberUpdatedState(landscape)
     var active by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }

@@ -75,6 +75,7 @@ struct NativePlayer: UIViewControllerRepresentable {
         let container = PlayerContainer(controller: controller, model: model)
         container.installPlaybackControls(controls)
         context.coordinator.container = container
+        model.restorePlaybackSpeed()
         return container
     }
     @MainActor final class Coordinator: NSObject, @preconcurrency AVPlayerViewControllerDelegate {

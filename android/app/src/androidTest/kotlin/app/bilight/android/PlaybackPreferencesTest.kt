@@ -42,7 +42,14 @@ import java.util.zip.DeflaterOutputStream
 
 /** Exercise persisted device preferences through real PlaybackModel instances, with no platform calls. */
 class PlaybackPreferencesTest {
-    @get:Rule val activity=ActivityScenarioRule(MainActivity::class.java)
+    private val activity=ActivityScenarioRule(MainActivity::class.java)
+    @get:Rule val activityLaunch=org.junit.rules.TestRule { statement,description ->
+        if (description.methodName in setOf(
+            "captionsSpeedAndDanmakuFollowExplicitChoicesAcrossVideosAndRecreatedPlayers",
+            "explicitQualitySurvivesNewPlayersAndUnavailableQualityDoesNotReplaceIt",
+            "danmakuPreferencesPersistAndStyleChangesOrCancelledReadsCannotRefetchOrResurrectIt",
+        )) statement else activity.apply(statement,description)
+    }
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
     private fun main(block: () -> Unit)=instrumentation.runOnMainSync(block)
     private fun await(message: String,condition: () -> Boolean) {
@@ -54,7 +61,8 @@ class PlaybackPreferencesTest {
     }
     private fun fixture(durationSeconds: Int = 1, audio: Boolean = false, authenticated: Boolean = false, test: (Fixture) -> Unit) {
         val app=ApplicationProvider.getApplicationContext<BilightApplication>()
-        check(android.os.Build.HARDWARE in listOf("ranchu","goldfish") && SessionVault(app).load()==null) { "Use only the isolated anonymous emulator" }
+        val isolatedDeviceBuild=app.packageName=="app.bilight.android.awakeverification"
+        check((android.os.Build.HARDWARE in listOf("ranchu","goldfish") || isolatedDeviceBuild) && SessionVault(app).load()==null) { "Use only an isolated anonymous emulator or the separate device verification app" }
         val store=app.getSharedPreferences("playback-preferences",Context.MODE_PRIVATE)
         val saved=HashMap(store.all)
         store.edit().clear().commit()
@@ -69,6 +77,42 @@ class PlaybackPreferencesTest {
             }.commit()
         }
     }
+    @Test fun videoPageKeepsTheDisplayAwakeAndReleasesItOnPauseEndAndExit() = fixture(30,audio=false) { f ->
+        lateinit var model: PlaybackModel
+        lateinit var screen: MainActivity
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")); f.owner.open(model.route) }
+        activity.scenario.onActivity {
+            screen=it
+            it.findViewById<ViewGroup>(android.R.id.content).removeAllViews()
+            it.setContent { MainApp(f.owner) }
+        }
+        fun keepsAwake(view: android.view.View): Boolean {
+            if (view.keepScreenOn) return true
+            if (view is ViewGroup) for (index in 0 until view.childCount) if (keepsAwake(view.getChildAt(index))) return true
+            return false
+        }
+        fun awake()=keepsAwake(screen.findViewById(android.R.id.content))
+        await("The real playing video page did not request screen-on") { model.player.isPlaying && awake() }
+        for (fullscreen in listOf(false,true)) {
+            main { model.fullscreen=fullscreen; model.portraitFullscreen=fullscreen }
+            await("Changing fullscreen lost the screen-on request") { awake() }
+            main { model.player.pause() }
+            await("Pausing kept the display awake") { !awake() }
+            main { model.player.play() }
+            await("Resuming did not restore the screen-on request") { model.player.isPlaying && awake() }
+        }
+        activity.scenario.moveToState(androidx.lifecycle.Lifecycle.State.STARTED)
+        await("A background page kept the display awake") { !awake() }
+        activity.scenario.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        await("Returning did not restore screen-on for ongoing playback") { model.player.isPlaying && awake() }
+        main { model.player.seekTo(model.player.duration-100); model.player.play() }
+        await("Ending did not release the display") { model.player.playbackState==androidx.media3.common.Player.STATE_ENDED && !awake() }
+        main { model.toggle() }
+        await("Replaying did not restore screen-on") { model.player.isPlaying && awake() }
+        main { f.owner.back() }
+        await("Leaving the page did not release screen-on") { !awake() }
+    }
+
     @Test fun lockScreenSessionPublishesMetadataAndControlsTheExistingPlayer() = fixture(30,audio=true) { f ->
         lateinit var model: PlaybackModel
         main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")); model.enableBackgroundPlayback() }
@@ -182,6 +226,62 @@ class PlaybackPreferencesTest {
             main { assertEquals(before,model.engagement); assertNull(model.supportError) }
         }
     }
+    @Test fun captionsSpeedAndDanmakuFollowExplicitChoicesAcrossVideosAndRecreatedPlayers() = fixture(8) { f ->
+        lateinit var model: PlaybackModel
+        fun open(bvid: String) {
+            main { model=f.owner.playback(Route.Watch(bvid)) }
+            await("Subtitle metadata did not load") { model.tracks.size==f.languages.size && !model.preparing }
+        }
+        open("BV12qnt6VEM1")
+        await("Default captions did not load") { model.cues.isNotEmpty() }
+        main {
+            model.subtitle(model.tracks.first { it.language=="en" }); model.speed(1.5f)
+            model.danmaku(true); model.font(24); model.area(.5f); model.opacity(.75f)
+        }
+        await("Selected captions did not load") { model.cues.isNotEmpty() && model.player.isPlaying }
+        main {
+            model.beginTemporarySpeed(); assertEquals(2f,model.player.playbackParameters.speed)
+            assertEquals(1.5f,PlaybackSettings(f.app).speed)
+            f.owner.releasePlayback(model)
+        }
+        open("BV1NGZtBwELa")
+        await("The language preference was not restored with different track IDs") { model.subtitle?.language=="en" && model.cues.isNotEmpty() }
+        main {
+            assertEquals(1.5f,model.speed); assertEquals(1.5f,model.player.playbackParameters.speed)
+            assertTrue(model.danmaku); assertEquals(24,model.danmakuFont); assertEquals(.5f,model.danmakuArea); assertEquals(.75f,model.danmakuOpacity)
+            model.subtitle(null); model.danmaku(false)
+            model.selectPart(model.detail!!.parts[1])
+        }
+        await("Next part metadata did not arrive") { model.part?.cid==44L && model.tracks.isNotEmpty() && !model.preparing }
+        main { assertNull(model.subtitle); assertTrue(model.cues.isEmpty()); f.owner.releasePlayback(model) }
+        f.languages=emptyList()
+        open("BV12qnt6VEM1")
+        main { assertNull(model.subtitle); assertFalse(PlaybackSettings(f.app).subtitlesEnabled); f.owner.releasePlayback(model) }
+        f.languages=listOf("zh-CN", "en")
+        open("BV1NGZtBwELa")
+        main {
+            assertNull(model.subtitle); assertTrue(model.cues.isEmpty()); assertFalse(model.danmaku)
+            assertFalse(PlaybackSettings(f.app).subtitlesEnabled)
+            model.subtitle(model.tracks.first { it.language=="en" }); f.owner.releasePlayback(model)
+        }
+        f.languages=listOf("zh-CN")
+        open("BV12qnt6VEM1")
+        await("Unavailable language did not temporarily fall back") { model.subtitle?.language=="zh-CN" }
+        main { assertEquals("en",PlaybackSettings(f.app).subtitleLanguage); f.owner.releasePlayback(model) }
+        f.languages=listOf("zh-CN", "en")
+        open("BV1NGZtBwELa")
+        await("Preferred language was overwritten by a fallback") { model.subtitle?.language=="en" }
+        main { f.owner.releasePlayback(model) }
+        f.subtitleGate=CountDownLatch(1)
+        val before=f.subtitleReads.get()
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
+        await("Delayed metadata request did not start") { f.subtitleReads.get()>before }
+        main { model.subtitle(null) }
+        f.subtitleGate!!.countDown()
+        await("Disabling while metadata loads discarded the track list") { model.tracks.isNotEmpty() }
+        main { assertNull(model.subtitle); assertTrue(model.cues.isEmpty()); assertFalse(PlaybackSettings(f.app).subtitlesEnabled) }
+    }
+
     @Test fun explicitQualitySurvivesNewPlayersAndUnavailableQualityDoesNotReplaceIt() = fixture { f ->
         val preferences=PlaybackSettings(f.app)
         fun open(bvid: String): PlaybackModel {
@@ -258,6 +358,9 @@ class PlaybackPreferencesTest {
         assertEquals(5,f.danmakuReads.get())
     }
     private inner class Fixture(val app: BilightApplication, durationSeconds: Int, audio: Boolean, authenticated: Boolean) {
+        var languages=listOf("en","zh-CN")
+        val subtitleReads=AtomicInteger()
+        @Volatile var subtitleGate: CountDownLatch?=null
         val requestedQualities=CopyOnWriteArrayList<Int>()
         val danmakuReads=AtomicInteger()
         @Volatile var danmakuGate: CountDownLatch?=null
@@ -276,7 +379,12 @@ class PlaybackPreferencesTest {
                     val quality=minOf(preferred,if(request.url.queryParameter("bvid")=="BV12qnt6VEM1") 120 else 80)
                     """{"code":0,"data":{"quality":$quality,"timelength":1000,"durl":[{"url":"https://audit.bilivideo.com/preferences.mp4"}]}}"""
                 }
-                "/x/player/wbi/v2" -> """{"code":0,"data":{"subtitle":{"subtitles":[{"id":1,"lan":"en","lan_doc":"English","subtitle_url":"https://i0.hdslb.com/en.json"},{"id":2,"lan":"zh-CN","lan_doc":"中文","subtitle_url":"https://i0.hdslb.com/zh.json"}]}}}"""
+                "/x/player/wbi/v2" -> {
+                    subtitleReads.incrementAndGet(); check(subtitleGate?.await(5,TimeUnit.SECONDS)!=false)
+                    val base=request.url.queryParameter("cid")!!.toLong()*100
+                    val tracks=languages.mapIndexed { index,language -> """{"id":${base+index},"lan":"$language","lan_doc":"$language","subtitle_url":"https://i0.hdslb.com/${if (language=="en") "en" else "zh"}.json"}""" }.joinToString(",")
+                    """{"code":0,"data":{"subtitle":{"subtitles":[$tracks]}}}"""
+                }
                 "/en.json", "/zh.json" -> """{"body":[{"from":0,"to":1,"content":"字幕测试"}]}"""
                 "/x/v2/reply/wbi/main" -> """{"code":0,"data":{"cursor":{"is_end":true,"all_count":0},"replies":[]}}"""
                 "/x/v1/dm/list.so" -> {
@@ -307,7 +415,7 @@ class PlaybackPreferencesTest {
             await("The isolated session did not restore") { !owner.restoring }
         }
         fun close() {
-            danmakuGate?.countDown(); engagementGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
+            subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
         }
     }
 }

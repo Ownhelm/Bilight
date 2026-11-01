@@ -3,6 +3,7 @@ package app.bilight.android
 import android.media.MediaCodec
 import android.media.MediaCodecInfo
 import android.media.MediaFormat
+import android.media.MediaCodecList
 import android.media.MediaMuxer
 import java.io.File
 import java.nio.ByteBuffer
@@ -13,11 +14,16 @@ internal fun encodedFixture(file: File, audio: Boolean, durationSeconds: Int = 1
     val format=if (audio) MediaFormat.createAudioFormat(mime,44100,1).apply {
         setInteger(MediaFormat.KEY_AAC_PROFILE,MediaCodecInfo.CodecProfileLevel.AACObjectLC)
         setInteger(MediaFormat.KEY_BIT_RATE,64000)
-    } else MediaFormat.createVideoFormat(mime,64,64).apply {
+    } else MediaFormat.createVideoFormat(mime,320,240).apply {
         setInteger(MediaFormat.KEY_COLOR_FORMAT,MediaCodecInfo.CodecCapabilities.COLOR_FormatYUV420Flexible)
         setInteger(MediaFormat.KEY_BIT_RATE,100000); setInteger(MediaFormat.KEY_FRAME_RATE,10); setInteger(MediaFormat.KEY_I_FRAME_INTERVAL,1)
     }
-    val codec=MediaCodec.createEncoderByType(mime)
+    // Tiny fixtures must not depend on an OEM hardware encoder's minimum frame size.
+    val codecName=MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.firstOrNull {
+        it.isEncoder && (it.name.startsWith("c2.android.") || it.name.startsWith("OMX.google.")) &&
+            it.supportedTypes.any { type -> type.equals(mime,true) } && it.getCapabilitiesForType(mime).isFormatSupported(format)
+    }?.name ?: MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(format)
+    val codec=MediaCodec.createByCodecName(checkNotNull(codecName) { "No encoder supports the fixture format" })
     val muxer=MediaMuxer(file.absolutePath,MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
     var track=-1; var started=false; var input=0; var samples=0L; var ended=false; var done=false
     try {
@@ -30,7 +36,7 @@ internal fun encodedFixture(file: File, audio: Boolean, durationSeconds: Int = 1
                     val buffer=codec.getInputBuffer(index)!!; buffer.clear()
                     if (input>=(if (audio) 44 else 10)*durationSeconds) { codec.queueInputBuffer(index,0,0,if (audio) samples*1_000_000/44100 else durationSeconds*1_000_000L,MediaCodec.BUFFER_FLAG_END_OF_STREAM); ended=true }
                     else {
-                        val bytes=if (audio) ByteArray(minOf(2048,buffer.remaining())/2*2) { i -> if (i%2==0) ((i/2+samples)%200).toByte() else 0 } else ByteArray(64*64*3/2) { i -> if (i<64*64) (32+input*16).toByte() else 128.toByte() }
+                        val bytes=if (audio) ByteArray(minOf(2048,buffer.remaining())/2*2) { i -> if (i%2==0) ((i/2+samples)%200).toByte() else 0 } else ByteArray(320*240*3/2) { i -> if (i<320*240) (32+input*16).toByte() else 128.toByte() }
                         val pts=if (audio) samples*1_000_000/44100 else input*100000L
                         buffer.put(bytes); codec.queueInputBuffer(index,0,bytes.size,pts,0); input++; if (audio) samples+=bytes.size/2
                     }

@@ -9,11 +9,11 @@ import AVKit
     private var orientationObserver: NSObjectProtocol?
     private var exitingFullscreen = false
     private var lifecycleInactive = false
-    private var backgroundPlayback: (AVPlayerItem?, Bool, Float)?
+    private var backgroundPlayback: (AVPlayerItem?, Bool)?
     private var foregroundRecovery: Task<Void, Never>?
     private var deviceWasLandscape = false
     private var suppressUntilPortrait = false
-    private var playbackIntent: (AVPlayerItem?, Bool, Float)?
+    private var playbackIntent: (AVPlayerItem?, Bool)?
     private var controlsAutoHide: Task<Void, Never>?
     private var playbackControls: PlaybackControls?
     private let loadingView = UIView()
@@ -258,7 +258,7 @@ import AVKit
     }
     private func rememberPlayback() {
         model.endTemporarySpeed()
-        playbackIntent = (model.player.currentItem, model.player.timeControlStatus != .paused, model.player.defaultRate)
+        playbackIntent = (model.player.currentItem, model.player.timeControlStatus != .paused)
     }
     private func traceFullscreen(active: Bool) {
         let position = model.player.currentTime().seconds
@@ -273,7 +273,7 @@ import AVKit
         guard !lifecycleInactive, let intent = playbackIntent else { return }
         playbackIntent = nil
         guard model.player.currentItem === intent.0 else { return }
-        model.setRate(intent.2)
+        model.restorePlaybackSpeed()
         if intent.1 {
             if model.player.timeControlStatus == .paused { model.player.play() }
         } else if model.player.timeControlStatus != .paused { model.player.pause() }
@@ -502,7 +502,7 @@ import AVKit
     func backgroundPlaybackActivity() {
         resignPlaybackActivity()
         guard backgroundPlayback == nil else { return }
-        backgroundPlayback = playbackIntent ?? (model.player.currentItem, model.player.timeControlStatus != .paused, model.player.defaultRate)
+        backgroundPlayback = playbackIntent ?? (model.player.currentItem, model.player.timeControlStatus != .paused)
         model.flush()
         // AVPlayer's background policy and audio session keep audio running on this same item.
     }

@@ -180,10 +180,63 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertNotNil(next.player.currentItem)
     }
 
+    @MainActor func testSavedSpeedSurvivesMountingAndReplacingNativeVideoPlayers() async throws {
+        let suite = "Bilight.NativeSpeedTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene)
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let video = Video(bvid: "BV12qnt6VEM1", aid: 42, title: "Speed continuity", cover: nil, duration: 12,
+            publishedAt: 0, owner: User(mid: 42, name: "Test", avatar: nil), views: 0)
+        let record = DownloadRecord(id: UUID(), video: video, part: VideoPart(cid: 43, page: 1, title: "P1", duration: 12), quality: 80, qualityLabel: "1080P")
+        defer { window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+        for index in 0..<3 {
+            let model = PlayerModel(preferences: PlaybackPreferences(defaults: defaults))
+            if index > 0 { XCTAssertEqual(model.rate, 1.5, "The next player must start with the explicit preference") }
+            let root = UIViewController()
+            let host = UIHostingController(rootView: NativePlayer(model: model, onQuality: { _ in }))
+            window.rootViewController = root; root.addChild(host); root.view.addSubview(host.view); host.didMove(toParent: root)
+            host.view.frame = CGRect(x: 0, y: 100, width: window.bounds.width, height: 240); window.makeKeyAndVisible()
+            model.loadLocal(media, record: record)
+            let deadline = Date().addingTimeInterval(4)
+            while (model.player.currentTime().seconds < 0.15 || containers(root).isEmpty), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertEqual(model.player.timeControlStatus, .playing)
+            if index == 0 { model.setRate(1.5) }
+            try await Task.sleep(for: .milliseconds(200))
+            XCTAssertEqual(model.rate, 1.5, "Mounting a new native player must not reset the selected speed")
+            XCTAssertEqual(model.player.defaultRate, 1.5)
+            XCTAssertEqual(model.player.rate, 1.5, "Check actual playback, not just stored state or menu selection")
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).rate, 1.5)
+            if index == 1 {
+                let container = try XCTUnwrap(containers(root).first)
+                container.enterFullscreen(rotate: false)
+                try await Task.sleep(for: .milliseconds(250))
+                XCTAssertEqual(model.player.rate, 1.5)
+                container.exitFullscreen()
+                try await Task.sleep(for: .milliseconds(250))
+                XCTAssertEqual(model.player.rate, 1.5)
+            }
+            model.player.pause()
+            model.player.defaultRate = 1 // A late native reset must neither replace the preference nor resume playback.
+            try await Task.sleep(for: .milliseconds(100))
+            XCTAssertEqual(model.player.defaultRate, 1.5); XCTAssertEqual(model.player.rate, 0)
+            XCTAssertEqual(model.rate, 1.5); XCTAssertEqual(PlaybackPreferences(defaults: defaults).rate, 1.5)
+            containers(root).forEach { $0.shutdown() }
+            host.willMove(toParent: nil); host.view.removeFromSuperview(); host.removeFromParent(); model.stop()
+            try await Task.sleep(for: .milliseconds(150))
+            XCTAssertEqual(PlaybackPreferences(defaults: defaults).rate, 1.5, "Tearing down the previous native player cannot overwrite the next video's preference")
+        }
+    }
+
     @MainActor func testHoldingTemporarilyUsesTwoTimesSpeedInBothContainersAndRestoresOnCancel() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousWindow = scene.keyWindow, window = UIWindow(windowScene: scene), root = UIViewController()
-        let model = PlayerModel()
+        let suite = "Bilight.SpeedTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = PlaybackPreferences(defaults: defaults)
+        let model = PlayerModel(preferences: preferences)
         let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
         model.player.replaceCurrentItem(with: AVPlayerItem(url: media))
         let host = UIHostingController(rootView: NativePlayer(model: model, onQuality: { _ in }))
@@ -200,6 +253,7 @@ final class PlayerChromeTests: XCTestCase {
                 model.setRate(rate)
                 container.handleSpeedHold(.began)
                 XCTAssertEqual(model.player.rate, 2)
+                XCTAssertEqual(preferences.rate, rate, "A temporary hold must not persist its 2× speed")
                 XCTAssertEqual(model.rate, rate, "Temporary acceleration cannot overwrite the selected rate")
                 container.handleSpeedHold(.cancelled)
                 XCTAssertEqual(model.player.rate, rate)
@@ -615,6 +669,7 @@ final class PlayerChromeTests: XCTestCase {
         }
         XCTAssertEqual(model.player.volume, 1)
         XCTAssertFalse(model.player.isMuted)
+        XCTAssertTrue(model.player.preventsDisplaySleepDuringVideoPlayback)
         let play = try XCTUnwrap(buttons.first { $0.accessibilityIdentifier == "player-play-pause" })
         XCTAssertTrue(progress.isEnabled)
         play.sendActions(for: .touchUpInside)
@@ -658,6 +713,7 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertTrue(model.player.currentItem === currentItem)
         XCTAssertEqual(model.player.timeControlStatus, .playing)
         let fullscreenSettings = settings.convert(settings.bounds, to: window)
+        XCTAssertTrue(model.player.preventsDisplaySleepDuringVideoPlayback, "The same fullscreen player must retain video sleep prevention")
         for control in descendants(container.controller.view).compactMap({ $0 as? UIControl }).filter(visible) where control !== settings {
             XCTAssertFalse(control.convert(control.bounds, to: window).intersects(fullscreenSettings), "Fullscreen controls must not overlap settings")
         }

@@ -137,6 +137,78 @@ final class VideoSupportTests: XCTestCase {
         XCTAssertEqual(lock.withLock { danmaku }, ["5", "6"], "Disabled preferences must not fetch danmaku")
         XCTAssertEqual(preferences.quality, 120)
     }
+    @MainActor func testCaptionChoicesSpeedAndFontSurviveNewVideosAndRecreatedPreferences() async throws {
+        let suite = "Bilight.CaptionTests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = PlaybackPreferences(defaults: defaults)
+        let lock = NSLock()
+        var languages = ["en", "zh-CN"]
+        let (client, _) = fixture { request in
+            if request.url!.path.hasSuffix("/playurl") { return ["code": -403, "message": "Test-only unavailable media"] }
+            if request.url!.path.hasSuffix("/list.so") { throw URLError(.notConnectedToInternet) }
+            if request.url!.path.hasSuffix(".json") { return ["body": [["from": 0, "to": 10, "content": "Test caption"]]] }
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            let cid = Int(query.first { $0.name == "cid" }!.value!)!
+            return ["code": 0, "data": ["subtitle": ["subtitles": lock.withLock { languages }.enumerated().map { index, language in
+                ["id": cid * 100 + index, "lan": language, "lan_doc": language, "subtitle_url": "https://i0.hdslb.com/\(language).json"] as JSON
+            }]]]
+        }
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [MockProtocol.self]
+        func makePlayer() throws -> PlayerModel {
+            PlayerModel(preferences: PlaybackPreferences(defaults: try XCTUnwrap(UserDefaults(suiteName: suite))), subtitleConfiguration: configuration)
+        }
+        func load(_ model: PlayerModel, cid: Int, expectedCount: Int) async throws {
+            model.load(client: client, bvid: bvid, part: VideoPart(cid: cid, page: 1, title: "P1", duration: 60))
+            let deadline = Date().addingTimeInterval(3)
+            while (model.busy || model.subtitleTracks.count != expectedCount || (expectedCount > 0 && model.subtitleTracks.first!.id / 100 != cid)), Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+            XCTAssertEqual(model.subtitleTracks.count, expectedCount)
+            if expectedCount > 0 { XCTAssertEqual(model.subtitleTracks.first!.id / 100, cid) }
+        }
+        let first = try makePlayer()
+        try await load(first, cid: 5, expectedCount: 2)
+        XCTAssertEqual(first.subtitleTracks.first { $0.id == first.selectedSubtitle }?.language, "zh-CN")
+        first.selectSubtitle(first.subtitleTracks.first { $0.language == "en" })
+        first.setRate(1.5); first.danmakuFontSize = 24; first.danmakuArea = .half
+        first.setDanmakuEnabled(true, client: client, cid: 5)
+        first.stop()
+        let second = try makePlayer()
+        defer { second.stop() }
+        XCTAssertEqual(second.rate, 1.5); XCTAssertEqual(second.player.defaultRate, 1.5)
+        XCTAssertEqual(second.danmakuFontSize, 24); XCTAssertEqual(second.danmakuArea, .half); XCTAssertTrue(second.danmakuEnabled)
+        try await load(second, cid: 6, expectedCount: 2)
+        XCTAssertEqual(second.subtitleTracks.first { $0.id == second.selectedSubtitle }?.language, "en")
+        second.selectSubtitle(nil); second.setDanmakuEnabled(false, client: client, cid: 6)
+        try await load(second, cid: 7, expectedCount: 2)
+        XCTAssertNil(second.selectedSubtitle); XCTAssertEqual(second.subtitleText, "")
+        XCTAssertFalse(preferences.subtitlesEnabled); XCTAssertEqual(preferences.subtitleLanguage, "en")
+        second.stop()
+        let restarted = try makePlayer()
+        defer { restarted.stop() }
+        try await load(restarted, cid: 8, expectedCount: 2)
+        XCTAssertNil(restarted.selectedSubtitle); XCTAssertFalse(restarted.danmakuEnabled)
+        restarted.setSubtitlesEnabled(true)
+        XCTAssertEqual(restarted.subtitleTracks.first { $0.id == restarted.selectedSubtitle }?.language, "en")
+        lock.withLock { languages = ["zh-CN"] }
+        try await load(restarted, cid: 9, expectedCount: 1)
+        XCTAssertEqual(restarted.subtitleTracks.first { $0.id == restarted.selectedSubtitle }?.language, "zh-CN")
+        XCTAssertEqual(preferences.subtitleLanguage, "en", "Fallbacks must not replace explicit language choices")
+        lock.withLock { languages = [] }
+        try await load(restarted, cid: 10, expectedCount: 0)
+        XCTAssertNil(restarted.selectedSubtitle); XCTAssertTrue(preferences.subtitlesEnabled)
+        lock.withLock { languages = ["zh-CN", "en"] }
+        try await load(restarted, cid: 11, expectedCount: 2)
+        XCTAssertEqual(restarted.subtitleTracks.first { $0.id == restarted.selectedSubtitle }?.language, "en")
+        restarted.selectSubtitle(nil)
+        restarted.load(client: client, bvid: bvid, part: VideoPart(cid: 12, page: 1, title: "P1", duration: 60))
+        restarted.setSubtitlesEnabled(true); restarted.setSubtitlesEnabled(false)
+        let deadline = Date().addingTimeInterval(3)
+        while restarted.subtitleTracks.isEmpty, Date() < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        XCTAssertEqual(restarted.subtitleTracks.count, 2)
+        XCTAssertNil(restarted.selectedSubtitle); XCTAssertFalse(preferences.subtitlesEnabled)
+    }
+
     func testQualityBelowAvailableMinimumUsesLowestStreamWithoutUpshiftingToHighest() throws {
         let data: JSON = ["dash": ["duration": 60, "video": [64, 120, 80].map {
             ["id": $0, "codecs": "avc1.640028", "base_url": "https://edge.bilivideo.com/video.m4s"] as JSON
