@@ -7,6 +7,10 @@ struct VideoActionBar: View {
     var cid: Int
     var statistics: VideoStatistics?
     var onDownload: () -> Void
+    var title: String = "视频"
+    var page: Int = 1
+    @ObservedObject private var network = PlaybackNetwork.shared
+    @State private var cached = false
     @StateObject private var support = VideoSupportModel()
     @State private var panel: Panel?
     @State private var charging = false
@@ -18,28 +22,22 @@ struct VideoActionBar: View {
     @ScaledMetric(relativeTo: .caption) private var iconGap: CGFloat = 9
     @ScaledMetric(relativeTo: .caption) private var groupGap: CGFloat = 24
     private enum Panel: String, Identifiable { case coin, favorite; var id: String { rawValue } }
-    private var enabled: Bool { !support.busy }
+    private var enabled: Bool { !support.busy && network.available && app.shareVideo == nil }
     var body: some View {
         VStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: 0) {
-                    HStack(spacing: groupGap) {
-                        likeControl.frame(width: max(44, actionWidth))
-                        coinControl.frame(width: max(44, actionWidth))
-                        favoriteControl.frame(width: max(44, actionWidth))
-                    }
-                    Spacer(minLength: 8)
-                    downloadControl.frame(width: max(44, actionWidth))
-                }
+                actionRow
                 // Keep readable labels and 44pt targets when a larger font cannot fit a single row.
                 LazyVGrid(columns: [GridItem(.flexible(minimum: 44), spacing: 12), GridItem(.flexible(minimum: 44), spacing: 12)], spacing: 12) {
                     likeControl
                     coinControl
                     favoriteControl
+                    shareControl
+                    Color.clear.frame(height: 0).accessibilityHidden(true)
                     downloadControl
                 }
             }.buttonStyle(.plain)
-            if let error = support.error {
+            if let error = support.error, network.available {
                 HStack(alignment: .top) {
                     Text(error).font(.caption2)
                     Spacer(minLength: 6)
@@ -56,13 +54,42 @@ struct VideoActionBar: View {
         }.padding(.leading, 16).padding(.trailing, 20).padding(.bottom, 2)
             .task(id: "\(bvid)-\(app.accountGeneration)") {
                 support.reset(statistics); setCharging(false)
-                await refresh()
+                if network.available { await refresh() }
             }.onDisappear { setCharging(false) }
+            .onReceive(app.downloads.$items) { items in
+                cached = items.contains { $0.video.bvid == bvid && $0.part.cid == cid && $0.state == .completed && FileManager.default.fileExists(atPath: app.downloads.fileURL($0).path) }
+            }
+            .onChange(of: network.available) { _, available in
+                setCharging(false)
+                if available { Task { await refresh() } } else { panel = nil }
+            }
             .onChange(of: app.accountGeneration) { _, _ in panel = nil }
             .sheet(item: $panel) { value in
                 if value == .coin { CoinActionSheet(bvid: bvid, support: support).environmentObject(app) }
                 else { FavoriteActionSheet(bvid: bvid, support: support).environmentObject(app) }
             }
+    }
+    private var actionRow: some View {
+        HStack(spacing: 0) {
+            likeControl.frame(width: max(44, actionWidth))
+            Spacer(minLength: 4).frame(maxWidth: groupGap)
+            coinControl.frame(width: max(44, actionWidth))
+            Spacer(minLength: 4).frame(maxWidth: groupGap)
+            favoriteControl.frame(width: max(44, actionWidth))
+            Spacer(minLength: 4).frame(maxWidth: groupGap)
+            shareControl.frame(width: max(44, actionWidth))
+            Spacer(minLength: 8)
+            downloadControl.frame(width: max(44, actionWidth))
+        }
+    }
+    private var shareControl: some View {
+        Button { setCharging(false); app.shareVideo = VideoShareInfo(bvid: bvid, title: title, page: page) } label: {
+            VStack(spacing: iconGap) {
+                Image(systemName: "arrowshape.turn.up.right.fill").font(.system(size: iconSize))
+                Text("转发").font(.system(size: countSize)).lineLimit(1)
+            }.foregroundStyle(Color.biliMuted).frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight))
+                .contentShape(Rectangle())
+        }.accessibilityLabel("转发")
     }
     private var likeControl: some View {
         actionIcon(.like, count: support.statistics?.likes, title: "点赞", selected: support.state?.liked == true)
@@ -81,13 +108,14 @@ struct VideoActionBar: View {
         }.disabled(!enabled).accessibilityLabel("收藏")
     }
     private var downloadControl: some View {
-        Button(action: onDownload) {
+        Button { if cached { app.navigate(.downloads) } else { onDownload() } } label: {
             VStack(spacing: iconGap) {
-                BiliActionIcon(kind: .download, size: iconSize)
-                Text("缓存").font(.system(size: countSize)).lineLimit(1).minimumScaleFactor(0.5)
-            }.foregroundStyle(Color.biliMuted).frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight))
+                if cached { Image(systemName: "checkmark.circle").font(.system(size: iconSize)) }
+                else { BiliActionIcon(kind: .download, size: iconSize) }
+                Text(cached ? "已缓存" : "缓存").font(.system(size: countSize)).lineLimit(1).minimumScaleFactor(0.5)
+            }.foregroundStyle(cached ? Color.biliPink : Color.biliMuted).frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight))
                 .contentShape(Rectangle())
-        }.accessibilityLabel("下载当前分 P")
+        }.accessibilityLabel(cached ? "已缓存，查看缓存" : "下载当前分 P")
     }
     private func actionIcon(_ icon: BiliActionIcon.Kind, count: Int?, title: String, selected: Bool) -> some View {
         VStack(spacing: iconGap) {
@@ -105,6 +133,7 @@ struct VideoActionBar: View {
             .accessibilityElement(children: .ignore).accessibilityLabel("\(title)，\(count.map(countLabel) ?? "数量暂不可用")")
     }
     private func like() {
+        guard network.available else { return }
         guard app.user != nil else { app.showLogin = true; return }
         guard let state = support.state else { Task { await refresh() }; return }
         write(.like(!state.liked))
@@ -122,10 +151,12 @@ struct VideoActionBar: View {
         }
     }
     private func open(_ value: Panel) {
+        guard network.available else { return }
         guard app.user != nil else { app.showLogin = true; return }
         panel = value
     }
     private func write(_ action: VideoWrite) {
+        guard network.available else { return }
         guard app.user != nil else { app.showLogin = true; return }
         Task {
             let generation = app.accountGeneration
@@ -134,6 +165,81 @@ struct VideoActionBar: View {
         }
     }
     private func refresh() async { await support.refresh(client: app.client, bvid: bvid, authenticated: app.user != nil) }
+}
+
+func videoShareURL(bvid: String, page: Int) -> URL {
+    var url = URL(string: "https://www.bilibili.com/video/")!.appendingPathComponent(bvid, isDirectory: true)
+    if page > 1 { url.append(queryItems: [URLQueryItem(name: "p", value: String(page))]) }
+    return url
+}
+
+struct VideoShareInfo: Identifiable {
+    var bvid: String
+    var title: String
+    var page: Int
+    var id: String { "\(bvid):\(page)" }
+}
+
+struct VideoShareSheet: View {
+    var bvid: String
+    var title: String
+    var page: Int
+    var onClose: () -> Void
+    var onCopied: () -> Void = {}
+    var onSystemShare: () -> Void = {}
+    @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 11
+    @ScaledMetric(relativeTo: .body) private var cancelSize: CGFloat = 14
+    private let ink = Color(red: 97 / 255, green: 102 / 255, blue: 109 / 255)
+    private let muted = Color(red: 148 / 255, green: 153 / 255, blue: 160 / 255)
+    private var url: URL { videoShareURL(bvid: bvid, page: page) }
+    var body: some View {
+        GeometryReader { geometry in
+            let contentHeight = max(72, 52 + labelSize * 1.5) + 42 + max(50, cancelSize * 1.5)
+            let height = min(contentHeight, max(0, geometry.size.height - geometry.safeAreaInsets.bottom - 16))
+            ZStack {
+                Color.black.opacity(0.32).onTapGesture(perform: onClose).accessibilityHidden(true)
+                VStack(spacing: 0) {
+                    Spacer(minLength: 16)
+                    ScrollView {
+                        content
+                    }.frame(height: height)
+                        .padding(.bottom, geometry.safeAreaInsets.bottom).background(.white)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
+                        .accessibilityElement(children: .contain).accessibilityIdentifier("video-share-sheet")
+                        .accessibilityAddTraits(.isModal)
+                }
+            }.ignoresSafeArea()
+        }
+    }
+    private var content: some View {
+        VStack(spacing: 0) {
+            HStack(alignment: .top, spacing: 4) {
+                Button { UIPasteboard.general.url = url; onClose(); onCopied() } label: { option("复制链接", icon: "link") }
+                Button(action: onSystemShare) { option("系统分享", icon: "square.and.arrow.up") }
+            }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
+            Rectangle().fill(Color(white: 0.965)).frame(height: 6)
+            Button(action: onClose) {
+                Text("取消").font(.system(size: cancelSize)).foregroundStyle(Color(white: 0.1))
+                    .frame(maxWidth: .infinity).frame(minHeight: 50).contentShape(Rectangle())
+            }
+        }.buttonStyle(.plain).foregroundStyle(ink).background(.white)
+    }
+    private func option(_ title: String, icon: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: icon).font(.system(size: 22, weight: .regular)).frame(width: 44, height: 44)
+                .background(Color(white: 0.96), in: Circle()).accessibilityHidden(true)
+            Text(title).font(.system(size: labelSize)).foregroundStyle(muted).multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+        }.frame(maxWidth: .infinity, minHeight: 72, alignment: .top).contentShape(Rectangle())
+    }
+}
+
+struct VideoSystemShareSheet: UIViewControllerRepresentable {
+    var share: VideoShareInfo
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [share.title, videoShareURL(bvid: share.bvid, page: share.page)], applicationActivities: nil)
+    }
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }
 
 private struct CoinActionSheet: View {

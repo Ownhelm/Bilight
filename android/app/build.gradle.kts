@@ -10,9 +10,16 @@ android {
     applicationId = "app.bilight.android"
     minSdk = 26
     targetSdk = 36
-    versionCode = 9
-    versionName = "0.1.6"
+    versionCode = 10
+    versionName = "0.1.7"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  // Android Studio and the CLI must use the same existing local development key.
+  // Keep its private material outside the repository; other checkouts retain the SDK default.
+  signingConfigs.getByName("debug") {
+    val localKey = rootProject.file("../../Local/Dependencies/Android/user/debug.keystore")
+    if (localKey.isFile) storeFile = localKey
   }
 
   buildTypes {

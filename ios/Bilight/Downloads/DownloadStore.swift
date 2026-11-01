@@ -11,6 +11,7 @@ import UIKit
     private let preferNative: Bool
     private let directory: URL
     nonisolated private let incoming: URL
+    nonisolated private let progressGate = DownloadProgressGate()
     private var cachedKey: SymmetricKey?
     private var generation = UUID()
     private var session: URLSession?
@@ -19,12 +20,11 @@ import UIKit
     private var merger: Task<Void, Never>?
     private var exporting: AVAssetExportSession?
     private var lastSave = Date.distantPast
-    private var lastProgress: [Int: Date] = [:]
     private var background: UIBackgroundTaskIdentifier = .invalid
     private var suspendedForSystem = false
     init(
         client: BiliClient, directory: URL? = nil, key: SymmetricKey? = nil, automaticallyStarts: Bool = true,
-        preferNative: Bool = true
+        preferNative: Bool = false
     ) {
         self.client = client
         self.automaticallyStarts = automaticallyStarts
@@ -53,6 +53,7 @@ import UIKit
         session?.invalidateAndCancel()
         session = nil
         tasks = [:]
+        progressGate.clear()
         endBackgroundTime()
         mid = value
         items = []
@@ -238,7 +239,7 @@ import UIKit
                 try Task.checkCancellation()
                 if item.files.isEmpty {
                     let source = try await client.playback(
-                        item.video.bvid, cid: item.part.cid, quality: item.quality, allowNative: preferNative)
+                        item.video.bvid, cid: item.part.cid, quality: item.quality, preferNative: preferNative)
                     try Task.checkCancellation()
                     guard generation == token, let row = items.firstIndex(where: { $0.id == id }),
                         items[row].state == .resolving
@@ -282,7 +283,8 @@ import UIKit
                         request.setValue("bytes=0-", forHTTPHeaderField: "Range")
                         task = transferSession().downloadTask(with: request)
                     }
-                    task.priority = URLSessionTask.lowPriority
+                    // This is an explicit user download, rather than speculative prefetching.
+                    task.priority = URLSessionTask.highPriority
                     tasks[task.taskIdentifier] = (id, fileIndex)
                     items[row].files[fileIndex].resumeData = nil
                     task.resume()
@@ -393,22 +395,25 @@ extension DownloadStore: URLSessionDownloadDelegate {
         _ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
         totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64
     ) {
+        // Throttle on the delegate queue, before scheduling UI work for every network packet.
+        guard progressGate.accept(downloadTask) else { return }
         Task { @MainActor in
             guard self.session === session, let target = self.tasks[downloadTask.taskIdentifier],
                 let row = self.items.firstIndex(where: { $0.id == target.0 })
             else { return }
-            guard self.items[row].files.indices.contains(target.1),
-                Date().timeIntervalSince(self.lastProgress[downloadTask.taskIdentifier] ?? .distantPast) >= 0.25
+            guard self.items[row].files.indices.contains(target.1), self.items[row].state == .downloading
             else { return }
-            self.lastProgress[downloadTask.taskIdentifier] = Date()
             self.items[row].files[target.1].received = totalBytesWritten
             self.items[row].files[target.1].expected = max(totalBytesExpectedToWrite, 0)
-            if Date().timeIntervalSince(self.lastSave) >= 1 { self.saveOrReport() }
+            // State changes and completed tracks are saved immediately. Byte progress only
+            // needs occasional checkpoints, rather than an encrypted atomic write every second.
+            if Date().timeIntervalSince(self.lastSave) >= 5 { self.saveOrReport() }
         }
     }
     nonisolated func urlSession(
         _ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL
     ) {
+        progressGate.remove(downloadTask)
         let saved = incoming.appendingPathComponent(UUID().uuidString)
         do {
             let size = (try location.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init) ?? 0
@@ -450,6 +455,7 @@ extension DownloadStore: URLSessionDownloadDelegate {
         }
     }
     nonisolated func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        progressGate.remove(task)
         guard let error else { return }
         Task { @MainActor in
             defer { self.startNext() }
@@ -476,6 +482,27 @@ extension DownloadStore: URLSessionDownloadDelegate {
         next.setValue(nil, forHTTPHeaderField: "Cookie")
         next.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
         completionHandler(next)
+    }
+}
+
+/// URLSession delegate callbacks and account cleanup may arrive on different queues.
+private final class DownloadProgressGate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var updated: [ObjectIdentifier: TimeInterval] = [:]
+    func accept(_ task: URLSessionTask) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        let id = ObjectIdentifier(task), now = ProcessInfo.processInfo.systemUptime
+        if let before = updated[id], now - before < 0.25 { return false }
+        updated[id] = now
+        return true
+    }
+    func remove(_ task: URLSessionTask) {
+        lock.lock(); defer { lock.unlock() }
+        updated.removeValue(forKey: ObjectIdentifier(task))
+    }
+    func clear() {
+        lock.lock(); defer { lock.unlock() }
+        updated.removeAll()
     }
 }
 
@@ -508,7 +535,8 @@ enum OfflineMovie {
         try? FileManager.default.removeItem(at: target)
         session.outputURL = target
         session.outputFileType = .mp4
-        session.shouldOptimizeForNetworkUse = true
+        // The result is played from disk. Avoid reorganizing a large offline MP4 for network streaming.
+        session.shouldOptimizeForNetworkUse = false
         export(session)
         let handle = ExportHandle(session)
         try await withTaskCancellationHandler {

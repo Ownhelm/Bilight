@@ -354,6 +354,10 @@ final class PlaybackPreferences {
             }
         }
     }
+    func loadLocalSupport(client: BiliClient, bvid: String, cid: Int) {
+        loadSubtitles(client: client, bvid: bvid, cid: cid)
+        if danmakuEnabled { setDanmakuEnabled(true, client: client, cid: cid) }
+    }
     private func activateAudioSession() async throws {
         try await Task.detached(priority: .userInitiated) {
             let session = AVAudioSession.sharedInstance()

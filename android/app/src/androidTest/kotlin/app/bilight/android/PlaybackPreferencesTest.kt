@@ -25,6 +25,8 @@ import app.bilight.android.core.*
 import app.bilight.android.core.Route
 import app.bilight.android.playback.PlaybackModel
 import app.bilight.android.playback.PlaybackSettings
+import app.bilight.android.downloads.DownloadRecord
+import app.bilight.android.downloads.DownloadState
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
@@ -76,6 +78,50 @@ class PlaybackPreferencesTest {
                 } }
             }.commit()
         }
+    }
+    @Test fun cachedPlaybackKeepsTheNormalActionsAndLoadsCommentsWhenNetworkReturns() = fixture(30,authenticated=true) { f ->
+        val route=f.cachedVideo()
+        fun shell(command: String) { android.os.ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { it.readBytes() } }
+        lateinit var model: PlaybackModel
+        try {
+            shell("svc wifi disable"); shell("svc data disable")
+            await("The isolated device did not finish disconnecting") {
+                val connectivity=f.app.getSystemService(android.net.ConnectivityManager::class.java)
+                connectivity.getNetworkCapabilities(connectivity.activeNetwork)?.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)!=true
+            }
+            main { model=f.owner.playback(route); f.owner.open(route) }
+            activity.scenario.onActivity { it.setContent { MainApp(f.owner) } }
+            await("A cached file must play without any network") { !model.networkAvailable && model.player.isPlaying }
+            val player=model.player
+            lateinit var item: androidx.media3.common.MediaItem
+            main {
+                item=player.currentMediaItem!!
+                assertEquals("file",item.localConfiguration!!.uri.scheme)
+                assertFalse(model.detailLoaded); assertTrue(model.comments.isEmpty())
+                player.pause(); model.seek(500); model.speed(1.5f)
+            }
+            shell("svc wifi enable"); shell("svc data enable")
+            await("Reconnecting did not load cached-video metadata and comments") { model.networkAvailable && model.detailLoaded && model.comments.singleOrNull()?.text=="缓存页评论测试" && model.engagement!=null }
+            main {
+                assertSame(player,model.player); assertEquals(item,player.currentMediaItem)
+                assertFalse(player.playWhenReady); assertEquals(1.5f,player.playbackParameters.speed)
+                assertEquals(500.0,player.currentPosition.toDouble(),150.0)
+            }
+            // Read only this isolated app's accessibility tree; never trigger a real interaction write.
+            fun labels(node: android.view.accessibility.AccessibilityNodeInfo?): List<String> {
+                if (node==null) return emptyList()
+                return listOfNotNull(node.text?.toString(),node.contentDescription?.toString())+(0 until node.childCount).flatMap { labels(node.getChild(it)) }
+            }
+            instrumentation.waitForIdleSync(); Thread.sleep(300)
+            val visible=labels(instrumentation.uiAutomation.rootInActiveWindow)
+            File(f.app.getExternalFilesDir(null),"cached-player-labels.txt").writeText(visible.joinToString("\n"))
+            instrumentation.uiAutomation.takeScreenshot()?.let { image ->
+                File(f.app.getExternalFilesDir(null),"cached-player.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            }
+            assertTrue("The cached action must remain visible",visible.any { it.contains("已缓存") })
+            assertTrue("The standard share action must remain visible",visible.any { it.contains("转发") })
+            assertFalse(visible.any { it.contains("导出 MP4") })
+        } finally { shell("svc wifi enable"); shell("svc data enable") }
     }
     @Test fun videoPageKeepsTheDisplayAwakeAndReleasesItOnPauseEndAndExit() = fixture(30,audio=false) { f ->
         lateinit var model: PlaybackModel
@@ -358,6 +404,7 @@ class PlaybackPreferencesTest {
         assertEquals(5,f.danmakuReads.get())
     }
     private inner class Fixture(val app: BilightApplication, durationSeconds: Int, audio: Boolean, authenticated: Boolean) {
+        private val cachedIds=CopyOnWriteArrayList<String>()
         var languages=listOf("en","zh-CN")
         val subtitleReads=AtomicInteger()
         @Volatile var subtitleGate: CountDownLatch?=null
@@ -373,6 +420,8 @@ class PlaybackPreferencesTest {
             val text=when (path) {
                 "/x/web-interface/nav" -> """{"code":0,"data":{"isLogin":$authenticated,"mid":900000003,"uname":"隔离测试","wbi_img":{"img_url":"https://i0.hdslb.com/${"a".repeat(32)}.png","sub_url":"https://i0.hdslb.com/${"b".repeat(32)}.png"}}}"""
                 "/x/web-interface/archive/relation" -> { check(engagementGate?.await(5,TimeUnit.SECONDS)!=false); if (failEngagement) throw java.io.IOException("Isolated engagement failure"); """{"code":0,"data":{"like":false,"coin":0,"favorite":false}}""" }
+                "/x/relation" -> """{"code":0,"data":{"attribute":0}}"""
+                "/x/v2/history/report" -> """{"code":0,"data":{}}"""
                 "/x/web-interface/wbi/view" -> """{"code":0,"data":{"bvid":"${request.url.queryParameter("bvid")}","aid":42,"title":"偏好恢复测试","duration":1,"owner":{"mid":42,"name":"隔离测试"},"pages":[{"cid":43,"page":1,"part":"第一段","duration":1},{"cid":44,"page":2,"part":"第二段","duration":1}],"stat":{}}}"""
                 "/x/player/wbi/playurl" -> {
                     val preferred=request.url.queryParameter("qn")!!.toInt(); requestedQualities+=preferred
@@ -386,7 +435,7 @@ class PlaybackPreferencesTest {
                     """{"code":0,"data":{"subtitle":{"subtitles":[$tracks]}}}"""
                 }
                 "/en.json", "/zh.json" -> """{"body":[{"from":0,"to":1,"content":"字幕测试"}]}"""
-                "/x/v2/reply/wbi/main" -> """{"code":0,"data":{"cursor":{"is_end":true,"all_count":0},"replies":[]}}"""
+                "/x/v2/reply/wbi/main" -> if (cachedIds.isEmpty()) """{"code":0,"data":{"cursor":{"is_end":true,"all_count":0},"replies":[]}}""" else """{"code":0,"data":{"cursor":{"is_end":true,"all_count":1},"replies":[{"rpid_str":"1","member":{"mid":42,"uname":"隔离评论"},"content":{"message":"缓存页评论测试"},"like":0}]}}"""
                 "/x/v1/dm/list.so" -> {
                     danmakuReads.incrementAndGet(); check(danmakuGate?.await(5,TimeUnit.SECONDS)!=false)
                     """<i><d p="0,1,25,16777215">cid-${request.url.queryParameter("oid")}</d></i>"""
@@ -404,6 +453,16 @@ class PlaybackPreferencesTest {
         }.build()
         private val store=ViewModelStore()
         val owner: AppModel
+        fun cachedVideo(): Route.Watch {
+            await("The fixture download account did not restore") { owner.downloads.ready && owner.user!=null }
+            val detail=kotlinx.coroutines.runBlocking { owner.repository.detail("BV12qnt6VEM1") }
+            val id=java.util.UUID.randomUUID().toString()
+            val destination=File(app.filesDir,"downloads/${owner.user!!.mid}/$id/video.mp4")
+            destination.parentFile!!.mkdirs(); destination.writeBytes(bytes)
+            val record=DownloadRecord(id,detail.video,detail.parts.first(),80,"1080P",DownloadState.COMPLETED)
+            main { cachedIds+=id; owner.downloads.items.add(record) }
+            return Route.Watch(detail.video.bvid,downloadId=id)
+        }
         init {
             val http=BiliHttp(object: SecureStore { var saved: ByteArray?=null; override fun load()=saved; override fun save(bytes: ByteArray) { saved=bytes }; override fun clear() { saved=null } },api)
             if (authenticated) kotlinx.coroutines.runBlocking { http.acceptLogin("SESSDATA=fixture-only; bili_jct=test-only") }
@@ -415,6 +474,7 @@ class PlaybackPreferencesTest {
             await("The isolated session did not restore") { !owner.restoring }
         }
         fun close() {
+            main { cachedIds.forEach(owner.downloads::remove) }
             subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
         }
     }

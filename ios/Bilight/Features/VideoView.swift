@@ -1,5 +1,19 @@
 import AVKit
 import SwiftUI
+import Network
+
+@MainActor final class PlaybackNetwork: ObservableObject {
+    static let shared = PlaybackNetwork()
+    @Published private(set) var available = true
+    private let monitor = NWPathMonitor()
+    private init() {
+        monitor.pathUpdateHandler = { [weak self] path in
+            let available = path.status == .satisfied
+            Task { @MainActor [weak self] in self?.available = available }
+        }
+        monitor.start(queue: DispatchQueue(label: "app.bilight.playback-network"))
+    }
+}
 
 struct NativePlayer: UIViewControllerRepresentable {
     @ObservedObject var model: PlayerModel
@@ -168,10 +182,13 @@ struct VideoView: View {
     var bvid: String
     var requestedPage = 1
     var startTime = 0.0
+    var localRecord: DownloadRecord? = nil
+    @ObservedObject private var network = PlaybackNetwork.shared
     @State private var detail: VideoDetail?
     @State private var selected = 0
     @State private var refresh = 0
     @State private var error: String?
+    @State private var metadataError: String?
     @State private var busy = true
     var body: some View {
         ScrollView {
@@ -191,8 +208,11 @@ struct VideoView: View {
                     if let warning = detail.warning {
                         Text(warning).font(.caption2).foregroundStyle(Color.biliMuted).padding(.horizontal, 16)
                     }
-                    PlaybackView(detail: detail, part: part, start: part.page == requestedPage ? startTime : 0).id(
+                    PlaybackView(detail: detail, part: part, start: part.page == requestedPage ? startTime : 0, localRecord: localRecord).id(
                         part.cid)
+                    if let metadataError, network.available {
+                        FailureBlock(error: metadataError) { refresh += 1 }.padding(.horizontal, 16)
+                    }
                     if detail.parts.count > 1 {
                         VStack(alignment: .leading, spacing: 12) {
                             Text("分 P · \(part.page)/\(detail.parts.count)").font(.subheadline.weight(.semibold))
@@ -222,12 +242,32 @@ struct VideoView: View {
                             ).padding(.vertical, 10)
                         }.font(.footnote).padding(.horizontal, 16)
                     }
-                    CommentsView(aid: detail.video.aid).padding(.horizontal, 16)
+                    CommentsView(aid: detail.video.aid, cachedPlayback: localRecord != nil).padding(.horizontal, 16)
                 }
             }.padding(.bottom, 20)
-        }.navigationTitle("视频").navigationBarTitleDisplayMode(.inline).task(id: "\(bvid)-\(refresh)") {
+        }.navigationTitle("视频").navigationBarTitleDisplayMode(.inline).task(id: "\(bvid)-\(refresh)-\(network.available)") {
             // Returning from native full screen must not refetch metadata and replace the live player view.
-            if detail?.video.bvid == bvid && error == nil { return }
+            if detail?.video.bvid == bvid && error == nil && (localRecord == nil || detail?.statistics != nil) { return }
+            if let localRecord {
+                if detail == nil {
+                    detail = VideoDetail(video: localRecord.video, parts: [localRecord.part], description: "", coinLimit: nil)
+                    selected = requestedPage
+                }
+                busy = false
+                guard network.available else { return }
+                metadataError = nil
+                do {
+                    var value = try await app.client.video(bvid, known: localRecord.video)
+                    try Task.checkCancellation()
+                    guard value.parts.contains(where: { $0.cid == localRecord.part.cid }) else { throw BiliFailure.invalid }
+                    value.parts = [localRecord.part]
+                    detail = value
+                    app.register(value.video.owner)
+                } catch is CancellationError {} catch {
+                    if !Task.isCancelled { metadataError = "视频信息暂未更新：\(error.localizedDescription)" }
+                }
+                return
+            }
             busy = true
             error = nil
             do {
@@ -251,6 +291,8 @@ struct PlaybackView: View {
     var detail: VideoDetail
     var part: VideoPart
     var start: Double
+    var localRecord: DownloadRecord? = nil
+    @ObservedObject private var network = PlaybackNetwork.shared
     @StateObject private var model = PlayerModel()
     @State private var historyError: String?
     @State private var showDownload = false
@@ -260,13 +302,16 @@ struct PlaybackView: View {
             ZStack {
                 Color.black
                 NativePlayer(model: model, onDanmaku: { model.setDanmakuEnabled($0, client: app.client, cid: part.cid) }) { quality in
+                    guard localRecord == nil else { return }
                     model.selectQuality(quality, client: app.client, bvid: detail.video.bvid, part: part)
                 }
             }.aspectRatio(16 / 9, contentMode: .fit)
             if let error = model.error {
                 FailureBlock(error: error) {
-                    model.load(
+                    if let localRecord { model.loadLocal(app.downloads.fileURL(localRecord), record: localRecord) }
+                    else { model.load(
                         client: app.client, bvid: detail.video.bvid, part: part, preserve: true)
+                    }
                 }
             }
             if let error = model.subtitleError {
@@ -297,8 +342,13 @@ struct PlaybackView: View {
                 } catch { historyError = error.localizedDescription }
             }
             if model.player.currentItem == nil {
-                model.load(client: app.client, bvid: detail.video.bvid, part: part, start: resumePosition ?? start, video: detail.video)
+                if let localRecord {
+                    model.loadLocal(app.downloads.fileURL(localRecord), record: localRecord)
+                    if network.available { model.loadLocalSupport(client: app.client, bvid: detail.video.bvid, cid: part.cid) }
+                } else { model.load(client: app.client, bvid: detail.video.bvid, part: part, start: resumePosition ?? start, video: detail.video) }
             }
+        }.onChange(of: network.available) { _, available in
+            if available && localRecord != nil { model.loadLocalSupport(client: app.client, bvid: detail.video.bvid, cid: part.cid) }
         }.onChange(of: scene) { _, phase in if phase != .active { model.flush() } }.onDisappear {
             let time = model.player.currentTime().seconds
             if time.isFinite { resumePosition = max(0, time) }
@@ -312,6 +362,9 @@ struct CommentsView: View {
     var aid: Int = 0
     var oid: String? = nil
     var commentType = 1
+    var cachedPlayback = false
+    var parentLoading = false
+    @ObservedObject private var network = PlaybackNetwork.shared
     @State private var expanded = true
     @State private var busy = false
     @State private var result: Page<Comment>?
@@ -321,41 +374,35 @@ struct CommentsView: View {
     @State private var page = 0
     @State private var refresh = 0
     var body: some View {
-        DisclosureGroup(isExpanded: $expanded) {
-            VStack(alignment: .leading, spacing: 22) {
-                if busy {
-                    LoadingBlock(label: "正在读取评论")
-                } else if let error {
-                    FailureBlock(error: error) { refresh += 1 }
-                } else if let result {
-                    if result.items.isEmpty { Text("暂时没有评论。").font(.footnote).foregroundStyle(Color.biliMuted) }
-                    ForEach(result.items) { comment in
-                        HStack(alignment: .top, spacing: 10) {
-                            Button {
-                                app.open(comment.user)
-                            } label: {
-                                RemoteImage(url: comment.user.avatar, avatar: true).frame(width: 29, height: 29)
-                                    .clipShape(Circle())
-                            }
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(comment.user.name).font(.caption).foregroundStyle(Color.biliMuted)
-                                Text(comment.text).font(.system(size: 13)).lineSpacing(4)
-                                Text(Date(timeIntervalSince1970: comment.createdAt), style: .date).font(.caption2)
-                                    .foregroundStyle(Color.biliMuted)
-                            }
+        VStack(alignment: .leading, spacing: 22) {
+            DisclosureGroup(isExpanded: $expanded) {
+                VStack(alignment: .leading, spacing: 22) {
+                    if !network.available {
+                        OfflineCommentsNotice(cachedPlayback: cachedPlayback) { refresh += 1 }
+                    } else if busy {
+                        LoadingBlock(label: "正在读取评论")
+                    } else if let error {
+                        FailureBlock(error: error) { refresh += 1 }
+                    } else if let result {
+                        if result.items.isEmpty { Text("暂时没有评论。").font(.footnote).foregroundStyle(Color.biliMuted) }
+                        ForEach(result.items) { comment in
+                            CommentThreadView(oid: oid ?? "\(aid)", commentType: commentType, comment: comment)
+                                .id("\(app.accountGeneration):\(comment.id)")
+                        }
+                        PageButtons(page: page + 1, more: result.hasMore, busy: busy) { next in
+                            if next > page + 1 { cursors = Array(cursors.prefix(page + 1)) + [result.cursor] }
+                            page = next - 1
+                            cursor = cursors[page]
                         }
                     }
-                    PageButtons(page: page + 1, more: result.hasMore, busy: busy) { next in
-                        if next > page + 1 { cursors = Array(cursors.prefix(page + 1)) + [result.cursor] }
-                        page = next - 1
-                        cursor = cursors[page]
-                    }
                 }
+            } label: {
+                Text("评论").font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
             }
-        } label: {
-            Text("评论").font(.system(size: 15, weight: .semibold)).foregroundStyle(.primary)
-        }.task(id: "\(expanded)-\(page)-\(refresh)") {
-            guard expanded else { return }
+            // Comments own the shared spinner while reading; retain one if only the parent is pending.
+            if parentLoading && (!expanded || !network.available || !busy) { LoadingBlock(label: "正在读取动态") }
+        }.task(id: "\(expanded)-\(page)-\(refresh)-\(network.available)-\(app.accountGeneration)") {
+            guard expanded && network.available else { busy = false; return }
             busy = true
             error = nil
             do {
@@ -368,5 +415,104 @@ struct CommentsView: View {
             }
             if !Task.isCancelled { busy = false }
         }
+    }
+}
+
+struct CommentThreadView: View {
+    @EnvironmentObject private var app: AppModel
+    var oid: String
+    var commentType: Int
+    var comment: Comment
+    @State private var expanded = false
+    @State private var replies: [Comment] = []
+    @State private var total: Int?
+    @State private var requestedPage = 1
+    @State private var loadedPage = 0
+    @State private var more = false
+    @State private var busy = false
+    @State private var error: String?
+    @State private var retry = 0
+    @State private var requestToken = UUID()
+    private let blue = Color(red: 77 / 255, green: 131 / 255, blue: 161 / 255)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            CommentContentRow(comment: comment)
+            if comment.replyCount > 0 {
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
+                        Text("共\(total ?? comment.replyCount)条回复").font(.caption).foregroundStyle(Color.biliMuted)
+                        Button(expanded ? "收起" : "展开") { expanded.toggle() }
+                            .font(.caption).foregroundStyle(blue).frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                            .accessibilityIdentifier("comment-expand-\(comment.id)").accessibilityValue(expanded ? "已展开" : "已收起")
+                    }.buttonStyle(.plain)
+                    if expanded {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(replies) { reply in CommentContentRow(comment: reply, reply: true) }
+                            if busy { Text("正在读取回复…").font(.caption).foregroundStyle(Color.biliMuted).accessibilityIdentifier("comment-replies-loading-\(comment.id)") }
+                            if let error {
+                                Text(error).font(.caption).foregroundStyle(Color.biliPink)
+                                Button("重试") { retry += 1 }.font(.caption).foregroundStyle(blue).frame(minWidth: 44, minHeight: 44)
+                            } else if !busy, loadedPage > 0, replies.isEmpty {
+                                Text("暂时没有可见回复。").font(.caption).foregroundStyle(Color.biliMuted)
+                            } else if !busy, more {
+                                Button("加载更多") { requestedPage = loadedPage + 1 }.font(.caption).foregroundStyle(blue)
+                                    .frame(minWidth: 44, minHeight: 44).accessibilityIdentifier("comment-replies-more-\(comment.id)")
+                            }
+                        }.padding(.leading, 12).accessibilityIdentifier("comment-replies-\(comment.id)")
+                    }
+                }.padding(.leading, 42)
+            }
+            Divider().padding(.top, 14)
+        }.frame(maxWidth: .infinity, alignment: .leading).buttonStyle(.plain)
+            .task(id: "\(expanded):\(requestedPage):\(retry)") {
+                let token = UUID(); requestToken = token
+                guard expanded, loadedPage < requestedPage else { busy = false; return }
+                let generation = app.accountGeneration, page = requestedPage
+                busy = true; error = nil
+                defer { if requestToken == token { busy = false } }
+                do {
+                    let result = try await app.client.commentReplies(oid: oid, type: commentType, root: comment.id, page: page)
+                    try Task.checkCancellation()
+                    guard generation == app.accountGeneration, requestToken == token else { return }
+                    var ids = Set(replies.map(\.id))
+                    let additions = result.items.filter { ids.insert($0.id).inserted }
+                    if result.hasMore && additions.isEmpty { throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复分页没有新增内容，请重试。") }
+                    replies += additions; total = result.total; more = result.hasMore; loadedPage = page
+                } catch is CancellationError { return } catch {
+                    if !Task.isCancelled && generation == app.accountGeneration && requestToken == token { self.error = error.localizedDescription }
+                }
+            }
+    }
+}
+
+private struct CommentContentRow: View {
+    @EnvironmentObject private var app: AppModel
+    var comment: Comment
+    var reply = false
+    var body: some View {
+        HStack(alignment: .top, spacing: reply ? 8 : 10) {
+            Button { app.open(comment.user) } label: {
+                RemoteImage(url: comment.user.avatar, avatar: true).frame(width: reply ? 24 : 32, height: reply ? 24 : 32).clipShape(Circle())
+            }.accessibilityLabel("查看UP主")
+            VStack(alignment: .leading, spacing: 7) {
+                Text(comment.user.name).font(.caption).foregroundStyle(Color.biliMuted)
+                Text(comment.text).font(.system(size: reply ? 13 : 14)).lineSpacing(4).fixedSize(horizontal: false, vertical: true)
+                if comment.createdAt > 0 { Text(Date(timeIntervalSince1970: comment.createdAt), style: .date).font(.caption2).foregroundStyle(Color.biliMuted) }
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+struct OfflineCommentsNotice: View {
+    var cachedPlayback = false
+    var retry: () -> Void
+    var body: some View {
+        VStack(spacing: 10) {
+            Image(systemName: "wifi.slash").font(.system(size: 28)).foregroundStyle(Color.biliMuted).accessibilityHidden(true)
+            Text("当前处于离线状态").font(.subheadline.weight(.medium))
+            Text(cachedPlayback ? "缓存视频可继续播放，联网后即可查看评论。" : "连接网络后即可查看评论。")
+                .font(.footnote).foregroundStyle(Color.biliMuted).multilineTextAlignment(.center)
+            Button("重新加载", action: retry).font(.footnote).frame(minHeight: 44)
+        }.padding(20).frame(maxWidth: .infinity).background(Color.biliSoft, in: RoundedRectangle(cornerRadius: 12))
     }
 }

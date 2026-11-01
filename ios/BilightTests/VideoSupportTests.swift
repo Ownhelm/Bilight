@@ -4,6 +4,74 @@ import XCTest
 @testable import Bilight
 
 final class VideoSupportTests: XCTestCase {
+    @MainActor func testOnlineExtrasForCachedVideoPreserveTheLocalPlayerAndExplicitPreferences() async throws {
+        let lock = NSLock()
+        var paths: [String] = []
+        let (client, _) = fixture { request in
+            let path = request.url!.path
+            lock.withLock { paths.append(path) }
+            XCTAssertEqual(path, "/x/player/wbi/v2", "Cached playback must not request a network playback source")
+            return ["code": 0, "data": ["subtitle": ["subtitles": []]]]
+        }
+        let suite = "Bilight.CachedPlayback.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = PlaybackPreferences(defaults: defaults)
+        preferences.quality = 120; preferences.rate = 1.5; preferences.danmakuEnabled = false
+        let model = PlayerModel(preferences: preferences)
+        defer { model.stop() }
+        let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
+        let video = Video(bvid: "BV12qnt6VEM1", aid: 42, title: "缓存播放测试", cover: nil, duration: 12,
+            publishedAt: 0, owner: User(mid: 42, name: "隔离测试", avatar: nil), views: 0)
+        let record = DownloadRecord(id: UUID(), video: video, part: VideoPart(cid: 43, page: 1, title: "P1", duration: 12), quality: 80, qualityLabel: "1080P")
+        model.loadLocal(media, record: record)
+        let deadline = Date().addingTimeInterval(5)
+        while model.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        model.player.pause()
+        let player = model.player, item = try XCTUnwrap(model.player.currentItem)
+        model.loadLocalSupport(client: client, bvid: video.bvid, cid: record.part.cid)
+        while lock.withLock({ paths.isEmpty }) && Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(lock.withLock { paths }, ["/x/player/wbi/v2"])
+        XCTAssertTrue(model.player === player); XCTAssertTrue(model.player.currentItem === item)
+        XCTAssertFalse(model.player.timeControlStatus == .playing)
+        XCTAssertEqual(model.rate, 1.5); XCTAssertEqual(preferences.quality, 120)
+        XCTAssertEqual(model.playback?.quality, 80)
+    }
+    func testExternalShareUsesThePublicSelectedPartURL() {
+        let url = videoShareURL(bvid: "BV1xx411c7mD", page: 3)
+        XCTAssertEqual(url.absoluteString, "https://www.bilibili.com/video/BV1xx411c7mD/?p=3")
+        XCTAssertEqual(videoShareURL(bvid: "BV1xx411c7mD", page: 1).absoluteString, "https://www.bilibili.com/video/BV1xx411c7mD/")
+
+    }
+    @MainActor func testDownloadSourceUsesDASHWithoutWaitingForANativeProbe() async throws {
+        let lock = NSLock()
+        var formats: [String] = []
+        let (client, _) = fixture { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            lock.withLock { formats.append(query.first { $0.name == "fnval" }!.value!) }
+            return ["code": 0, "data": ["dash": ["duration": 10, "video": [
+                ["id": 80, "codecs": "avc1.640028", "base_url": "https://edge.bilivideo.com/video.m4s"]
+            ]]]]
+        }
+        let source = try await client.playback(bvid, cid: 5, quality: 80, preferNative: false)
+        XCTAssertEqual(source.quality, 80); XCTAssertNotNil(source.video)
+        XCTAssertEqual(lock.withLock { formats }, ["4048"])
+    }
+    @MainActor func testDownloadRetainsNativeFallbackWhenDASHIsUnavailable() async throws {
+        let lock = NSLock()
+        var formats: [String] = []
+        let (client, _) = fixture { request in
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            let format = query.first { $0.name == "fnval" }!.value!
+            lock.withLock { formats.append(format) }
+            if format == "4048" { return ["code": 0, "data": ["dash": ["video": []]]] }
+            return ["code": 0, "data": ["quality": 80, "timelength": 10000,
+                "durl": [["url": "https://edge.bilivideo.com/video.mp4"]]]]
+        }
+        let source = try await client.playback(bvid, cid: 5, quality: 80, preferNative: false)
+        XCTAssertEqual(source.quality, 80); XCTAssertNotNil(source.mp4)
+        XCTAssertEqual(lock.withLock { formats }, ["4048", "1"])
+    }
     @MainActor func testLikeCoinAndTripleUpdateBeforeTheRequestAndSilentlyRestoreTheExactPriorState() async throws {
         let (client, http) = fixture { request in
             XCTAssertEqual(request.httpMethod, "GET", "This test cannot send a real or simulated engagement write")
@@ -333,8 +401,11 @@ final class VideoSupportTests: XCTestCase {
         } catch {}
         XCTAssertEqual(lock.withLock { posts }, 0)
     }
-    @MainActor func testCaptionSwitchRemembersLanguageAndClearsDisabledCuesAndErrors() {
-        let model = PlayerModel()
+    @MainActor func testCaptionSwitchRemembersLanguageAndClearsDisabledCuesAndErrors() throws {
+        let suite = "Bilight.CaptionSwitch.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let model = PlayerModel(preferences: PlaybackPreferences(defaults: defaults))
         defer { model.stop() }
         // These intentionally non-CDN URLs are rejected before any network request.
         let english = SubtitleTrack(

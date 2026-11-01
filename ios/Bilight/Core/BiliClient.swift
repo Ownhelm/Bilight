@@ -6,6 +6,7 @@ actor BiliClient {
     private var verificationVersion: UUID?
     private var verificationEpoch = UUID()
     private var followWrites: [Int: (Bool, Task<Relation, Error>)] = [:]
+    private var dynamicWrites: [String: (id: UUID, version: UUID, liked: Bool, task: Task<DynamicPost, Error>)] = [:]
     private var supportWrites: [String: (id: UUID, session: UUID, action: VideoWrite, task: Task<VideoEngagement, Error>)] = [:]
     private var uncertainSupport: [String: UUID] = [:]
     private let followingTimeout: Duration
@@ -36,6 +37,8 @@ actor BiliClient {
         return try await http.acceptLogin(cookies)
     }
     private func cancelSupportWrites() {
+        for write in dynamicWrites.values { write.task.cancel() }
+        dynamicWrites = [:]
         for write in supportWrites.values { write.task.cancel() }
         supportWrites = [:]
         uncertainSupport = [:]
@@ -437,7 +440,7 @@ actor BiliClient {
         var seen = Set<String>()
         return items.compactMap { DynamicPost.map($0) }.filter { seen.insert($0.id).inserted }
     }
-    func dynamic(_ id: String) async throws -> DynamicPost {
+    func dynamic(_ id: String, strictLikes: Bool = false) async throws -> DynamicPost {
         guard DynamicPost.validID(id) else { throw BiliFailure.invalid }
         let version = await http.version()
         try await http.ensureDevice()
@@ -445,8 +448,48 @@ actor BiliClient {
             "/x/polymer/web-dynamic/v1/detail",
             query: ["id": id, "platform": "web", "features": "itemOpusStyle,opusBigCover,ugcDelete"])
         try await http.check(version)
-        guard let post = DynamicPost.map(obj(data["item"])), post.id == id else { throw BiliFailure.invalid }
+        let item = obj(data["item"])
+        if strictLikes {
+            let like = obj(obj(item["modules"])["module_stat"])["like"]
+            let values = obj(like), status = values["status"]
+            guard let count = values["count"] as? NSNumber, count.doubleValue.isFinite, count.doubleValue >= 0,
+                count.doubleValue.rounded(.down) == count.doubleValue, count.doubleValue < Double(Int.max),
+                let status = status as? NSNumber, [0.0, 1.0].contains(status.doubleValue) else {
+                throw BiliFailure(code: "DYNAMIC_UNAVAILABLE", message: "动态点赞状态暂时无法确认，请重试。")
+            }
+        }
+        guard let post = DynamicPost.map(item), post.id == id else { throw BiliFailure.invalid }
         return post
+    }
+    func setDynamicLike(_ id: String, liked: Bool) async throws -> DynamicPost {
+        guard DynamicPost.validID(id) else { throw BiliFailure.invalid }
+        let version = await http.version()
+        if let active = dynamicWrites[id], active.version == version {
+            guard active.liked == liked else { throw BiliFailure(code: "INTERACTION_BUSY", message: "该动态正在处理，请稍候。") }
+            return try await active.task.value
+        }
+        let token = UUID()
+        let task = Task { try await self.performDynamicLike(id, liked: liked, version: version) }
+        dynamicWrites[id] = (token, version, liked, task)
+        defer { if dynamicWrites[id]?.id == token { dynamicWrites[id] = nil } }
+        return try await task.value
+    }
+    private func performDynamicLike(_ id: String, liked: Bool, version: UUID) async throws -> DynamicPost {
+        try await http.check(version)
+        let csrf = try await http.csrf(), before = try await dynamic(id, strictLikes: true)
+        try await http.check(version); try Task.checkCancellation()
+        if before.liked == liked { return before }
+        var writeError: Error?
+        do { _ = try await http.request("/x/dynamic/feed/dyn/thumb", query: ["csrf": csrf], json: ["dyn_id_str": id, "up": liked ? 1 : 2], referer: "https://t.bilibili.com/\(id)") }
+        catch is CancellationError { throw CancellationError() } catch { writeError = error }
+        for attempt in 0..<3 {
+            try await http.check(version); try Task.checkCancellation()
+            if attempt > 0 { try await Task.sleep(for: .milliseconds(150)) }
+            do { let after = try await dynamic(id, strictLikes: true); try await http.check(version); if after.liked == liked { return after } }
+            catch is CancellationError { throw CancellationError() } catch { if writeError == nil { writeError = error } }
+        }
+        if let writeError { throw writeError }
+        throw BiliFailure(code: "DYNAMIC_LIKE_UNCONFIRMED", message: "点赞结果暂未确认，请刷新动态后再操作。")
     }
     func video(_ bvid: String, known: Video? = nil) async throws -> VideoDetail {
         guard validBVID(bvid) else { throw BiliFailure(code: "INVALID_VIDEO", message: "视频 BV 号不正确。") }
@@ -481,7 +524,7 @@ actor BiliClient {
             video: video, parts: parts, description: clean(data["desc"], limit: 10000),
             coinLimit: [1, 3].contains(int(data["copyright"])) ? 2 : 1, statistics: try? VideoStatistics.map(obj(data["stat"])))
     }
-    func playback(_ bvid: String, cid: Int, quality: Int = 127, allowNative: Bool = true) async throws -> Playback {
+    func playback(_ bvid: String, cid: Int, quality: Int = 127, allowNative: Bool = true, preferNative: Bool = true) async throws -> Playback {
         let version = await http.version()
         let data = try await http.request(
             "/x/player/wbi/playurl",
@@ -491,7 +534,8 @@ actor BiliClient {
         try Task.checkCancellation(); try await http.check(version)
         let original = try? Self.mapPlayback(data, native: nil, quality: quality)
         var native: JSON?
-        if allowNative && original?.mp4 == nil && (original?.quality ?? 0) < 112 {
+        // Downloads can use DASH immediately; retain MP4 fallback when DASH is unusable.
+        if allowNative && (original == nil || (preferNative && original?.mp4 == nil && (original?.quality ?? 0) < 112)) {
             do {
                 native = try await http.request(
                     "/x/player/wbi/playurl",
@@ -607,11 +651,33 @@ actor BiliClient {
             Comment(
                 id: String(describing: $0["rpid_str"] ?? $0["rpid"] ?? ""), user: User.map(obj($0["member"])),
                 text: clean(obj($0["content"])["message"], limit: 6000), createdAt: num($0["ctime"]),
-                likes: int($0["like"]))
+                likes: int($0["like"]), replyCount: max(0, int($0["rcount"])))
         }
         let next = obj(paging["pagination_reply"])["next_offset"] as? String
         if !end && (items.isEmpty || next == nil || next == "") { throw BiliFailure.invalid }
         return Page(items: items, hasMore: !end, cursor: end ? nil : next)
+    }
+    func commentReplies(oid: String, type: Int = 1, root: String, page: Int = 1) async throws -> CommentReplyPage {
+        guard DynamicPost.validID(oid), DynamicPost.validID(root), type > 0, (1...1000).contains(page) else { throw BiliFailure.invalid }
+        let data = try await http.request("/x/v2/reply/reply", query: ["type": "\(type)", "oid": oid, "root": root, "pn": "\(page)", "ps": "20"])
+        let parent = obj(data["root"]), paging = obj(data["page"])
+        func id(_ item: JSON, _ key: String) -> String { String(describing: item[key + "_str"] ?? item[key] ?? "") }
+        let total = int(paging["count"]), size = int(paging["size"])
+        guard id(parent, "rpid") == root, parent["oid"] == nil || id(parent, "oid") == oid,
+            int(paging["num"]) == page, paging["count"] != nil, total >= 0, (1...20).contains(size),
+            data["replies"] is [Any] || total == 0 else {
+            throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复数据不完整或不属于当前评论，请重试。")
+        }
+        let items = try list(data["replies"]).map { item -> Comment in
+            guard DynamicPost.validID(id(item, "rpid")), id(item, "root") == root,
+                item["oid"] == nil || id(item, "oid") == oid else {
+                throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复归属校验失败，请重试。")
+            }
+            return Comment(id: id(item, "rpid"), user: User.map(obj(item["member"])), text: clean(obj(item["content"])["message"], limit: 6000), createdAt: num(item["ctime"]), likes: int(item["like"]))
+        }
+        let more = page * size < total
+        guard !more || !items.isEmpty else { throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复分页数据不完整，请重试。") }
+        return CommentReplyPage(items: items, total: total, hasMore: more)
     }
     private func unique(_ videos: [Video]) -> [Video] {
         var ids = Set<String>()

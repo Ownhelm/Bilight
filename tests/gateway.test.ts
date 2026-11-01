@@ -592,9 +592,9 @@ test('danmaku parses real XML attributes, decodes safe text and drops unsupporte
 });
 
 test('comments include only the requested page and initial child replies with sanitized text', async () => {
-  const { gateway, calls } = fixture(() => ({ cursor: { is_end: false, all_count: 41, pagination_reply: { next_offset: '{"type":3,"cursor":123}' } }, replies: [{ rpid_str: '1', member: { mid: 7, uname: '<b>Teacher</b>' }, content: { message: '<script>x()</script>Hello' }, ctime: 3, like: 4, replies: [{ rpid: 2, member: { mid: 8, uname: 'Student' }, content: { message: 'Child' } }] }] }));
+  const { gateway, calls } = fixture(() => ({ cursor: { is_end: false, all_count: 41, pagination_reply: { next_offset: '{"type":3,"cursor":123}' } }, replies: [{ rpid_str: '1', member: { mid: 7, uname: '<b>Teacher</b>' }, content: { message: '<script>x()</script>Hello' }, ctime: 3, like: 4, rcount: 9, replies: [{ rpid: 2, member: { mid: 8, uname: 'Student' }, content: { message: 'Child' } }] }] }));
   const result = await gateway.comments(9, 2, 'opaque-next');
-  assert.equal(result.items[0].text, 'Hello'); assert.equal(result.items[0].user.name, 'Teacher'); assert.equal(result.items[0].replies[0].text, 'Child'); assert.equal(result.nextPage, 3);
+  assert.equal(result.items[0].text, 'Hello'); assert.equal(result.items[0].user.name, 'Teacher'); assert.equal(result.items[0].replies[0].text, 'Child'); assert.equal(result.items[0].replyCount, 9); assert.equal(result.nextPage, 3);
   assert.equal(result.nextCursor, '{"type":3,"cursor":123}');
   assert.deepEqual(calls[0].options.query, { type: 1, oid: 9, mode: 2, pagination_str: '{"offset":"opaque-next"}', plat: 1, web_location: '1315875' });
   assert.equal(calls[0].options.wbi, true); assert.match(calls[0].url, /\/reply\/wbi\/main$/);
@@ -635,4 +635,69 @@ test('resolve follows only manual Bili short-link redirects and blocks unsafe pr
   for (const input of ['http://b23.tv/a', 'https://127.0.0.1/', 'https://bilibili.com.attacker.test/', 'https://www.bilibili.com:8443/', 'https://user:pass@b23.tv/x', 'file:///etc/passwd', 'javascript:alert(1)']) await assert.rejects(gateway.resolve(input), { code: 'UNSAFE_URL' });
   const unsafe = fixture(() => ({}), () => new Response(null, { status: 302, headers: { location: 'http://169.254.169.254/latest/meta-data/' } }));
   await assert.rejects(unsafe.gateway.resolve('https://b23.tv/unsafe'), { code: 'UNSAFE_URL' }); assert.equal(unsafe.fetches.length, 1);
+});
+
+test('reply pages preserve exact root IDs, actual totals and manual page boundaries', async () => {
+  const root = '289123456789';
+  const { gateway, calls } = fixture(({ options }) => ({ page: { num: options.query?.pn, size: 20, count: 21 }, root: { rpid_str: root, oid: 9 }, replies: [{ rpid_str: '289123456790', root, oid: 9, member: { mid: 8, uname: 'Reader' }, content: { message: '<b>Child</b>' } }] }));
+  const first = await gateway.commentReplies(9, root);
+  assert.equal(first.total, 21); assert.equal(first.hasMore, true); assert.equal(first.nextPage, 2); assert.equal(first.items[0].text, 'Child');
+  assert.deepEqual(calls[0].options.query, { type: 1, oid: 9, root, pn: 1, ps: 20 });
+  const last = await gateway.commentReplies(9, root, 2); assert.equal(last.hasMore, false); assert.equal(last.nextPage, undefined);
+});
+
+test('reply pages reject wrong roots, wrong videos and malformed or fake empty pagination', async () => {
+  const valid = { page: { num: 1, size: 20, count: 1 }, root: { rpid_str: '11', oid: 9 }, replies: [{ rpid_str: '12', root: 11, oid: 9 }] };
+  for (const payload of [{ ...valid, root: { rpid_str: '99' } }, { ...valid, replies: [{ rpid_str: '12', root: 99 }] }, { ...valid, replies: [{ rpid_str: '12', root: 11, oid: 10 }] }, { ...valid, page: { num: 1, size: 0, count: 1 } }, { ...valid, page: { num: 1, size: 20, count: 40 }, replies: [] }, { ...valid, replies: null }]) {
+    await assert.rejects(fixture(() => payload).gateway.commentReplies(9, '11'), { code: 'COMMENTS_UNAVAILABLE' });
+  }
+  const empty = await fixture(() => ({ ...valid, page: { num: 1, size: 20, count: 0 }, replies: null })).gateway.commentReplies(9, '11');
+  assert.deepEqual(empty, { items: [], total: 0, hasMore: false });
+  const invalid = fixture(() => valid);
+  for (const root of ['0', 'https://evil.example', '11&oid=10']) await assert.rejects(invalid.gateway.commentReplies(9, root), { code: 'INVALID_INPUT' });
+  assert.equal(invalid.calls.length, 0);
+});
+
+const dynamicID = '1057955152016703512';
+function dynamicItem(liked: boolean, likes = 12) {
+  const item = post(BV1, 7, 1700000000, { id_str: dynamicID });
+  (item.modules as Record<string, unknown>).module_stat = { like: { count: likes, status: liked }, comment: { count: 3 } };
+  return item;
+}
+test('dynamic likes preserve exact IDs, read first, write explicit JSON targets once and confirm real counts', async () => {
+  let liked = false;
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/dyn/thumb')) {
+      assert.equal(options.method, 'POST'); assert.deepEqual(options.query, { csrf: 'fixture-csrf' });
+      assert.equal(options.form, undefined); assert.equal(options.json?.dyn_id_str, dynamicID);
+      liked = options.json?.up === 1; return null;
+    }
+    assert.equal(options.query?.id, dynamicID); return { item: dynamicItem(liked, liked ? 19 : 18) };
+  });
+  await loginFixture(transport);
+  assert.equal((await gateway.setDynamicLike(dynamicID, true)).likes, 19);
+  assert.match(calls[0].url, /web-dynamic\/v1\/detail$/);
+  await gateway.setDynamicLike(dynamicID, true);
+  assert.equal(calls.filter(c => c.options.json).length, 1);
+  assert.equal((await gateway.setDynamicLike(dynamicID, false)).liked, false);
+  assert.deepEqual(calls.filter(c => c.options.json).map(c => c.options.json?.up), [1, 2]);
+});
+test('dynamic duplicate likes share one write, and stale or incomplete reads never authorize a write', async () => {
+  const gate = deferred<void>(); let liked = false;
+  const f = fixture(async ({ options }) => {
+    if (options.json) { await gate.promise; liked = true; return null; }
+    return { item: dynamicItem(liked) };
+  }); await loginFixture(f.transport);
+  const first = f.gateway.setDynamicLike(dynamicID, true), second = f.gateway.setDynamicLike(dynamicID, true);
+  gate.resolve(); await Promise.all([first, second]); assert.equal(f.calls.filter(c => c.options.json).length, 1);
+  const malformed = fixture(() => ({ item: { ...dynamicItem(false), modules: {} } })); await loginFixture(malformed.transport);
+  await assert.rejects(malformed.gateway.setDynamicLike(dynamicID, true)); assert.equal(malformed.calls.filter(c => c.options.json).length, 0);
+  const changed = fixture(() => { changed.transport.jar = new CookieJar(); return { item: dynamicItem(false) }; }); await loginFixture(changed.transport);
+  await assert.rejects(changed.gateway.setDynamicLike(dynamicID, true), { code: 'LOGIN_REQUIRED' }); assert.equal(changed.calls.filter(c => c.options.json).length, 0);
+  for (const id of ['1e18', '0', '-1', '123/like']) await assert.rejects(f.gateway.setDynamicLike(id, true), { code: 'INVALID_INPUT' });
+});
+test('an uncertain dynamic like performs bounded reads and never retries the write', async () => {
+  const f = fixture(({ options }) => { if (options.json) throw new BiliError('NETWORK_ERROR', 'Disconnected'); return { item: dynamicItem(false) }; });
+  await loginFixture(f.transport); await assert.rejects(f.gateway.setDynamicLike(dynamicID, true), { code: 'NETWORK_ERROR' });
+  assert.equal(f.calls.filter(c => c.options.json).length, 1); assert.equal(f.calls.filter(c => !c.options.json).length, 4);
 });

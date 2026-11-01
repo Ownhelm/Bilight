@@ -41,14 +41,23 @@ data class ByteResume(val etag: String, val total: Long) {
     companion object {
         fun strong(value: String?): String? = value?.takeIf { it.startsWith('"') && it.endsWith('"') && !it.startsWith("W/") }
         fun validate(code: Int, offset: Long, length: Long, range: String?, etag: String?, previous: ByteResume?): ByteResume {
-            if (length <= 0) invalid("下载响应缺少有效长度。")
+            // HTTP/2 and chunked responses can omit Content-Length. A complete Content-Range
+            // still proves the expected file length, checked again against bytes actually written.
+            val parts = range?.let { Regex("bytes ([0-9]+)-([0-9]+)/([0-9]+)").matchEntire(it)?.groupValues }
+            val start = parts?.get(1)?.toLongOrNull()
+            val end = parts?.get(2)?.toLongOrNull()
+            val total = parts?.get(3)?.toLongOrNull()
+            val completeRange = start == offset && total != null && total > offset && end == total - 1 &&
+                (length < 0 || length == total - offset)
             if (offset == 0L) {
                 if (code != 200 && code != 206) invalid("下载失败（HTTP $code）。")
-                if (code == 206 && range != "bytes 0-${length - 1}/$length") invalid("下载范围不完整，请重试。")
-                return ByteResume(strong(etag).orEmpty(), length)
+                if (code == 206 && !completeRange) invalid("下载范围不完整，请重试。")
+                val expected = if (code == 206) total!! else length
+                if (expected <= 0) invalid("下载响应缺少有效长度。")
+                return ByteResume(strong(etag).orEmpty(), expected)
             }
-            if (code != 206 || previous == null || previous.etag.isEmpty() || strong(etag) != previous.etag ||
-                previous.total != offset + length || range != "bytes $offset-${previous.total - 1}/${previous.total}") {
+            if (code != 206 || !completeRange || previous == null || previous.etag.isEmpty() || strong(etag) != previous.etag ||
+                previous.total != total) {
                 throw BiliFailure("RESUME_CHANGED", "下载源已变化，请重新下载，避免文件损坏。")
             }
             return previous

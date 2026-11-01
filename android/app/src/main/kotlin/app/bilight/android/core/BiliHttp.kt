@@ -6,6 +6,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONArray
 import org.json.JSONObject
@@ -126,9 +128,9 @@ class BiliHttp(private val vault: SecureStore, val client: OkHttpClient = OkHttp
         synchronized(lock) { cookies = cookies.filter { c -> issued.none { it.name == c.name } } + issued; cookieRevision++ }
         if (user != null && !authChanging) persist()
     }
-    suspend fun request(path: String, query: Map<String,String> = emptyMap(), form: Map<String,String>? = null, wbi: Boolean = false, referer: String = "https://www.bilibili.com/"): JSONObject {
-        val raw = envelope(path,query,form,wbi,referer); requireSuccess(raw)
-        if (form != null && raw.isNull("data")) return JSONObject()
+    suspend fun request(path: String, query: Map<String,String> = emptyMap(), form: Map<String,String>? = null, wbi: Boolean = false, referer: String = "https://www.bilibili.com/", json: JSONObject? = null): JSONObject {
+        val raw = envelope(path,query,form,wbi,referer,json); requireSuccess(raw)
+        if ((form != null || json != null) && raw.isNull("data")) return JSONObject()
         val data = raw.optJSONObject("data") ?: invalid()
         if (data.has("v_voucher")) throw BiliFailure("-352", "B站要求安全验证，请登录后重试（-352）。")
         return data
@@ -148,7 +150,7 @@ class BiliHttp(private val vault: SecureStore, val client: OkHttpClient = OkHttp
         if (raw.length != 64) invalid("签名参数暂时无法读取。")
         mixin.take(32).map { raw[it] }.joinToString("").also { signingKey = it to System.currentTimeMillis()+600000 }
     }
-    private suspend fun envelope(path: String, query: Map<String,String> = emptyMap(), form: Map<String,String>? = null, wbi: Boolean = false, referer: String = "https://www.bilibili.com/"): JSONObject {
+    private suspend fun envelope(path: String, query: Map<String,String> = emptyMap(), form: Map<String,String>? = null, wbi: Boolean = false, referer: String = "https://www.bilibili.com/", json: JSONObject? = null): JSONObject {
         val version = generation
         val base = (if (path.startsWith("https://")) path else "https://api.bilibili.com$path").toHttpUrl()
         if (!trusted(base)) invalid("请求地址不受信任。")
@@ -157,7 +159,9 @@ class BiliHttp(private val vault: SecureStore, val client: OkHttpClient = OkHttp
         val request = Request.Builder().url(url).header("User-Agent", USER_AGENT).header("Referer", referer).header("Origin", "https://www.bilibili.com")
         val header = synchronized(lock) { cookies.filter { it.matches(url) && it.expiresAt > System.currentTimeMillis() }.sortedByDescending { it.path.length }.joinToString("; ") { "${it.name}=${it.value}" } }
         if (header.isNotEmpty()) request.header("Cookie",header)
+        if (form != null && json != null) invalid("请求体格式冲突。")
         if (form != null) request.post(FormBody.Builder().apply { form.forEach { (k,v) -> add(k,v) } }.build())
+        if (json != null) request.post(json.toString().toRequestBody("application/json".toMediaType()))
         val bytes = execute(request.build(), version)
         check(version)
         persistIssuedCookies()

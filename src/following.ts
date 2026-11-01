@@ -38,7 +38,7 @@ export class FollowingFeed {
   private lastRequest = { cursor: '', replace: true };
   private listeners = new Set<() => void>();
   scrollTop = 0;
-  constructor(private readPage = (cursor: string, signal: AbortSignal) => api<Page<VideoSummary>>(`/api/following${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal })) {}
+  constructor(private readPage = (cursor: string, signal: AbortSignal) => api<Page<VideoSummary>>(`/api/following${cursor ? `?cursor=${encodeURIComponent(cursor)}` : ''}`, { signal }), private observation?: { version: () => number; accept: (items: VideoSummary[], version: number) => void }) {}
   getSnapshot = () => this.state;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(state: FeedState) { this.state = state; this.listeners.forEach(listener => listener()); }
@@ -68,8 +68,10 @@ export class FollowingFeed {
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 30_000);
     try {
+      const readVersion = this.observation?.version() ?? 0;
       const page = await this.readPage(cursor, controller.signal);
       if (controller.signal.aborted || this.active !== controller) return;
+      this.observation?.accept(page.items, readVersion);
       if (replace) this.visited.clear();
       this.visited.add(cursor);
       const next = nextFollowingCursor(page, this.visited);

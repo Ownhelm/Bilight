@@ -10,11 +10,18 @@ import SwiftUI
     @Published var accountError: String?
     @Published var showLogin = false
     @Published var showAccount = false
+    @Published var shareVideo: VideoShareInfo?
     @Published var path: [Route] = []
     @Published var accountPath: [Route] = []
     @Published var relations: [Int: Relation] = [:]
     @Published var followBusy = Set<Int>()
     @Published var accountGeneration = UUID()
+    @Published var dynamicLikeErrors: [String: String] = [:]
+    @Published var dynamicLikeStates: [String: DynamicLikeState] = [:]
+    @Published var dynamicLikePending: [String: Bool] = [:]
+    private(set) var dynamicLikeRevision = 0
+    private var dynamicLikeVersions: [String: Int] = [:]
+    private var dynamicLikeTasks: [String: Task<Void, Never>] = [:]
     var people: [Int: User] = [:]
     var videos: [String: Video] = [:]
     var catalogs: [String: CreatorCollection] = [:]
@@ -28,6 +35,8 @@ import SwiftUI
         self.client = client
         history = WatchHistory(client: client)
         downloads = DownloadStore(client: client)
+        following.likeReadVersion = { [weak self] in self?.dynamicLikeRevision ?? 0 }
+        following.didRead = { [weak self] posts, version in for post in posts { self?.recordDynamic(post, readVersion: version) } }
     }
     func restore() async {
         downloads.restoreLocalAccount()
@@ -44,11 +53,14 @@ import SwiftUI
         let changed = user?.mid != value?.mid
         user = value
         if changed {
+            shareVideo = nil
             following.account(value?.mid)
             history.account(value?.mid)
             downloads.account(value?.mid)
             relations = [:]
             dynamics = [:]
+            for task in dynamicLikeTasks.values { task.cancel() }
+            dynamicLikeTasks = [:]; dynamicLikeErrors = [:]; dynamicLikeStates = [:]; dynamicLikePending = [:]; dynamicLikeVersions = [:]; dynamicLikeRevision = 0
             path = []
             accountPath = []
             if value == nil { showAccount = false }
@@ -90,6 +102,35 @@ import SwiftUI
     func open(_ post: DynamicPost) {
         dynamics[post.id] = post
         navigate(.dynamic(post.id))
+    }
+    func dynamicLikeState(_ post: DynamicPost) -> DynamicLikeState {
+        dynamicLikeStates[post.id] ?? DynamicLikeState(liked: post.liked, likes: post.likes)
+    }
+    func recordDynamic(_ post: DynamicPost, readVersion: Int) {
+        dynamics[post.id] = post
+        guard dynamicLikePending[post.id] == nil, (dynamicLikeVersions[post.id] ?? 0) <= readVersion else { return }
+        dynamicLikeStates[post.id] = DynamicLikeState(liked: post.liked, likes: post.likes)
+    }
+    func toggleDynamicLike(_ post: DynamicPost) {
+        guard user != nil else { showLogin = true; return }
+        guard dynamicLikePending[post.id] == nil else { return }
+        let generation = accountGeneration, target = !dynamicLikeState(post).liked
+        dynamicLikeRevision += 1; dynamicLikeVersions[post.id] = dynamicLikeRevision
+        dynamicLikePending[post.id] = target; dynamicLikeErrors[post.id] = nil
+        dynamicLikeTasks[post.id] = Task { [weak self] in
+            guard let self else { return }
+            defer { if accountGeneration == generation { dynamicLikePending[post.id] = nil; dynamicLikeTasks[post.id] = nil } }
+            do {
+                let after = try await client.setDynamicLike(post.id, liked: target)
+                try Task.checkCancellation()
+                guard accountGeneration == generation else { return }
+                dynamicLikeRevision += 1; dynamicLikeVersions[post.id] = dynamicLikeRevision
+                let state = DynamicLikeState(liked: after.liked, likes: after.likes)
+                dynamicLikeStates[post.id] = state; dynamics[post.id] = after; following.updateLike(post.id, state: state)
+            } catch is CancellationError { return } catch {
+                if accountGeneration == generation { dynamicLikeErrors[post.id] = error.localizedDescription; handle(error) }
+            }
+        }
     }
     func readRelation(_ mid: Int) async {
         guard user != nil, user?.mid != mid else { return }

@@ -80,7 +80,7 @@ data class Post(val id: String, val author: User, val published: Long, val actio
         } else null
         val stats=modules.obj("module_stat")
         val warning=if (forward && original==null) "原动态已失效或暂时无法查看" else if (key=="none") major.obj("none").text("tips","内容暂时无法查看") else if (!forward && video==null && photos.isEmpty() && link==null && key !in listOf("","opus")) "附加内容暂时无法展示" else null
-        return Post(id, author, a.optLong("pub_ts"), a.text("pub_action"), dynamic.obj("desc").text("text", opus.obj("summary").text("text")), opus.text("title"), video, photos, original, link, warning, basic.text("comment_id_str").takeIf { Regex("^[1-9][0-9]{0,31}$").matches(it) }, basic.optInt("comment_type"), stats.obj("comment").optLong("count"),stats.obj("forward").optLong("count"),stats.obj("like").optLong("count"),stats.obj("like").optBoolean("status"))
+        return Post(id, author, a.optLong("pub_ts"), a.text("pub_action"), dynamic.obj("desc").text("text", opus.obj("summary").text("text")), opus.text("title"), video, photos, original, link, warning, basic.text("comment_id_str").takeIf { Regex("^[1-9][0-9]{0,31}$").matches(it) }, basic.optInt("comment_type"), stats.obj("comment").optLong("count"),stats.obj("forward").optLong("count"),stats.obj("like").optLong("count"),(stats.obj("like").opt("status")==true || (stats.obj("like").opt("status") as? Number)?.toDouble()==1.0))
     } }
 }
 data class Track(val id: Int, val url: String, val codecs: String, val bandwidth: Long, val width: Int, val height: Int, val initialization: String, val indexRange: String) {
@@ -99,7 +99,10 @@ enum class TapZone { BACKWARD, TOGGLE, FORWARD }
 fun tapZone(fraction: Float): TapZone = when { fraction < .4f -> TapZone.BACKWARD; fraction < .6f -> TapZone.TOGGLE; else -> TapZone.FORWARD }
 data class Subtitle(val id: Long, val language: String, val label: String, val url: String)
 data class Cue(val from: Double, val to: Double, val text: String)
-data class Comment(val id: String, val user: User, val text: String, val likes: Long)
+data class Comment(val id: String, val user: User, val text: String, val likes: Long, val replyCount: Int = 0, val createdAt: Long = 0)
+data class CommentReplyPage(val items: List<Comment>, val total: Int, val more: Boolean)
 data class History(val video: Video, val cid: Long, val page: Int, val part: String, val progress: Long, val viewedAt: Long, val completed: Boolean)
 data class Folder(val id: Long, val mid: Long, val title: String, val count: Int, val private: Boolean, val selected: Boolean = false, val capacity: Int = 1000, val cover: String? = null)
 data class Engagement(val liked: Boolean, val coins: Int, val favorite: Boolean) { val complete: Boolean get() = liked && coins > 0 && favorite }
+
+data class DynamicLikeState(val liked: Boolean, val likes: Long)

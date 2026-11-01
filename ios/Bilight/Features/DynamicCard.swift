@@ -8,6 +8,8 @@ struct DynamicCard: View {
     @State private var expanded = false
     @State private var gallery: PostGallerySelection?
     var body: some View {
+        let state = app.dynamicLikeState(post)
+        let selected = app.dynamicLikePending[post.id] ?? state.liked
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 10) {
                 Button {
@@ -42,12 +44,13 @@ struct DynamicCard: View {
                     }.accessibilityLabel("动态操作")
                 }
             }
-            if !post.title.isEmpty { Text(post.title).font(.headline).textSelection(.enabled) }
+            if !post.title.isEmpty { Text(post.title).font(.headline).textSelection(.enabled).contentShape(Rectangle()).onTapGesture { if !detail { app.open(post) } } }
             if !post.text.isEmpty {
                 Text(post.text).font(.system(size: 15)).lineSpacing(5).lineLimit(detail || expanded ? nil : 6)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
-                    .accessibilityIdentifier("dynamic-body-\(post.id)")
+                    .accessibilityIdentifier("dynamic-body-\(post.id)").contentShape(Rectangle())
+                    .onTapGesture { if !detail { app.open(post) } }
                 if !detail && (post.text.count > 120 || post.text.filter({ $0 == "\n" }).count > 4) {
                     Button { expanded.toggle() } label: {
                         Text(expanded ? "收起" : "展开").font(.system(size: 14))
@@ -68,23 +71,27 @@ struct DynamicCard: View {
                             systemImage: "arrowshape.turn.up.right")
                     }.accessibilityLabel("分享动态链接")
                     Spacer()
-                    if !detail, post.commentID != nil, post.commentType > 0 {
+                    if !detail {
                         Button {
                             app.open(post)
                         } label: {
-                            Label(post.comments > 0 ? countLabel(post.comments) : "评论", systemImage: "text.bubble")
-                        }.accessibilityLabel("查看评论，共\(post.comments)条")
+                            Label(post.comments > 0 ? "动态 · " + countLabel(post.comments) : "查看动态", systemImage: "text.bubble")
+                                .frame(minHeight: 44).contentShape(Rectangle())
+                        }.accessibilityLabel("查看动态详情，共\(post.comments)条评论").accessibilityIdentifier("dynamic-open-\(post.id)")
                     } else {
                         Label(post.comments > 0 ? countLabel(post.comments) : "评论", systemImage: "text.bubble")
                     }
                     Spacer()
-                    Label(
-                        post.likes > 0 ? countLabel(post.likes) : "赞",
-                        systemImage: post.liked ? "hand.thumbsup.fill" : "hand.thumbsup"
-                    )
-                    .foregroundStyle(post.liked ? Color.biliPink : Color.biliMuted)
-                    .accessibilityLabel("\(post.likes)赞" + (post.liked ? "，已点赞" : ""))
-                }.font(.system(size: 13)).foregroundStyle(Color.biliMuted).padding(.top, 6).frame(minHeight: 36)
+                    Button { app.toggleDynamicLike(post) } label: {
+                        Label(state.likes > 0 ? countLabel(state.likes) : "赞", systemImage: selected ? "hand.thumbsup.fill" : "hand.thumbsup")
+                            .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
+                    }.foregroundStyle(selected ? Color.biliPink : Color.biliMuted)
+                        .disabled(app.dynamicLikePending[post.id] != nil)
+                        .accessibilityLabel(selected ? "取消动态点赞" : "点赞动态")
+                        .accessibilityValue("\(state.likes)赞" + (app.dynamicLikePending[post.id] != nil ? "，正在处理" : selected ? "，已点赞" : "，未点赞"))
+                        .accessibilityIdentifier("dynamic-like-\(post.id)")
+                }.font(.system(size: 13)).labelStyle(DynamicActionLabelStyle()).foregroundStyle(Color.biliMuted).padding(.top, 6).frame(minHeight: 44)
+                if let error = app.dynamicLikeErrors[post.id] { Text(error).font(.caption).foregroundStyle(.red).accessibilityIdentifier("dynamic-like-error-\(post.id)") }
             }
         }.buttonStyle(.plain).fullScreenCover(item: $gallery) { selection in
             PostGallery(images: selection.images, selection: selection.index)
@@ -94,25 +101,21 @@ struct DynamicCard: View {
         switch post.content {
         case .text: EmptyView()
         case .video(let video):
-            Button {
-                app.open(video)
-            } label: {
-                VStack(alignment: .leading, spacing: 9) {
+            VStack(alignment: .leading, spacing: 9) {
+                Button { app.open(video) } label: {
                     RemoteImage(url: video.cover).aspectRatio(16 / 9, contentMode: .fit)
                         .overlay(alignment: .bottom) {
-                            HStack {
-                                Label(countLabel(video.views), systemImage: "play.rectangle")
-                                Spacer()
-                                Text(timeLabel(video.duration)).monospacedDigit()
-                            }.font(.system(size: 11)).foregroundStyle(.white).padding(9)
-                                .background(
-                                    LinearGradient(
-                                        colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom))
+                            HStack { Label(countLabel(video.views), systemImage: "play.rectangle"); Spacer(); Text(timeLabel(video.duration)).monospacedDigit() }
+                                .font(.system(size: 11)).foregroundStyle(.white).padding(9)
+                                .background(LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom))
                         }.clipShape(RoundedRectangle(cornerRadius: 7))
+                }.accessibilityLabel("播放视频：" + video.title)
+                Button { if detail { app.open(video) } else { app.open(post) } } label: {
                     Text(video.title).font(.system(size: 15, weight: .medium)).lineLimit(2).foregroundStyle(.primary)
-                        .multilineTextAlignment(.leading)
-                }
-            }.accessibilityLabel("播放视频：" + video.title)
+                        .multilineTextAlignment(.leading).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())
+                }.accessibilityLabel((detail ? "播放视频：" : "查看视频动态：") + video.title)
+                    .accessibilityIdentifier("dynamic-video-title-\(post.id)")
+            }
         case .pictures(let images):
             if let image = images.first, images.count == 1 {
                 Button {
@@ -169,6 +172,15 @@ struct DynamicCard: View {
             )
             .padding(14).background(Color.biliSoft, in: RoundedRectangle(cornerRadius: 6))
         }
+    }
+}
+/// Keep action symbols readable without enlarging their counts or captions.
+private struct DynamicActionLabelStyle: LabelStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 6) {
+            configuration.icon.font(.system(size: 18, weight: .regular))
+            configuration.title
+        }.frame(minHeight: 44).contentShape(Rectangle())
     }
 }
 private struct PostGallerySelection: Identifiable {

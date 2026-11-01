@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, ChatCircle, Check, SignOut, UserCircle, Users } from '@phosphor-icons/react';
-import type { AuthState, Comment, CreatorSummary, Page, SearchPage, VideoDetail, VideoSummary } from '../shared/types';
+import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, Check, SignOut, UserCircle, Users } from '@phosphor-icons/react';
+import type { AuthState, CreatorSummary, Page, SearchPage, VideoDetail, VideoSummary } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, SearchBox, useResource, VideoGrid } from './components';
 import { Login } from './Login';
 import { preloadPlayer, VideoPlayer } from './Player';
 import { TripleActions } from './TripleActions';
+import { Comments } from './Comments';
+import { DynamicActions, DynamicDetail, DynamicLikes } from './dynamics';
 import { HistoryMenu, HistoryPage } from './History';
 import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollections';
 import { completeFollowingRows, FollowingFeed, useFollowingColumns, useFollowingFeed } from './following';
@@ -19,8 +21,9 @@ export function App() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [authGeneration, setAuthGeneration] = useState(0);
   const [loggingOut, setLoggingOut] = useState(false);
-  const followingCache = useMemo(() => new FollowingFeed(), [auth?.user?.mid, authGeneration]);
-  useEffect(() => () => followingCache.clear(), [followingCache]);
+  const dynamicLikes = useMemo(() => new DynamicLikes(), [auth?.user?.mid, authGeneration]);
+  const followingCache = useMemo(() => new FollowingFeed(undefined, { version: dynamicLikes.readVersion, accept: dynamicLikes.ingestVideos }), [dynamicLikes]);
+  useEffect(() => () => { followingCache.clear(); dynamicLikes.clear(); }, [followingCache, dynamicLikes]);
   const refreshAuth = useCallback(async () => {
     const state = await api<AuthState>('/api/auth/state'); setAuth(state); setAuthError('');
     if (state.authenticated) { setLoginOpen(false); setAuthGeneration(value => value + 1); }
@@ -55,10 +58,11 @@ export function App() {
     <main id="main-content"><Routes>
       <Route path="/" element={<Home />} />
       <Route path="/search" element={<Search />} />
-      <Route path="/following" element={<Following key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} cache={followingCache} auth={auth} onLogin={() => setLoginOpen(true)} />} />
+      <Route path="/following" element={<Following key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} cache={followingCache} likes={dynamicLikes} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/history" element={<HistoryPage key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}:${location.search}`} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/creator/:mid" element={<Creator />} />
       <Route path="/creator/:mid/collections/:kind/:collectionId" element={<Creator />} />
+      <Route path="/dynamic/:id" element={<DynamicDetail key={`${location.pathname}:${authGeneration}`} store={dynamicLikes} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/video/:bvid" element={<Video key={location.pathname} auth={auth} authGeneration={authGeneration} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/open/*" element={<OpenLink />} />
       <Route path="*" element={<div className="page-container"><Empty title="这个页面还不存在" action={<Link className="button button-primary" to="/">返回首页</Link>}>从搜索开始，找到想看的内容。</Empty></div>} />
@@ -88,7 +92,7 @@ function Search() {
   </div>;
 }
 
-function Following({ auth, onLogin, cache }: { auth: AuthState | null; onLogin: () => void; cache: FollowingFeed }) {
+function Following({ auth, onLogin, cache, likes }: { auth: AuthState | null; onLogin: () => void; cache: FollowingFeed; likes: DynamicLikes }) {
   const feed = useFollowingFeed(cache, Boolean(auth?.authenticated));
   const restored = useRef(feed.initialized);
   const scrollIntent = useRef(false), nearEnd = useRef(false);
@@ -141,7 +145,7 @@ function Following({ auth, onLogin, cache }: { auth: AuthState | null; onLogin: 
     {auth?.authenticated && <p className="following-description">只看已关注 UP 主的视频，按发布时间更新。向下滚动继续加载。</p>}
     {!auth ? <Loading text="正在连接账号" /> : !auth.authenticated ? <Empty title="看看关注的 UP 主更新了什么" action={<button className="button button-primary" onClick={onLogin}>登录哔哩哔哩</button>}>登录后，只显示你已关注 UP 主的视频。</Empty> : <>
       {!feed.initialized && <div className="following-skeleton" role="status" aria-label="正在获取关注更新"><p>正在获取关注更新</p><div className="video-grid" aria-hidden="true">{Array.from({ length: columns * 2 }, (_, index) => <div className="video-placeholder" key={index}><div /><span /><span /></div>)}</div></div>}
-      {videos.length > 0 && <VideoGrid videos={videos} columns={columns} />}
+      {videos.length > 0 && <VideoGrid videos={videos} columns={columns} titleLink={video => video.dynamicId ? `/dynamic/${video.dynamicId}` : `/video/${video.bvid}`} renderFooter={video => video.dynamicId ? <DynamicActions id={video.dynamicId} initial={{ liked: video.dynamicLiked ?? false, likes: video.dynamicLikes ?? 0 }} comments={video.dynamicComments ?? 0} store={likes} auth={auth} onLogin={onLogin} /> : null} />}
       {feed.error && <Failure error={feed.error} retry={feed.retry} />}
       {feed.initialized && !feed.error && !feed.items.length && !feed.cursor && <Empty title="暂时没有新的视频">你的关注更新会显示在这里。</Empty>}
       <div className="following-loader" ref={sentinel}>
@@ -180,28 +184,12 @@ function Video({ auth, authGeneration, onLogin }: { auth: AuthState | null; auth
   if (!data || !part) return <div className="page-container"><Empty title="这个视频暂时无法播放" /></div>;
   return <div className="page-container watch-page"><div className="watch-title"><h1>{data.title}</h1><p><span>{countLabel(data.views)} 播放</span><span>{dateLabel(data.publishedAt)}</span><span className="watch-bvid">{data.bvid}</span></p></div>
     <div className={`watch-layout${data.parts.length > 1 ? ' has-parts' : ''}`}><div className="watch-primary"><VideoPlayer key={`${data.bvid}:${part.cid}`} bvid={data.bvid} cid={part.cid} poster={data.cover} startTime={Math.max(0, Math.min(part.duration, Number(params.get('t')) || 0))} accountMid={auth?.authenticated ? auth.user?.mid : undefined} />
-      <TripleActions key={`${data.bvid}:${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} bvid={data.bvid} auth={auth} onLogin={onLogin} snapshot={data.interaction} />
+      <TripleActions key={`${data.bvid}:${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} bvid={data.bvid} auth={auth} onLogin={onLogin} snapshot={data.interaction} title={data.title} page={part.page} />
       <Link className="watch-creator" to={`/creator/${data.owner.mid}`}><img src={data.owner.avatar} alt="" referrerPolicy="no-referrer" /><div><strong>{data.owner.name}</strong><span>查看 UP 主的视频</span></div><ArrowRight size={18} /></Link>
       {data.description && <details className="video-description"><summary>视频简介<CaretDown size={15} /></summary><p>{data.description}</p></details>}
-      <Comments bvid={data.bvid} />
+      <Comments key={`${data.bvid}:${auth?.user?.mid ?? 0}:${authGeneration}`} bvid={data.bvid} />
     </div>{data.parts.length > 1 && <aside className="parts-panel" aria-label="视频分P"><div className="parts-heading"><h2>分 P 列表</h2><span>{part.page} / {data.parts.length}</span></div><p className="parts-note">点击切换分 P</p><div className="parts-list">{data.parts.map(item => <button key={item.cid} className={item.cid === part.cid ? 'active' : ''} onClick={() => setParams({ p: String(item.page) })} aria-current={item.cid === part.cid ? 'true' : undefined}><span className="part-number">{String(item.page).padStart(2, '0')}</span><span className="part-title">{item.title}</span><span className="part-duration">{duration(item.duration)}</span></button>)}</div></aside>}</div>
   </div>;
-}
-
-function Comments({ bvid }: { bvid: string }) {
-  const [expanded, setExpanded] = useState(true); const [page, setPage] = useState(1); const [refresh, setRefresh] = useState(0); const [cursors, setCursors] = useState(['']);
-  const { data, error, loading } = useResource<Page<Comment>>(expanded ? `/api/videos/${bvid}/comments?page=${page}${cursors[page - 1] ? `&cursor=${encodeURIComponent(cursors[page - 1])}` : ''}` : null, refresh);
-  function change(next: number) {
-    if (next > page && data?.nextCursor) setCursors(value => [...value.slice(0, page), data.nextCursor!]);
-    setPage(next);
-  }
-  return <section className="comments-section"><button className="comments-trigger" aria-expanded={expanded} onClick={() => setExpanded(value => !value)}><span><ChatCircle size={21} />评论</span><span>{expanded ? '收起评论' : '展开查看'}<CaretDown className={expanded ? 'rotate' : ''} size={16} /></span></button>
-    {expanded && <div className="comments-content"><p className="comments-note">按时间查看评论，仅阅读。</p>{loading ? <Loading text="正在加载评论" /> : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} /> : data?.items.length ? data.items.map(comment => <CommentItem key={comment.id} comment={comment} />) : <p className="comments-empty">暂时没有评论。</p>}{data && <Pagination page={page} hasMore={data.hasMore && Boolean(data.nextCursor)} onChange={change} />}</div>}
-  </section>;
-}
-
-function CommentItem({ comment, reply = false }: { comment: Comment; reply?: boolean }) {
-  return <article className={`comment${reply ? ' comment-reply' : ''}`}><Link to={`/creator/${comment.user.mid}`} className="comment-avatar"><img src={comment.user.avatar} alt="" loading="lazy" referrerPolicy="no-referrer" /></Link><div className="comment-body"><Link className="comment-name" to={`/creator/${comment.user.mid}`}>{comment.user.name}</Link><p>{comment.text}</p><div className="comment-meta"><span>{dateLabel(comment.createdAt)}</span>{comment.likes > 0 && <span>{countLabel(comment.likes)} 赞</span>}</div>{!reply && comment.replies?.map(item => <CommentItem key={item.id} comment={item} reply />)}</div></article>;
 }
 
 function OpenLink() {

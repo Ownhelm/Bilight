@@ -238,6 +238,12 @@ struct Comment: Identifiable {
     var text: String
     var createdAt: Double
     var likes: Int
+    var replyCount: Int = 0
+}
+struct CommentReplyPage {
+    var items: [Comment]
+    var total: Int
+    var hasMore: Bool
 }
 struct WatchRecord: Codable, Identifiable {
     var video: Video

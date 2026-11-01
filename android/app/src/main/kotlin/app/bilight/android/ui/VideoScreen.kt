@@ -30,6 +30,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.unit.LayoutDirection
 
@@ -224,33 +225,44 @@ import kotlin.math.min
     var coinDialog by remember { mutableStateOf(false) }; var favoriteDialog by remember { mutableStateOf(false) }
     var downloadDialog by remember { mutableStateOf(false) }
     val detail=model.detail
+    val cached=model.offline || app.downloads.items.any { it.video.bvid==detail?.video?.bvid && it.part.cid==model.part?.cid && app.downloads.file(it)!=null }
     LazyColumn(state=list,modifier=Modifier.fillMaxSize()) {
         if (detail==null) item { ErrorNotice(model.error,model::retry) } else {
             item { Column(Modifier.padding(horizontal=16.dp)) {
                 Row(Modifier.padding(top=14.dp),verticalAlignment=Alignment.CenterVertically) { Avatar(detail.video.owner,38) { app.open(Route.Creator(detail.video.owner)) }; Text(detail.video.owner.name,Modifier.weight(1f).padding(horizontal=10.dp).heightIn(min=44.dp).clickable { app.open(Route.Creator(detail.video.owner)) }.wrapContentHeight(Alignment.CenterVertically),fontSize=14.sp,maxLines=2,overflow=TextOverflow.Ellipsis); FollowButton(app,detail.video.owner.mid) }
                 Text(detail.video.title,Modifier.padding(top=14.dp),fontSize=17.sp,lineHeight=25.sp,fontWeight=FontWeight.SemiBold)
                 Text("${count(detail.video.views)}播放",Modifier.padding(top=6.dp),fontSize=11.sp,color=Muted)
-                if (!model.offline) VideoActions(model,onCoin={ if (app.requireLogin()) coinDialog=true },onFavorite={ if (app.requireLogin()) favoriteDialog=true },onDownload={ if (app.requireLogin()) downloadDialog=true })
+                VideoActions(model,cached,onCoin={ if (app.requireLogin()) coinDialog=true },onFavorite={ if (app.requireLogin()) favoriteDialog=true },onDownload={ if (cached) app.open(Route.Downloads) else if (app.requireLogin()) downloadDialog=true })
                 HorizontalDivider(Modifier.padding(top=12.dp),thickness=.5.dp,color=Color(0xffe9e9ee))
             } }
-            item { ErrorNotice(model.supportError,model::readEngagement); ErrorNotice(app.historyError) }
+            item { if (model.networkAvailable) { ErrorNotice(model.metadataError,model::refreshOnlineContent); ErrorNotice(model.supportError,model::readEngagement) }; ErrorNotice(app.historyError) }
             if (detail.parts.size>1) item { Column(Modifier.padding(16.dp)) { Text("分P",fontWeight=FontWeight.Medium); FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { detail.parts.forEach { p -> FilterChip(selected=model.part?.cid==p.cid,onClick={ model.selectPart(p) },label={ Text("P${p.page} ${p.title}",maxLines=2,overflow=TextOverflow.Ellipsis) }) } } } }
             if (detail.description.isNotBlank()) item { var expanded by remember { mutableStateOf(false) }; Column(Modifier.padding(horizontal=16.dp)) { Text(detail.description,maxLines=if (expanded) Int.MAX_VALUE else 3,fontSize=13.sp,color=Muted,overflow=TextOverflow.Ellipsis); TextButton(onClick={ expanded=!expanded }) { Text(if (expanded) "收起简介" else "展开简介") } } }
-            if (!model.offline) item { TextButton(onClick={ model.commentsExpanded=!model.commentsExpanded },modifier=Modifier.padding(horizontal=8.dp)) { Text(if (model.commentsExpanded) "评论" else "展开评论",fontSize=17.sp,color=MaterialTheme.colorScheme.onSurface) } }
-            if (!model.offline && model.commentsExpanded) { items(model.comments,key={ it.id }) { CommentRow(app,it) }; item { PageMore(model.commentsBusy,model.commentsMore,model.commentsError,model::loadComments) } }
+            item { TextButton(onClick={ model.commentsExpanded=!model.commentsExpanded },modifier=Modifier.padding(horizontal=8.dp)) { Text(if (model.commentsExpanded) "评论" else "展开评论",fontSize=17.sp,color=MaterialTheme.colorScheme.onSurface) } }
+            if (model.commentsExpanded) {
+                items(model.comments,key={ it.id }) { CommentRow(app,it,"${detail.video.aid}") }
+                item {
+                    if (!model.networkAvailable) OfflineCommentsNotice(model.offline,model::refreshOnlineContent)
+                    else {
+                        PageMore(model.commentsBusy,model.commentsMore,model.commentsError,model::loadComments)
+                        if (!model.commentsBusy && !model.commentsMore && model.commentsError==null && model.comments.isEmpty()) EmptyNotice("暂时没有评论")
+                    }
+                }
+            }
         }
     }
     if (coinDialog && detail!=null) CoinDialog(model) { coinDialog=false }
     if (favoriteDialog && detail!=null) FavoriteDialog(app,model) { favoriteDialog=false }
     if (downloadDialog) DownloadOptions(app,model) { downloadDialog=false }
 }
-@Composable private fun VideoActions(model: PlaybackModel,onCoin: () -> Unit,onFavorite: () -> Unit,onDownload: () -> Unit) {
-    val statistics=model.detail?.statistics ?: return; val state=model.engagement
+@Composable private fun VideoActions(model: PlaybackModel,cached: Boolean,onCoin: () -> Unit,onFavorite: () -> Unit,onDownload: () -> Unit) {
+    val statistics=model.detail?.statistics?.takeIf { model.detailLoaded }; val state=model.engagement
     var charging by remember { mutableStateOf(false) }
+    var shareDialog by remember(model.detail?.video?.bvid, model.part?.cid) { mutableStateOf(false) }
     val charge by animateFloatAsState(if (charging) 1f else 0f,tween(if (charging) 1500 else 0,easing=LinearEasing),label="三连蓄力")
     val scope=rememberCoroutineScope()
     val currentState by rememberUpdatedState(state)
-    val busy by rememberUpdatedState(model.actionBusy)
+    val busy by rememberUpdatedState(model.actionBusy || !model.networkAvailable || !model.detailLoaded)
     val press=remember(model) { LikePress(scope,{ !busy && currentState?.complete!=true },{ model.write(VideoWrite.Like(currentState?.liked!=true)) },{ model.write(VideoWrite.Triple) },{ charging=it }) }
     val pressLifecycle=LocalLifecycleOwner.current.lifecycle
     DisposableEffect(press,pressLifecycle) {
@@ -280,19 +292,41 @@ import kotlin.math.min
             }
         },horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.Center) {
             Box(contentAlignment=Alignment.Center) { if (charging) CircularProgressIndicator(progress={ charge },modifier=Modifier.size(34.dp),color=Pink,strokeWidth=2.dp); BiliActionIcon(BiliActionKind.LIKE,"点赞，长按一键三连",state?.liked==true) }
-            Spacer(Modifier.height(9.dp)); Text(count(statistics.likes),fontSize=13.sp,color=Muted)
+            Spacer(Modifier.height(9.dp)); Text(statistics?.likes?.let(::count) ?: "—",fontSize=13.sp,color=Muted)
         }
     }
-    @Composable fun Action(modifier: Modifier,kind: BiliActionKind,label: String,total: Long,selected: Boolean,onClick: () -> Unit) {
-        TextButton(onClick=onClick,enabled=!model.actionBusy,modifier=modifier.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
-            Column(horizontalAlignment=Alignment.CenterHorizontally) { BiliActionIcon(kind,label,selected); Spacer(Modifier.height(9.dp)); Text(count(total),fontSize=13.sp,color=Muted) }
+    @Composable fun Action(modifier: Modifier,kind: BiliActionKind,label: String,total: Long?,selected: Boolean,onClick: () -> Unit) {
+        TextButton(onClick=onClick,enabled=!busy,modifier=modifier.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
+            Column(horizontalAlignment=Alignment.CenterHorizontally) { BiliActionIcon(kind,label,selected); Spacer(Modifier.height(9.dp)); Text(total?.let(::count) ?: "—",fontSize=13.sp,color=Muted) }
         }
     }
     ActionBarLayout(Modifier.padding(top=10.dp,bottom=2.dp),
         like={ Like(it) },
-        coin={ Action(it,BiliActionKind.COIN,"投币",statistics.coins,(state?.coins ?: 0)>0,onCoin) },
-        favorite={ Action(it,BiliActionKind.FAVORITE,"收藏",statistics.favorites,state?.favorite==true,onFavorite) },
-        download={ IconButton(onClick=onDownload,modifier=it.heightIn(min=58.dp)) { BiliActionIcon(BiliActionKind.DOWNLOAD,"下载") } })
+        coin={ Action(it,BiliActionKind.COIN,"投币",statistics?.coins,(state?.coins ?: 0)>0,onCoin) },
+        favorite={ Action(it,BiliActionKind.FAVORITE,"收藏",statistics?.favorites,state?.favorite==true,onFavorite) },
+        share={ TextButton(onClick={ press.cancel(); shareDialog=true },modifier=it.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
+            Column(horizontalAlignment=Alignment.CenterHorizontally) {
+                Icon(Icons.Rounded.Reply,"转发",Modifier.size(22.dp).graphicsLayer { scaleX=-1f },tint=Muted)
+                Spacer(Modifier.height(9.dp)); Text("转发",fontSize=13.sp,color=Muted)
+            }
+        } },
+        download={ TextButton(onClick=onDownload,modifier=it.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
+            Column(horizontalAlignment=Alignment.CenterHorizontally) {
+                if (cached) Icon(Icons.Rounded.CheckCircleOutline,"已缓存，查看缓存",Modifier.size(22.dp),tint=Pink) else BiliActionIcon(BiliActionKind.DOWNLOAD,"下载")
+                Spacer(Modifier.height(9.dp)); Text(if (cached) "已缓存" else "缓存",fontSize=13.sp,color=if (cached) Pink else Muted)
+            }
+        } })
+    if (shareDialog) model.detail?.let { detail ->
+        VideoShareSheet(detail.video.bvid,detail.video.title,model.part?.page ?: 1) { shareDialog=false }
+    }
+}
+@Composable internal fun OfflineCommentsNotice(cachedPlayback: Boolean,retry: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=20.dp).background(Soft,androidx.compose.foundation.shape.RoundedCornerShape(12.dp)).padding(20.dp),horizontalAlignment=Alignment.CenterHorizontally,verticalArrangement=Arrangement.spacedBy(8.dp)) {
+        Icon(Icons.Rounded.WifiOff,null,Modifier.size(28.dp),tint=Muted)
+        Text("当前处于离线状态",fontSize=14.sp,color=MaterialTheme.colorScheme.onSurface)
+        Text(if (cachedPlayback) "缓存视频可继续播放，联网后即可查看评论。" else "连接网络后即可查看评论。",fontSize=12.sp,color=Muted,textAlign=androidx.compose.ui.text.style.TextAlign.Center)
+        TextButton(onClick=retry,modifier=Modifier.heightIn(min=44.dp)) { Text("重新加载") }
+    }
 }
 @Composable private fun CoinDialog(model: PlaybackModel,close: () -> Unit) {
     val detail=model.detail ?: return; val current=model.engagement

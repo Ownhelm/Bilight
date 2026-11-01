@@ -41,6 +41,145 @@ final class DynamicTests: XCTestCase {
         XCTAssertEqual(model.posts.count, 20)
     }
 
+    func testDynamicLikeWritesJSONOnceAndConfirmsBeforeChangingCounts() async throws {
+        let id = "1057955152016703512"
+        var liked = true, writes: [Int] = [], reads = 0
+        let (client, http) = fixture { request in
+            if request.url!.path == "/x/dynamic/feed/dyn/thumb" {
+                XCTAssertEqual(request.httpMethod, "POST")
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/json")
+                let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+                XCTAssertEqual(query.first { $0.name == "csrf" }?.value, "test-only")
+                var data = request.httpBody ?? Data()
+                if let stream = request.httpBodyStream {
+                    stream.open(); defer { stream.close() }; var bytes = [UInt8](repeating: 0, count: 1024)
+                    while stream.hasBytesAvailable { let count = stream.read(&bytes, maxLength: bytes.count); if count <= 0 { break }; data.append(contentsOf: bytes.prefix(count)) }
+                }
+                let body = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? JSON)
+                XCTAssertEqual(body["dyn_id_str"] as? String, id)
+                let up = int(body["up"]); writes.append(up); liked = up == 1
+                return ["code": 0, "data": NSNull()]
+            }
+            XCTAssertEqual(request.httpMethod, "GET"); reads += 1
+            var value = self.item(id), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": liked ? 19 : 18, "status": liked], "comment": ["count": 3]]
+            value["modules"] = modules
+            return ["code": 0, "data": ["item": value]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let cancelled = try await client.setDynamicLike(id, liked: false)
+        XCTAssertFalse(cancelled.liked); XCTAssertEqual(cancelled.likes, 18)
+        _ = try await client.setDynamicLike(id, liked: false)
+        let selected = try await client.setDynamicLike(id, liked: true)
+        XCTAssertTrue(selected.liked); XCTAssertEqual(selected.likes, 19)
+        XCTAssertEqual(writes, [2, 1]); XCTAssertEqual(reads, 5)
+    }
+    func testFailedDynamicLikeDoesNotRetryTheWriteOrClaimSuccess() async throws {
+        var writes = 0, reads = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" { writes += 1; throw URLError(.notConnectedToInternet) }
+            reads += 1; return ["code": 0, "data": ["item": self.item()]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        do { _ = try await client.setDynamicLike("1057955152016703512", liked: false); XCTFail("Unconfirmed state must fail") } catch {}
+        XCTAssertEqual(writes, 1); XCTAssertEqual(reads, 4)
+    }
+    @MainActor func testDynamicLikeStateIsSharedAndLateFeedReadsCannotOverwriteConfirmedMutation() async throws {
+        var liked = true, writes = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" { writes += 1; Thread.sleep(forTimeInterval: 0.1); liked = false; return ["code": 0, "data": NSNull()] }
+            var value = self.item(), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": liked ? 12 : 11, "status": liked]]; value["modules"] = modules
+            return ["code": 0, "data": ["item": value]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client), post = try XCTUnwrap(DynamicPost.map(item()))
+        app.user = User(mid: 3, name: "隔离账号", avatar: nil)
+        app.recordDynamic(post, readVersion: app.dynamicLikeRevision)
+        let oldRead = app.dynamicLikeRevision
+        app.toggleDynamicLike(post); app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikePending[post.id], false)
+        XCTAssertEqual(app.dynamicLikeState(post).likes, 12, "Pending icon must not invent a public count")
+        let end = Date().addingTimeInterval(3)
+        while app.dynamicLikePending[post.id] != nil && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(writes, 1); XCTAssertEqual(app.dynamicLikeState(post), DynamicLikeState(liked: false, likes: 11))
+        app.recordDynamic(post, readVersion: oldRead)
+        XCTAssertEqual(app.dynamicLikeState(post).likes, 11)
+    }
+    @MainActor func testDynamicAndCommentsShareOneLoadingIndicatorWhenDetailFinishesFirst() async throws {
+        try await checkDynamicLoading(commentsFirst: false)
+    }
+    @MainActor func testDynamicAndCommentsShareOneLoadingIndicatorWhenCommentsFinishFirst() async throws {
+        try await checkDynamicLoading(commentsFirst: true)
+    }
+    @MainActor private func checkDynamicLoading(commentsFirst: Bool) async throws {
+        let lock = NSLock()
+        var pending: [String: (JSON) -> Void] = [:], reads: [String: Int] = [:]
+        let detailPath = "/x/polymer/web-dynamic/v1/detail", commentPath = "/x/v2/reply/wbi/main"
+        let raw = item(), id = "1057955152016703512"
+        DynamicLoadingProtocol.respond = { request, reply in
+            XCTAssertEqual(request.httpMethod, "GET", "Loading regression must never write to a platform")
+            let path = request.url!.path
+            if [detailPath, commentPath].contains(path) {
+                lock.withLock { reads[path, default: 0] += 1; pending[path] = reply }; return
+            }
+            let data: JSON
+            switch path {
+            case "/x/frontend/finger/spi": data = ["b_3": "test-official-device-0001"]
+            case "/x/web-interface/nav": data = ["isLogin": true, "mid": 3, "uname": "隔离账号", "wbi_img": [
+                "img_url": "https://i0.hdslb.com/" + String(repeating: "a", count: 32) + ".png",
+                "sub_url": "https://i0.hdslb.com/" + String(repeating: "b", count: 32) + ".png"]]
+            default: XCTFail("Unexpected fixture endpoint: \(path)"); data = [:]
+            }
+            reply(["code": 0, "data": data])
+        }
+        let configuration = URLSessionConfiguration.ephemeral; configuration.protocolClasses = [DynamicLoadingProtocol.self]
+        let client = BiliClient(http: BiliHTTP(configuration: configuration, vault: MemoryVault()))
+        let app = AppModel(client: client); app.restoring = false; app.dynamics[id] = try XCTUnwrap(DynamicPost.map(raw))
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previous = scene.keyWindow, window = UIWindow(windowScene: scene)
+        let host = UIHostingController(rootView: DynamicDetailView(id: id).environmentObject(app))
+        window.rootViewController = host; window.makeKeyAndVisible()
+        defer { window.isHidden = true; window.rootViewController = nil; previous?.makeKeyAndVisible(); DynamicLoadingProtocol.respond = nil }
+        func indicators(_ view: UIView) -> [UIActivityIndicatorView] {
+            (view as? UIActivityIndicatorView).map { [$0] } ?? view.subviews.flatMap(indicators)
+        }
+        func count() -> Int {
+            indicators(host.view).filter { indicator in
+                guard indicator.window === window, indicator.isAnimating else { return false }
+                var area = indicator.convert(indicator.bounds, to: window).intersection(window.bounds)
+                var ancestor: UIView? = indicator
+                while let view = ancestor {
+                    if view.isHidden || view.alpha <= 0.01 { return false }
+                    if view.clipsToBounds { area = area.intersection(view.convert(view.bounds, to: window)) }
+                    ancestor = view.superview
+                }
+                return !area.isEmpty && !area.isNull
+            }.count
+        }
+        func wait(_ condition: () -> Bool) async throws {
+            let end = Date().addingTimeInterval(3)
+            while !condition() && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+            XCTAssertTrue(condition())
+            try await Task.sleep(for: .milliseconds(100))
+        }
+        func complete(_ path: String) {
+            let reply = lock.withLock { pending.removeValue(forKey: path) }
+            let data: JSON = path == detailPath ? ["item": raw] : ["cursor": ["is_end": 1, "all_count": 0], "replies": []]
+            reply?(["code": 0, "data": data])
+        }
+        try await wait { lock.withLock { pending.count == 2 } }
+        XCTAssertEqual(count(), 1, "Opening a cached dynamic while detail and comments both wait must show exactly one spinner")
+        let image = UIGraphicsImageRenderer(bounds: window.bounds).image { _ in window.drawHierarchy(in: window.bounds, afterScreenUpdates: true) }
+        let attachment = XCTAttachment(image: image); attachment.name = "dynamic-single-loading-\(commentsFirst ? "comments-first" : "detail-first")"; attachment.lifetime = .keepAlways; add(attachment)
+        complete(commentsFirst ? commentPath : detailPath)
+        try await wait { count() == 1 }
+        XCTAssertEqual(count(), 1, "One remaining request must retain one spinner")
+        complete(commentsFirst ? detailPath : commentPath)
+        try await wait { count() == 0 }
+        XCTAssertEqual(count(), 0)
+        XCTAssertEqual(lock.withLock { reads[detailPath] }, 1); XCTAssertEqual(lock.withLock { reads[commentPath] }, 1)
+    }
     private func item(
         _ id: String = "1057955152016703512", mid: Int = 7, type: String = "DYNAMIC_TYPE_WORD", major: JSON? = nil
     ) -> JSON {
@@ -333,6 +472,31 @@ final class DynamicTests: XCTestCase {
         model.removeAuthor(7)
         XCTAssertEqual(model.posts.map(\.author.mid), [8])
     }
+    func testReplyPaginationValidatesRootAndKeepsTheRequestedThreadAndType() async throws {
+        let (client, _) = fixture { request in
+            XCTAssertEqual(request.httpMethod, "GET")
+            XCTAssertEqual(request.url!.path, "/x/v2/reply/reply")
+            let query = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!.queryItems!
+            XCTAssertEqual(query.first { $0.name == "oid" }?.value, "1057955152016703512")
+            XCTAssertEqual(query.first { $0.name == "root" }?.value, "289123456789")
+            XCTAssertEqual(query.first { $0.name == "type" }?.value, "17")
+            let page = Int(query.first { $0.name == "pn" }!.value!)!
+            return ["code": 0, "data": ["page": ["num": page, "size": 20, "count": 21], "root": ["rpid_str": "289123456789", "oid": "1057955152016703512"], "replies": [["rpid_str": "289123456790", "root": "289123456789", "oid": "1057955152016703512", "member": ["mid": 8, "uname": "Reader"], "content": ["message": "Child"]]]]]
+        }
+        let first = try await client.commentReplies(oid: "1057955152016703512", type: 17, root: "289123456789")
+        XCTAssertEqual(first.items.first?.text, "Child"); XCTAssertEqual(first.total, 21); XCTAssertTrue(first.hasMore)
+        let last = try await client.commentReplies(oid: "1057955152016703512", type: 17, root: "289123456789", page: 2)
+        XCTAssertFalse(last.hasMore)
+    }
+    func testRepliesDoNotAcceptMismatchedRootsOrIncompleteEmptyPages() async throws {
+        for wrongRoot in [true, false] {
+            let (client, _) = fixture { _ in
+                ["code": 0, "data": ["page": ["num": 1, "size": 20, "count": 40], "root": ["rpid_str": wrongRoot ? "99" : "11"], "replies": []]]
+            }
+            do { _ = try await client.commentReplies(oid: "9", root: "11"); XCTFail("Must reject incomplete reply data") }
+            catch { XCTAssertTrue(error is BiliFailure) }
+        }
+    }
     func testDynamicCommentsUseReturnedTypeAndExactOID() async throws {
         let (client, _) = fixture { request in
             XCTAssertEqual(request.url!.path, "/x/v2/reply/wbi/main")
@@ -345,4 +509,25 @@ final class DynamicTests: XCTestCase {
         XCTAssertTrue(result.items.isEmpty)
         XCTAssertFalse(result.hasMore)
     }
+}
+
+/// Per-request gates keep independent SwiftUI loading paths pending without blocking URLSession.
+private final class DynamicLoadingProtocol: URLProtocol {
+    static var respond: ((URLRequest, @escaping (JSON) -> Void) -> Void)?
+    private let lock = NSLock()
+    private var stopped = false
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.respond?(request) { [weak self] body in
+            guard let self, !self.lock.withLock({ self.stopped }) else { return }
+            do {
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"])!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: try JSONSerialization.data(withJSONObject: body))
+                client?.urlProtocolDidFinishLoading(self)
+            } catch { client?.urlProtocol(self, didFailWithError: error) }
+        }
+    }
+    override func stopLoading() { lock.withLock { stopped = true } }
 }

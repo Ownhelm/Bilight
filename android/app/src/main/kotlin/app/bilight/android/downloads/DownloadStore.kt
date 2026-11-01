@@ -160,6 +160,15 @@ class DownloadStore(private val context: Context, private val repository: BiliRe
             update { it.copy(state = DownloadState.COMPLETED, received = completed.values.sum(), total = completed.values.sum(), error = null) }
             withContext(Dispatchers.IO) { folder.listFiles()?.filter { it.name != "video.mp4" }?.forEach { it.delete() } }
         } catch (e: CancellationException) { update { if (it.state.active) it.copy(state = DownloadState.PAUSED) else it }; throw e }
-        catch (e: Exception) { update { it.copy(state = DownloadState.FAILED, error = if (e is BiliFailure) e.message else "下载中断，请继续或重新下载。") } }
+        catch (e: Exception) { update {
+            val reason = when (e) {
+                is BiliFailure -> e.message
+                is java.net.SocketTimeoutException -> "网络超时，请继续下载。"
+                is java.net.UnknownHostException -> "无法连接下载服务器，请检查网络。"
+                is IOException -> "下载连接中断或文件无法写入，请检查网络与可用空间后继续。"
+                else -> "处理未完成，请重试。"
+            }
+            it.copy(state = DownloadState.FAILED, error = "${it.state.label}：$reason")
+        } }
     }
 }

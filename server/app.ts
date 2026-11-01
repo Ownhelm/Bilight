@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
 import type { AuthService } from './auth.js';
 import type { BiliGateway } from './gateway.js';
 import { MediaRegistry } from './media.js';
-import type { SmsSend, User, VideoSummary, Comment, EngagementAction, WatchProgress } from '../shared/types.js';
+import type { SmsSend, User, VideoSummary, Comment, EngagementAction, WatchProgress, VideoDynamic } from '../shared/types.js';
 
 export interface AppOptions { auth: AuthService; gateway: BiliGateway; key: Buffer; media?: MediaRegistry; staticDir?: string; allowedOrigins?: string[] }
 const fail = (code: string, message: string, status = 400) => Object.assign(new Error(message), { code, status });
@@ -39,11 +39,11 @@ export async function createApp(options: AppOptions) {
     const valid = !!token && request.unsignCookie(token).valid;
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) {
       if (!valid || !origins.has(request.headers.origin ?? '') || request.headers['x-bilight-request'] !== '1') throw fail('INVALID_ORIGIN', '请刷新 Bilight 页面后重试。', 403);
-      if (route.startsWith('/api/auth/') || /\/(triple|interaction|favorite-folders)$/.test(route)) {
+      if (route.startsWith('/api/auth/') || /\/(triple|interaction|favorite-folders|like)$/.test(route)) {
         const key = route;
         const now = Date.now();
         const attempts = (limits.get(key) ?? []).filter(at => now - at < 60000);
-        const max = key === '/api/auth/sms/send' ? 2 : /\/(triple|interaction|favorite-folders)$/.test(key) ? 10 : 20;
+        const max = key === '/api/auth/sms/send' ? 2 : /\/(triple|interaction|favorite-folders|like)$/.test(key) ? 10 : 20;
         if (attempts.length >= max) throw fail('TOO_MANY_REQUESTS', '操作过于频繁，请稍后再试。', 429);
         attempts.push(now); limits.set(key, attempts);
       }
@@ -65,6 +65,7 @@ export async function createApp(options: AppOptions) {
   const userImage = <T extends User>(user: T): T => ({ ...user, avatar: media.image(user.avatar) });
   const videoImages = <T extends VideoSummary>(video: T): T => ({ ...video, cover: media.image(video.cover), owner: userImage(video.owner) });
   const commentImages = (comment: Comment): Comment => ({ ...comment, user: userImage(comment.user), replies: comment.replies.map(commentImages) });
+  const dynamicImages = (post: VideoDynamic): VideoDynamic => ({ ...post, author: userImage(post.author), video: videoImages(post.video) });
   const requireLogin = async () => { if (!(await auth.state()).authenticated) throw fail('LOGIN_REQUIRED', '登录 B 站后即可使用此功能。', 401); };
 
   app.get('/health', async () => ({ ok: true, service: 'bilight' }));
@@ -192,9 +193,22 @@ export async function createApp(options: AppOptions) {
     if (!detail.parts.some(part => part.cid === cid)) throw fail('INVALID_PART', '该分 P 不属于当前视频。');
     return (await gateway.subtitles(bvid, cid)).map(subtitle => ({ ...subtitle, url: `${media.register(subtitle.url, 'subtitle')}/subtitle.vtt` }));
   });
+  app.get<{ Params: { id: string } }>('/api/dynamics/:id', async request => dynamicImages(await gateway.dynamic(request.params.id)));
+  app.post<{ Params: { id: string }; Body: { liked: boolean } }>('/api/dynamics/:id/like', async request => {
+    await requireLogin();
+    if (typeof request.body?.liked !== 'boolean') throw fail('INVALID_INPUT', '点赞状态无效。');
+    return dynamicImages(await gateway.setDynamicLike(request.params.id, request.body.liked));
+  });
+
   app.get<{ Params: { bvid: string }; Querystring: { page?: string; cursor?: string } }>('/api/videos/:bvid/comments', async request => {
     const detail = await gateway.video(bvidOf(request.params.bvid));
     const result = await gateway.comments(detail.aid, Math.min(1000, number(request.query.page)), text(request.query.cursor, 4096) || undefined);
+    return { ...result, items: result.items.map(commentImages) };
+  });
+
+  app.get<{ Params: { bvid: string; root: string }; Querystring: { page?: string } }>('/api/videos/:bvid/comments/:root/replies', async request => {
+    const detail = await gateway.video(bvidOf(request.params.bvid));
+    const result = await gateway.commentReplies(detail.aid, request.params.root, number(request.query.page));
     return { ...result, items: result.items.map(commentImages) };
   });
 

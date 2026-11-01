@@ -299,3 +299,17 @@ test('subtitles become inert VTT text with valid cue times', async () => {
   const vtt = await media.subtitle(path.split('/').pop()!);
   assert.match(vtt!, /00:00:01.250 --> 00:00:03.500/); assert.ok(!vtt!.includes('<script>')); assert.ok(!vtt!.includes('invalid'));
 });
+
+test('dynamic like routes require session, origin and a boolean target, and proxy detail images', async t => {
+  const id='1057955152016703512'; let writes=0;
+  const post={id,author:{mid:7,name:'UP',avatar:'https://i0.hdslb.com/avatar.jpg'},publishedAt:1,action:'发布了视频',text:'正文',comments:3,liked:false,likes:18,video:{bvid,aid:123,title:'视频',cover:'https://i0.hdslb.com/cover.jpg',duration:60,publishedAt:1,owner:{mid:7,name:'UP',avatar:'https://i0.hdslb.com/avatar.jpg'}}};
+  const remote={...gateway,dynamic:async()=>post,setDynamicLike:async(key:string,liked:boolean)=>{assert.equal(key,id);writes++;return {...post,liked};}} as unknown as BiliGateway;
+  const app=await createApp({auth:{...auth,state:async()=>({authenticated:true,user:{mid:3,name:'Test',avatar:''}})} as AuthService,gateway:remote,key:randomBytes(32),staticDir:'/nonexistent'});t.after(()=>app.close());
+  const initial=await app.inject({url:'/api/auth/state',headers:host});
+  const headers={...host,cookie:String(initial.headers['set-cookie']).split(';')[0],origin:'http://127.0.0.1:3880','x-bilight-request':'1'};
+  const detail=await app.inject({url:`/api/dynamics/${id}`,headers:host});assert.equal(detail.statusCode,200);assert.match(detail.json().video.cover,/^\/api\/media\//);
+  for(const badHeaders of [{...headers,origin:'https://evil.example'},{...headers,cookie:''}]) assert.equal((await app.inject({method:'POST',url:`/api/dynamics/${id}/like`,headers:badHeaders,payload:{liked:true}})).statusCode,403);
+  assert.equal((await app.inject({method:'POST',url:`/api/dynamics/${id}/like`,headers,payload:{liked:1}})).statusCode,400);
+  assert.equal(writes,0);
+  const result=await app.inject({method:'POST',url:`/api/dynamics/${id}/like`,headers,payload:{liked:true}});assert.equal(result.statusCode,200);assert.equal(result.json().liked,true);assert.equal(writes,1);
+});

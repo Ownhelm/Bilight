@@ -15,6 +15,8 @@ import SwiftUI
     private var seen = Set<String>(), cursors = Set<String>()
     private var version = UUID()
     private var request: Task<Void, Never>?
+    var likeReadVersion: (() -> Int)?
+    var didRead: (([DynamicPost], Int) -> Void)?
     private var lastReset = true
     var refreshing: Bool { busy && lastReset }
     func account(_ value: Int?) {
@@ -37,6 +39,9 @@ import SwiftUI
         account(mid)
         if let request { await request.value; return }
         if !initialized { await load(client: client, mid: mid, reset: true) }
+    }
+    func updateLike(_ id: String, state: DynamicLikeState) {
+        for index in posts.indices where posts[index].id == id { posts[index].liked = state.liked; posts[index].likes = state.likes }
     }
     func removeAuthor(_ mid: Int) { posts.removeAll { $0.author.mid == mid } }
     func retry(client: BiliClient, mid: Int) async { await load(client: client, mid: mid, reset: lastReset) }
@@ -67,6 +72,7 @@ import SwiftUI
         do {
             if reset { await client.invalidateFollowing() }
             for index in 0..<3 {
+                let likeVersion = likeReadVersion?() ?? 0
                 let page = try await client.following(mid: mid, cursor: reset && index == 0 ? nil : cursor)
                 try Task.checkCancellation()
                 guard version == token else { return }
@@ -76,6 +82,7 @@ import SwiftUI
                 if let next = page.cursor, cursors.contains(next) {
                     throw BiliFailure(code: "CURSOR_LOOP", message: "动态分页暂时异常，请下拉刷新。")
                 }
+                didRead?(page.items, likeVersion)
                 let incoming = page.items.filter { seen.insert($0.id).inserted }
                 posts += incoming
                 hasMore = page.hasMore

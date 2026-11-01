@@ -2,6 +2,9 @@ package app.bilight.android.playback
 
 import android.content.Context
 import android.net.Uri
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import androidx.compose.runtime.*
 import androidx.media3.common.*
 import androidx.media3.datasource.DefaultDataSource
@@ -52,6 +55,17 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private val context = app.getApplication<android.app.Application>()
     private val scope = CoroutineScope(SupervisorJob()+Dispatchers.Main.immediate)
     private val preferences = PlaybackSettings(context)
+    private val connectivity = context.getSystemService(ConnectivityManager::class.java)
+    private fun hasNetwork() = connectivity.getNetworkCapabilities(connectivity.activeNetwork)?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
+    var networkAvailable by mutableStateOf(hasNetwork()); private set
+    var detailLoaded by mutableStateOf(false); private set
+    var metadataError by mutableStateOf<String?>(null); private set
+    private var metadataJob: Job? = null
+    private val networkCallback = object: ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) = networkChanged()
+        override fun onLost(network: Network) = networkChanged()
+        override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) = networkChanged()
+    }
     val player = ExoPlayer.Builder(context).setSeekBackIncrementMs(10000).setSeekForwardIncrementMs(10000).setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(12000,35000,1000,1500).setPrioritizeTimeOverSizeThresholds(true).build()).build().apply {
         setAudioAttributes(AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),true)
         setPlaybackSpeed(preferences.speed)
@@ -114,6 +128,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private var closed=false
     private var refreshedMedia=false
     init {
+        connectivity.registerDefaultNetworkCallback(networkCallback)
         player.addListener(object: Player.Listener {
             override fun onIsPlayingChanged(isPlaying: Boolean) { playing=isPlaying; if (!isPlaying) flushHistory() }
             override fun onPlayWhenReadyChanged(playWhenReady: Boolean,reason: Int) { updateBuffering() }
@@ -174,14 +189,40 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
                 detail=Detail(item.video,listOf(item.part),"",2,Statistics(0,0,0)); part=item.part
                 playback=Playback(item.quality,listOf(Quality(item.quality,item.label)),item.part.duration.toDouble(),null,null,null)
                 player.setMediaItem(mediaItem(Uri.fromFile(file),item.part),route.progress*1000); player.prepare(); player.playWhenReady=visibility.prepared(true); preparing=false
+                refreshOnlineContent()
                 return@launch
             }
-            val value=app.repository.detail(route.bvid); app.http.check(version); detail=value
+            val value=app.repository.detail(route.bvid); app.http.check(version); detail=value; detailLoaded=true
             val selected=if (route.cid!=null) value.parts.firstOrNull { it.cid==route.cid } else value.parts.firstOrNull { it.page==route.page }
             if (selected==null) invalid("该分P已失效，请选择其他分P。")
             part=selected; prepare(selected,route.progress*1000,true)
             loadComments(); readEngagement()
         } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
+    }
+    private fun networkChanged() { scope.launch {
+        if (closed) return@launch
+        val available=hasNetwork(); val restored=available && !networkAvailable
+        networkAvailable=available
+        if (restored) refreshOnlineContent()
+    } }
+    fun refreshOnlineContent() {
+        if (!networkAvailable) return
+        if (offline && !detailLoaded && metadataJob?.isActive!=true) metadataJob=scope.launch {
+            metadataError=null
+            try {
+                val fresh=app.repository.detail(route.bvid); app.http.check(version)
+                val selected=part ?: return@launch
+                if (fresh.parts.none { it.cid==selected.cid }) invalid("缓存分P已不在当前视频中。")
+                // Refresh page content only; the local source and the existing player remain untouched.
+                detail=fresh.copy(parts=listOf(selected)); detailLoaded=true
+            } catch (e: CancellationException) { throw e } catch (e: Exception) { metadataError=e.message }
+        }
+        if (comments.isEmpty() || commentsError!=null) loadComments()
+        if (offline) {
+            part?.let { if (tracks.isEmpty()) loadSubtitles(it) }
+            if (danmakuItems.isEmpty()) loadDanmaku()
+        }
+        readEngagement()
     }
     private suspend fun prepare(selected: Part,progress: Long,autoplay: Boolean,loadSupport: Boolean = true,preserveCurrent: Boolean = false,preferredQuality: Int = preferences.quality) {
         val result=app.repository.playback(route.bvid,selected.cid,preferredQuality); app.http.check(version)
@@ -255,13 +296,13 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         app.report(d,p,player.currentPosition.coerceAtLeast(0)/1000,version); advanced=false; lastReport=android.os.SystemClock.elapsedRealtime()
     }
     fun loadComments() {
-        val d=detail ?: return; if (commentsBusy || !commentsMore) return
+        val d=detail ?: return; if (!networkAvailable || commentsBusy || !commentsMore) return
         commentsBusy=true; commentsError=null
         scope.launch { try { val page=app.repository.comments("${d.video.aid}",cursor=commentCursor); app.http.check(version); val known=comments.map { it.id }.toSet(); comments.addAll(page.items.filter { it.id !in known }); commentsMore=page.more; commentCursor=page.cursor } catch (e: CancellationException) { throw e } catch (e: Exception) { commentsError=e.message } finally { commentsBusy=false } }
     }
-    fun readEngagement() { if (app.user==null || actionBusy) return; engagementRead?.cancel(); engagementRead=scope.launch { try { val value=app.repository.engagement(route.bvid,true); app.http.check(version); if (!actionBusy) { engagement=value; refreshSupport=false; supportError=null } } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } } }
+    fun readEngagement() { if (!networkAvailable || app.user==null || actionBusy) return; engagementRead?.cancel(); engagementRead=scope.launch { try { val value=app.repository.engagement(route.bvid,true); app.http.check(version); if (!actionBusy) { engagement=value; refreshSupport=false; supportError=null } } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } } }
     fun write(action: VideoWrite) {
-        if (!app.requireLogin() || actionBusy) return
+        if (!networkAvailable || (offline && !detailLoaded) || !app.requireLogin() || actionBusy) return
         val d=detail ?: return; actionBusy=true; engagementRead?.cancel()
         val before=engagement; val pending=before ?: Engagement(false,0,false)
         val silent=action !is VideoWrite.Favorite
@@ -276,7 +317,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
             if (refreshSupport) app.repository.engagement(route.bvid,true)
             app.http.check(version)
             val value=app.repository.write(d,action); app.http.check(version); engagement=value; refreshSupport=false
-            try { val fresh=app.repository.detail(route.bvid); app.http.check(version); detail=fresh }
+            try { val fresh=app.repository.detail(route.bvid); app.http.check(version); detail=if (offline) fresh.copy(parts=listOfNotNull(part)) else fresh }
             catch (e: CancellationException) { throw e } catch (e: Exception) { if (!silent) supportError="互动已更新，计数暂时无法刷新：${e.message}" }
         } catch (e: CancellationException) { if (!closed && app.http.generation==version) engagement=before; throw e }
         catch (e: Exception) { if (!closed && app.http.generation==version) { engagement=before; refreshSupport=true; supportError=if (silent) null else e.message } }
@@ -315,7 +356,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         val cid=part?.cid ?: return; if (!danmaku) return
         danmakuJob=scope.launch { try { val bytes=app.http.bytes("https://api.bilibili.com/x/v1/dm/list.so?oid=$cid"); val values=withContext(Dispatchers.Default) { Danmaku.parse(bytes) }; app.http.check(version); danmakuItems=values } catch (e: CancellationException) { throw e } catch (e: Exception) { danmakuError=e.message } }
     }
-    fun close() { if (closed) return; endTemporarySpeed(); flushHistory(); closed=true; PlaybackService.detach(context,this); scope.cancel(); player.release(); mediaClient.dispatcher.cancelAll() }
+    fun close() { if (closed) return; endTemporarySpeed(); flushHistory(); closed=true; connectivity.unregisterNetworkCallback(networkCallback); PlaybackService.detach(context,this); scope.cancel(); player.release(); mediaClient.dispatcher.cancelAll() }
 }
 
 private fun xml(value: String): String = value.replace("&","&amp;").replace("\"","&quot;").replace("<","&lt;").replace(">","&gt;")

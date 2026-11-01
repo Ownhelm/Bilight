@@ -5,17 +5,36 @@ import SwiftUI
     @UIApplicationDelegateAdaptor(PlaybackOrientationDelegate.self) private var appDelegate
     @StateObject private var app = AppModel()
     @State private var started = false
+    @State private var systemShare: VideoShareInfo?
+    @State private var copied = false
     @Environment(\.scenePhase) private var scene
     var body: some Scene {
         WindowGroup {
-            Group {
-                #if DEBUG
-                    if InteractionRegression.player { PlaybackLifecycleRegressionView() }
-                    else if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
-                #else
-                    RootView()
-                #endif
-            }.environmentObject(app).onChange(of: scene) { old, phase in
+            ZStack {
+                Group {
+                    #if DEBUG
+                        if InteractionRegression.player { PlaybackLifecycleRegressionView() }
+                        else if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
+                    #else
+                        RootView()
+                    #endif
+                }.accessibilityHidden(app.shareVideo != nil)
+                if let share = app.shareVideo {
+                    VideoShareSheet(bvid: share.bvid, title: share.title, page: share.page, onClose: { app.shareVideo = nil },
+                        onCopied: { copied = true }, onSystemShare: { app.shareVideo = nil; systemShare = share })
+                        .id(share.id).zIndex(100)
+                }
+                if copied {
+                    VStack { Spacer(); Text("链接已复制").font(.system(size: 12)).padding(.horizontal, 16).padding(.vertical, 9)
+                        .foregroundStyle(.white).background(Color(white: 0.1).opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+                        .padding(.bottom, 24) }.allowsHitTesting(false).zIndex(101).task {
+                            UIAccessibility.post(notification: .announcement, argument: "链接已复制")
+                            do { try await Task.sleep(for: .seconds(2)); copied = false } catch {}
+                        }
+                }
+            }.sheet(item: $systemShare) { VideoSystemShareSheet(share: $0) }
+                .onChange(of: app.accountGeneration) { _, _ in systemShare = nil; copied = false }
+                .environmentObject(app).onChange(of: app.path) { _, _ in if app.shareVideo != nil { app.shareVideo = nil } }.onChange(of: scene) { old, phase in
                 let stage: NativeStage = phase == .active ? .playbackActivated : (phase == .background ? .playbackBackgrounded : (old == .background ? .playbackForegrounding : .playbackResigned))
                 if let player = PlaybackOrientationDelegate.active {
                     player.recordLifecycle(stage)

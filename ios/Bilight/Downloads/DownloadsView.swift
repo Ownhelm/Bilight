@@ -162,40 +162,14 @@ struct OfflineVideoView: View {
     @EnvironmentObject private var app: AppModel
     @ObservedObject var store: DownloadStore
     var id: UUID
-    @StateObject private var model = PlayerModel()
     private var record: DownloadRecord? { store.items.first { $0.id == id && $0.state == .completed } }
     var body: some View {
-        ScrollView {
+        Group {
             if let record {
-                VStack(alignment: .leading, spacing: 18) {
-                    NativePlayer(model: model) { _ in }.aspectRatio(16 / 9, contentMode: .fit).background(.black)
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text(record.video.title).font(.title3.bold())
-                        Text("P\(record.part.page) · \(record.qualityLabel) · 离线观看").font(.caption).foregroundStyle(
-                            Color.biliMuted)
-                        HStack(spacing: 30) {
-                            ShareLink("导出 MP4", item: store.fileURL(record))
-                        }.padding(.vertical, 10)
-                        if let error = model.error { Text(error).font(.footnote).foregroundStyle(Color.biliPink) }
-                        HistorySyncStatus(history: app.history)
-                    }.padding(.horizontal, 18)
-                }.task {
-                    if model.player.currentItem == nil {
-                        model.loadLocal(store.fileURL(record), record: record)
-                        let mid = app.user?.mid
-                        model.onWatch = { progress, completed in
-                            guard mid != nil, app.user?.mid == mid else { return }
-                            try? app.history.record(
-                                record.video, part: record.part, progress: progress, completed: completed)
-                        }
-                    }
-                }
+                VideoView(bvid: record.video.bvid, requestedPage: record.part.page, localRecord: record)
             } else {
                 EmptyBlock(title: "本地视频不可用", message: "请返回下载列表检查文件状态。")
             }
-        }.navigationTitle("离线观看").navigationBarTitleDisplayMode(.inline).onDisappear {
-            model.flush()
-            if !model.isFullscreen { model.stop() }
         }
     }
 }

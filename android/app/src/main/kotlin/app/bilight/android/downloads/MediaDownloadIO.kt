@@ -41,12 +41,15 @@ internal suspend fun downloadTrack(client: OkHttpClient, url: String, destinatio
     if (offset > 0 && offset == previous?.total) { progress(offset, offset); return }
     val request = Request.Builder().url(url).header("Referer", "https://www.bilibili.com/")
         .header("User-Agent", BiliHttp.USER_AGENT).header("Accept-Encoding", "identity")
-    if (offset > 0) request.header("Range", "bytes=$offset-").header("If-Range", previous!!.etag)
+        .header("Range", "bytes=$offset-")
+    if (offset > 0) request.header("If-Range", previous!!.etag)
     val call = client.newCall(request.build())
     // Also cancel an in-progress blocking body read, not only response-header waiting.
     val cancellation = currentCoroutineContext()[kotlinx.coroutines.Job]!!.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { if (it != null) call.cancel() }
     try {
         call.awaitResponse().use { response ->
+            // CDN error bodies are often HTML; preserve the actual status instead of reporting a media type error.
+            if (response.code != 200 && response.code != 206) invalid("下载失败（HTTP ${response.code}），请重新下载以获取新地址。")
             val type = response.header("Content-Type").orEmpty().substringBefore(';').lowercase()
             if (!(type.startsWith("video/") || type.startsWith("audio/") || type == "application/octet-stream")) invalid("下载响应不是视频或音频。")
             val body = response.body ?: invalid()
@@ -62,7 +65,7 @@ internal suspend fun downloadTrack(client: OkHttpClient, url: String, destinatio
                     received += count
                     if (received > proof.total) invalid("下载响应超过声明长度。")
                     output.write(chunk, 0, count)
-                    val now = android.os.SystemClock.elapsedRealtime()
+                    val now = System.nanoTime() / 1_000_000
                     if (now - lastUpdate >= 250) { progress(received, proof.total); lastUpdate = now }
                 }
                 output.fd.sync()

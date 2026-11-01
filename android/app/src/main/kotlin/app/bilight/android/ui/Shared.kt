@@ -50,13 +50,13 @@ enum class ImageLoadState { LOADING, READY, FAILED }
         }
     }
 }
-@Composable fun VideoCard(video: Video, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick=onClick)) {
-        Box(Modifier.fillMaxWidth().aspectRatio(16f/9).clip(RoundedCornerShape(8.dp))) {
+@Composable fun VideoCard(video: Video, onTitleClick: (() -> Unit)? = null, onClick: () -> Unit) {
+    Column(Modifier.fillMaxWidth().then(if (onTitleClick==null) Modifier.clickable(onClick=onClick) else Modifier)) {
+        Box(Modifier.fillMaxWidth().then(if (onTitleClick!=null) Modifier.clickable(onClick=onClick) else Modifier).aspectRatio(16f/9).clip(RoundedCornerShape(8.dp))) {
             RemoteImage(video.cover,video.title,Modifier.fillMaxSize())
             Text(clock(video.duration),Modifier.align(Alignment.BottomEnd).padding(5.dp).background(Color.Black.copy(alpha=.6f),RoundedCornerShape(3.dp)).padding(horizontal=4.dp,vertical=1.dp),color=Color.White,fontSize=11.sp)
         }
-        Text(video.title,Modifier.padding(top=7.dp),maxLines=2,overflow=TextOverflow.Ellipsis,fontSize=14.sp,lineHeight=20.sp)
+        Text(video.title,Modifier.padding(top=7.dp).then(if (onTitleClick!=null) Modifier.fillMaxWidth().heightIn(min=44.dp).clickable(onClick=onTitleClick) else Modifier),maxLines=2,overflow=TextOverflow.Ellipsis,fontSize=14.sp,lineHeight=20.sp)
         Text(video.owner.name + if (video.views > 0) " · ${count(video.views)}播放" else "",Modifier.padding(top=4.dp),fontSize=11.sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
     }
 }

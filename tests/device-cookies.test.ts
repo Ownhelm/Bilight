@@ -37,3 +37,17 @@ test('a device response after logout cannot populate the new jar or persist old 
   await assert.rejects(task, { code: 'LOGIN_REQUIRED' });
   assert.equal(await http.jar.getCookieString('https://api.bilibili.com/'), ''); assert.equal(persisted, 0);
 });
+
+test('JSON writes preserve the dynamic string ID and do not fall back to form encoding', async () => {
+  let calls = 0;
+  const http = new BiliHttp({ fetch: (async (url, init) => {
+    calls++; assert.equal(new URL(String(url)).searchParams.get('csrf'), 'test-only');
+    assert.equal(init?.method, 'POST'); assert.equal(new Headers(init?.headers).get('content-type'), 'application/json');
+    assert.deepEqual(JSON.parse(String(init?.body)), { dyn_id_str: '1057955152016703512', up: 2 });
+    return Response.json({ code: 0, data: null });
+  }) as typeof fetch });
+  await http.request('https://api.bilibili.com/x/dynamic/feed/dyn/thumb', { query: { csrf: 'test-only' }, json: { dyn_id_str: '1057955152016703512', up: 2 } });
+  assert.equal(calls, 1);
+  await assert.rejects(http.request('https://api.bilibili.com/x/dynamic/feed/dyn/thumb', { json: {}, form: {} }));
+  assert.equal(calls, 1);
+});

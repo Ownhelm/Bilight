@@ -191,10 +191,10 @@ actor BiliHTTP {
         try await withTaskCancellationHandler(operation: { try await task.value }, onCancel: { task.cancel() })
     }
     func request(
-        _ path: String, query: [String: String] = [:], form: [String: String]? = nil, wbi: Bool = false,
+        _ path: String, query: [String: String] = [:], form: [String: String]? = nil, json: JSON? = nil, wbi: Bool = false,
         referer: String = "https://www.bilibili.com/"
     ) async throws -> JSON {
-        let envelope = try await envelope(path, query: query, form: form, wbi: wbi, referer: referer)
+        let envelope = try await envelope(path, query: query, form: form, json: json, wbi: wbi, referer: referer)
         let code = int(envelope["code"])
         guard code == 0 else {
             let text = clean(envelope["message"] ?? envelope["msg"])
@@ -203,7 +203,7 @@ actor BiliHTTP {
                 message: code == -101 ? "登录已失效，请重新登录。" : text.isEmpty ? "B 站请求失败（\(code)）。" : "\(text)（\(code)）")
         }
         guard let data = envelope["data"] as? JSON else {
-            if form != nil && (envelope["data"] == nil || envelope["data"] is NSNull) { return [:] }
+            if (form != nil || json != nil) && (envelope["data"] == nil || envelope["data"] is NSNull) { return [:] }
             throw BiliFailure.invalid
         }
         if data["v_voucher"] != nil {
@@ -241,7 +241,7 @@ actor BiliHTTP {
         else { throw BiliFailure(code: "DANMAKU_UNAVAILABLE", message: "弹幕暂时无法读取，请重试。") }
         return data
     }
-    private func envelope(_ path: String, query: [String: String], form: [String: String]?, wbi: Bool, referer: String)
+    private func envelope(_ path: String, query: [String: String], form: [String: String]?, json: JSON? = nil, wbi: Bool, referer: String)
         async throws -> JSON
     {
         let version = generation
@@ -258,7 +258,8 @@ actor BiliHTTP {
             : values.keys.sorted().map { "\(Self.encode($0))=\(Self.encode(values[$0]!))" }.joined(separator: "&")
         guard let url = components.url, Self.trusted(url) else { throw BiliFailure.invalid }
         var request = URLRequest(url: url)
-        request.httpMethod = form == nil ? "GET" : "POST"
+        guard form == nil || json == nil else { throw BiliFailure.invalid }
+        request.httpMethod = form == nil && json == nil ? "GET" : "POST"
         request.setValue(Self.userAgent, forHTTPHeaderField: "User-Agent")
         request.setValue(referer, forHTTPHeaderField: "Referer")
         request.setValue("https://www.bilibili.com", forHTTPHeaderField: "Origin")
@@ -272,6 +273,7 @@ actor BiliHTTP {
                 separator: "&"
             ).data(using: .utf8)
         }
+        if let json { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: json) }
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
         try check(version)

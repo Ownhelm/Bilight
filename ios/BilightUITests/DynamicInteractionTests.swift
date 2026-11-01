@@ -1,6 +1,67 @@
 import XCTest
 
 final class DynamicInteractionTests: XCTestCase {
+    func testConnectedPhoneOpensVideoDynamicWithoutChangingLikes() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        defer { app.terminate() }
+        let following = app.buttons["关注"]
+        XCTAssertTrue(following.waitForExistence(timeout: 15)); following.tap()
+        let title = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "dynamic-video-title-")).firstMatch
+        let deadline = Date().addingTimeInterval(35)
+        while !title.exists && Date() < deadline {
+            if app.buttons["重新登录"].exists { XCTFail("Real account login is required"); return }
+            Thread.sleep(forTimeInterval: 0.5)
+            if !title.exists && app.scrollViews.firstMatch.exists { app.swipeUp() }
+        }
+        XCTAssertTrue(title.exists, "A real followed video dynamic must expose its title entry")
+        if !title.isHittable { app.swipeUp() }
+        let id = title.identifier.replacingOccurrences(of: "dynamic-video-title-", with: "")
+        title.tap()
+        XCTAssertTrue(app.navigationBars["动态详情"].waitForExistence(timeout: 15))
+        let like = app.buttons["dynamic-like-" + id]
+        let end = Date().addingTimeInterval(10)
+        while !like.isHittable && Date() < end { app.swipeUp() }
+        XCTAssertTrue(like.exists); XCTAssertTrue(like.isEnabled)
+        XCTAssertGreaterThanOrEqual(like.frame.height, 44)
+        let shot = XCTAttachment(screenshot: app.screenshot()); shot.name = "dynamic-real-iphone-detail"; shot.lifetime = .keepAlways; add(shot)
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(app.buttons["dynamic-video-title-" + id].waitForExistence(timeout: 5))
+        let comments = app.buttons["dynamic-open-" + id]
+        for _ in 0..<3 { if comments.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(comments.isHittable); comments.tap()
+        XCTAssertTrue(app.navigationBars["动态详情"].waitForExistence(timeout: 15))
+        XCTAssertLessThanOrEqual(app.activityIndicators.count, 1, "The comment entry shares the dynamic detail loading indicator")
+        app.navigationBars.buttons.firstMatch.tap()
+    }
+
+    func testShareSheetCopiesAndDismissesBeforeSystemHandoff() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        let search = app.textFields["search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10))
+        search.tap(); search.typeText("BV12qnt6VEM1\n")
+        let transfer = app.buttons["转发"]
+        XCTAssertTrue(transfer.waitForExistence(timeout: 10)); transfer.tap()
+        let copy = app.buttons["复制链接"], system = app.buttons["系统分享"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 3)); XCTAssertTrue(system.isHittable)
+        XCTAssertFalse(app.buttons["二维码"].exists)
+        XCTAssertGreaterThanOrEqual(copy.frame.height, 44)
+        XCTAssertGreaterThan(copy.frame.minY, app.frame.maxY - 240, "Share controls belong in a shallow bottom panel")
+        XCTAssertLessThan(copy.frame.minY, app.buttons["取消"].frame.minY)
+        let capture = XCTAttachment(screenshot: app.descendants(matching: .any).matching(identifier: "video-share-sheet").firstMatch.screenshot()); capture.name = "share-compact-ios"; capture.lifetime = .keepAlways; add(capture)
+        copy.tap()
+        XCTAssertTrue(app.staticTexts["链接已复制"].waitForExistence(timeout: 2))
+        XCTAssertFalse(app.buttons["取消"].exists)
+        transfer.tap(); app.buttons["取消"].tap()
+        XCTAssertFalse(app.buttons["复制链接"].exists)
+        transfer.tap(); app.buttons["系统分享"].tap()
+        XCTAssertFalse(app.buttons["取消"].waitForExistence(timeout: 1), "Custom chooser must close before the native share sheet")
+    }
+
     func testRealScrubbingPreservesPositionAndPlaybackStateInlineAndFullscreen() throws {
         continueAfterFailure = false
         let app = XCUIApplication()

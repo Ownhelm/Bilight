@@ -1,5 +1,5 @@
 export interface User { mid: number; name: string; avatar: string }
-export interface VideoSummary { bvid: string; aid: number; title: string; cover: string; duration: number; publishedAt: number; owner: User; views?: number }
+export interface VideoSummary { bvid: string; aid: number; title: string; cover: string; duration: number; publishedAt: number; owner: User; views?: number; dynamicId?: string; dynamicLikes?: number; dynamicLiked?: boolean; dynamicComments?: number }
 export interface CreatorSummary extends User { description: string; fans?: number }
 export interface HistoryItem extends VideoSummary { cid: number; page: number; part: string; viewedAt: number; progress: number }
 export interface WatchProgress { bvid: string; cid: number; progress: number; accountMid: number; completed?: boolean }
@@ -15,7 +15,8 @@ export interface Quality { id: number; label: string }
 export interface Subtitle { id: string; lang: string; label: string; url: string }
 export interface Playback { cid: number; quality: number; qualities: Quality[]; manifestUrl?: string; mp4Url?: string; subtitles: Subtitle[] }
 export interface Danmaku { text: string; time: number; mode: number; color: string; fontSize: number }
-export interface Comment { id: string; user: User; text: string; createdAt: number; likes: number; replies: Comment[] }
+export interface Comment { id: string; user: User; text: string; createdAt: number; likes: number; replies: Comment[]; replyCount?: number }
+export interface CommentReplyPage extends Page<Comment> { total: number }
 export interface VideoEngagement { liked: boolean; coins: number; favorited: boolean }
 export interface TripleResult { state: VideoEngagement; complete: boolean }
 export interface FavoriteFolder { id: number; title: string; count: number; selected: boolean; isPrivate?: boolean; isDefault?: boolean; capacity?: number }
@@ -30,3 +31,6 @@ export interface SmsSend { challengeId: string; tel: string; cid: number; challe
 export interface SmsTicket { id: string; expiresAt: number }
 export interface LoginResult { state: 'authenticated' | 'verification_required'; verificationUrl?: string }
 export interface ApiErrorBody { error: { code: string; message: string; retryable?: boolean } }
+
+export interface DynamicLikeState { liked: boolean; likes: number }
+export interface VideoDynamic extends DynamicLikeState { id: string; author: User; publishedAt: number; action: string; text: string; video: VideoSummary; comments: number }

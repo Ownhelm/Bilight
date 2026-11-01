@@ -4,6 +4,20 @@ import XCTest
 @testable import Bilight
 
 final class ResponsiveLayoutTests: XCTestCase {
+    @MainActor func testOfflineCommentNoticeFitsSmallScreensAndAccessibilityText() {
+        var normal: [CGFloat: CGFloat] = [:]
+        for type in [DynamicTypeSize.large, .accessibility5] {
+            for width: CGFloat in [288, 343, 408] {
+                let host = UIHostingController(rootView: OfflineCommentsNotice(cachedPlayback: true, retry: {}).environment(\.dynamicTypeSize, type))
+                host.safeAreaRegions = []
+                let size = host.sizeThatFits(in: CGSize(width: width, height: 5000))
+                XCTAssertLessThanOrEqual(size.width, width + 0.5)
+                XCTAssertTrue(size.height.isFinite && size.height >= 120)
+                if type == .large { normal[width] = size.height }
+                else { XCTAssertGreaterThan(size.height, normal[width] ?? 0) }
+            }
+        }
+    }
     @MainActor func testLongVideoInformationWrapsOnSmallAndLargePhones() async throws {
         let app = AppModel()
         let model = PlayerModel()

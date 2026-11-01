@@ -1,5 +1,5 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { CoinInfo, CollectionKind, CollectionPage, Comment, CreatorCollection, CreatorSummary, Danmaku, EngagementAction, FavoriteFolder, HistoryItem, Page, Quality, SearchPage, Subtitle, TripleResult, User, VideoDetail, VideoEngagement, VideoPart, VideoSummary } from '../shared/types.js';
+import type { CoinInfo, CollectionKind, CollectionPage, Comment, CommentReplyPage, CreatorCollection, CreatorSummary, Danmaku, EngagementAction, FavoriteFolder, HistoryItem, Page, Quality, SearchPage, Subtitle, TripleResult, User, VideoDynamic, VideoDetail, VideoEngagement, VideoPart, VideoSummary } from '../shared/types.js';
 import { BiliError, type BiliHttp } from './transport.js';
 
 type RecordValue = Record<string, any>;
@@ -89,6 +89,7 @@ export class BiliGateway {
   private readonly videoCache = new Map<string, { expires: number; request: Promise<VideoDetail> }>();
   private videoJar?: BiliHttp['jar'];
   private tripleJar?: BiliHttp['jar'];
+  private readonly dynamicWrites = new WeakMap<BiliHttp['jar'], Map<string, { liked: boolean; request: Promise<VideoDynamic> }>>();
   private readonly triples = new Map<string, Promise<TripleResult>>();
   private readonly interactions = new Map<string, { key: string; request: Promise<VideoEngagement> }>();
   private readonly folderCreations = new WeakMap<BiliHttp['jar'], Map<string, Promise<FavoriteFolder>>>();
@@ -391,10 +392,57 @@ export class BiliGateway {
       if (item.type !== 'DYNAMIC_TYPE_AV' || item.orig || major.type !== 'MAJOR_TYPE_ARCHIVE' || !followed.has(number(author.mid))) continue;
       if (archive.owner && number(object(archive.owner).mid) !== number(author.mid)) continue;
       const mapped = videoSummary({ ...archive, pubdate: archive.pubdate ?? author.pub_ts }, user(author));
-      if (mapped) items.push(mapped);
+      if (mapped) {
+        const dynamicId = typeof item.id_str === 'string' && /^[1-9]\d{0,31}$/.test(item.id_str) ? item.id_str : undefined;
+        const stats = object(modules.module_stat), like = object(stats.like);
+        items.push({ ...mapped, ...(dynamicId ? { dynamicId, dynamicLikes: number(like.count), dynamicLiked: like.status === true || like.status === 1, dynamicComments: number(object(stats.comment).count) } : {}) });
+      }
     }
     const nextCursor = clean(data.offset, 256), hasMore = [true, 1, '1'].includes(data.has_more) && Boolean(nextCursor) && nextCursor !== cursor;
     return { items: uniqueVideos(items).sort((a, b) => b.publishedAt - a.publishedAt || a.bvid.localeCompare(b.bvid)), hasMore, ...(hasMore ? { nextCursor } : {}) };
+  }
+
+  async dynamic(id: string): Promise<VideoDynamic> {
+    if (!/^[1-9]\d{0,31}$/.test(id)) throw new BiliError('INVALID_INPUT', '动态编号无效', 400);
+    const jar = this.transport.jar;
+    await this.transport.ensureDeviceCookies(); this.checkAccount(jar);
+    const data = await this.transport.request<RecordValue>(`${API}/x/polymer/web-dynamic/v1/detail`, { query: { id, platform: 'web', features: 'itemOpusStyle,opusBigCover,ugcDelete' } });
+    this.checkAccount(jar);
+    const item = object(data.item), modules = object(item.modules), author = user(modules.module_author), content = object(modules.module_dynamic), major = object(content.major), archive = object(major.archive);
+    if (item.id_str !== id) throw new BiliError('INVALID_RESPONSE', '动态内容与当前编号不一致');
+    if (item.type !== 'DYNAMIC_TYPE_AV' || item.orig || major.type !== 'MAJOR_TYPE_ARCHIVE') throw new BiliError('DYNAMIC_UNSUPPORTED', '当前网页暂时无法完整展示此类型动态', 502);
+    if (archive.owner && number(object(archive.owner).mid) !== author.mid) throw new BiliError('INVALID_RESPONSE', '动态作者与视频归属不一致');
+    const video = videoSummary({ ...archive, pubdate: archive.pubdate ?? object(modules.module_author).pub_ts }, author), stats = object(modules.module_stat), like = object(stats.like);
+    if (!video || typeof like.count !== 'number' || !Number.isSafeInteger(like.count) || like.count < 0 || ![true, false, 0, 1].includes(like.status)) throw new BiliError('DYNAMIC_UNAVAILABLE', '动态或点赞状态暂时无法确认，请重试', 502);
+    return { id, author, video, publishedAt: number(object(modules.module_author).pub_ts), action: clean(object(modules.module_author).pub_action), text: clean(object(content.desc).text, 10000), comments: number(object(stats.comment).count), likes: like.count, liked: like.status === true || like.status === 1 };
+  }
+
+  async setDynamicLike(id: string, liked: boolean): Promise<VideoDynamic> {
+    if (!/^[1-9]\d{0,31}$/.test(id) || typeof liked !== 'boolean') throw new BiliError('INVALID_INPUT', '动态点赞参数无效', 400);
+    const { jar, csrf } = await this.interactionCredentials();
+    let writes = this.dynamicWrites.get(jar);
+    if (!writes) { writes = new Map(); this.dynamicWrites.set(jar, writes); }
+    const active = writes.get(id);
+    if (active) {
+      if (active.liked !== liked) throw new BiliError('INTERACTION_BUSY', '该动态正在处理，请稍候', 409);
+      return active.request;
+    }
+    const request = (async () => {
+      const before = await this.dynamic(id); this.checkAccount(jar);
+      if (before.liked === liked) return before;
+      let writeError: unknown;
+      try { await this.transport.request(`${API}/x/dynamic/feed/dyn/thumb`, { method: 'POST', query: { csrf }, json: { dyn_id_str: id, up: liked ? 1 : 2 }, headers: { origin: 'https://www.bilibili.com', referer: `https://t.bilibili.com/${id}` } }); }
+      catch (error) { writeError = error; }
+      for (let attempt = 0; attempt < 3; attempt++) {
+        this.checkAccount(jar);
+        if (attempt) await new Promise(resolve => setTimeout(resolve, 150));
+        try { const after = await this.dynamic(id); this.checkAccount(jar); if (after.liked === liked) return after; } catch (error) { this.checkAccount(jar); if (!writeError) writeError = error; }
+      }
+      if (writeError) throw writeError;
+      throw new BiliError('DYNAMIC_LIKE_UNCONFIRMED', '点赞结果暂未确认，请刷新动态后再操作');
+    })();
+    writes.set(id, { liked, request });
+    try { return await request; } finally { if (writes.get(id)?.request === request) writes.delete(id); }
   }
 
   async creator(mid: number): Promise<CreatorSummary> {
@@ -503,12 +551,30 @@ export class BiliGateway {
     const data = await this.transport.request<RecordValue>(`${API}/x/v2/reply/wbi/main`, { wbi: true, query: { type: 1, oid: id, mode: 2, pagination_str: JSON.stringify({ offset: cursor ?? '' }), plat: 1, web_location: '1315875' } });
     const paging = object(data.cursor), isEnd = [true, 1, '1'].includes(paging.is_end);
     if (!Array.isArray(data.replies) && !(isEnd && number(paging.all_count) === 0)) throw new BiliError('COMMENTS_UNAVAILABLE', clean(object(data.control).show_text, 200) || '评论暂时无法读取，请登录或稍后重试', 502);
-    const map = (item: RecordValue, nested = false): Comment => ({ id: clean(item.rpid_str ?? item.rpid, 40), user: user(item.member), text: clean(object(item.content).message, 6000), createdAt: number(item.ctime), likes: number(item.like), replies: nested ? [] : array(item.replies).slice(0, 20).map(reply => map(reply, true)) });
+    const map = (item: RecordValue, nested = false): Comment => ({ id: clean(item.rpid_str ?? item.rpid, 40), user: user(item.member), text: clean(object(item.content).message, 6000), createdAt: number(item.ctime), likes: number(item.like), replyCount: nested ? 0 : number(item.rcount), replies: nested ? [] : array(item.replies).slice(0, 20).map(reply => map(reply, true)) });
     const items = array(data.replies).map(item => map(item)), rawCursor = object(paging.pagination_reply).next_offset;
     const nextCursor = typeof rawCursor === 'string' && rawCursor.length <= 8192 && !/[\u0000-\u001f]/.test(rawCursor) ? rawCursor : '';
     if (!isEnd && (!items.length || !nextCursor)) throw new BiliError('COMMENTS_UNAVAILABLE', '评论分页数据不完整，请稍后重试', 502);
     const hasMore = !isEnd && items.length > 0 && Boolean(nextCursor);
     return { items, hasMore, ...(hasMore ? { nextPage: pn + 1, nextCursor } : {}) };
+  }
+
+  async commentReplies(aid: number, root: string, page = 1): Promise<CommentReplyPage> {
+    const id = integer(aid, '稿件编号'), pn = integer(page, '页码');
+    if (!/^[1-9]\d{0,39}$/.test(root) || pn > 1000) throw new BiliError('INVALID_INPUT', '回复分页参数无效', 400);
+    const data = await this.transport.request<RecordValue>(`${API}/x/v2/reply/reply`, { query: { type: 1, oid: id, root, pn, ps: 20 } });
+    const paging = object(data.page), parent = object(data.root);
+    const identity = (value: RecordValue, key: string) => typeof value[`${key}_str`] === 'string' ? value[`${key}_str`] : typeof value[key] === 'string' ? value[key] : Number.isSafeInteger(value[key]) ? String(value[key]) : '';
+    const total = Number(paging.count), size = Number(paging.size);
+    if (identity(parent, 'rpid') !== root || (parent.oid !== undefined && String(parent.oid) !== String(id)) || Number(paging.num) !== pn || !Number.isSafeInteger(total) || total < 0 || !Number.isSafeInteger(size) || size <= 0 || size > 20 || (!Array.isArray(data.replies) && total !== 0)) throw new BiliError('COMMENTS_UNAVAILABLE', '回复数据不完整或不属于当前评论，请重试', 502);
+    const items = array(data.replies).map(item => {
+      const replyId = identity(item, 'rpid');
+      if (!/^[1-9]\d{0,39}$/.test(replyId) || identity(item, 'root') !== root || (item.oid !== undefined && String(item.oid) !== String(id))) throw new BiliError('COMMENTS_UNAVAILABLE', '回复归属校验失败，请重试', 502);
+      return { id: replyId, user: user(item.member), text: clean(object(item.content).message, 6000), createdAt: number(item.ctime), likes: number(item.like), replies: [], replyCount: 0 };
+    });
+    const hasMore = pn * size < total;
+    if (hasMore && !items.length) throw new BiliError('COMMENTS_UNAVAILABLE', '回复分页数据不完整，请重试', 502);
+    return { items, total, hasMore, ...(hasMore ? { nextPage: pn + 1 } : {}) };
   }
 
   async resolve(input: string): Promise<string> {

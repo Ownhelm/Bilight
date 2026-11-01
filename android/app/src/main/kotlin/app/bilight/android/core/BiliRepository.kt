@@ -27,6 +27,7 @@ class BiliRepository(val http: BiliHttp) {
     private var relationVersion = -1L
     @Volatile private var relationEpoch = 0L
     private val followLocks = ConcurrentHashMap<Long,Mutex>()
+    private val dynamicLocks = ConcurrentHashMap<String,Mutex>()
     private val videoLocks = ConcurrentHashMap<String,Mutex>()
     private val uncertain = ConcurrentHashMap<String,Long>()
     fun invalidateFollowing() { relationEpoch++; relationCache.clear(); relationVersion = http.generation }
@@ -112,9 +113,35 @@ class BiliRepository(val http: BiliHttp) {
         if (more && (next.isEmpty() || next == cursor)) throw BiliFailure("CURSOR_LOOP","动态分页暂时异常，请下拉刷新。")
         Page(posts.filter { relationCache[it.author.mid]?.first?.following == true },more,next.takeIf { more })
     } } catch (_: TimeoutCancellationException) { throw BiliFailure("FOLLOW_TIMEOUT","关注动态读取超时，请重试。") }
-    suspend fun dynamic(id: String): Post {
-        if (!Regex("^[1-9][0-9]{0,31}$").matches(id)) invalid()
-        return Post.parse(http.request("/x/polymer/web-dynamic/v1/detail",mapOf("id" to id,"platform" to "web","features" to "itemOpusStyle,opusBigCover,ugcDelete")).obj("item")) ?: invalid()
+    suspend fun dynamic(id: String, strictLikes: Boolean = false): Post {
+        if (!Regex("^[1-9][0-9]{0,31}$").matches(id)) invalid("动态编号无效。")
+        val version=http.generation
+        val item=http.request("/x/polymer/web-dynamic/v1/detail",mapOf("id" to id,"platform" to "web","features" to "itemOpusStyle,opusBigCover,ugcDelete")).obj("item")
+        http.check(version)
+        if (strictLikes) {
+            val like=item.obj("modules").obj("module_stat").obj("like"); val status=like.opt("status")
+            if (like.opt("count") !is Number || like.optLong("count",-1)<0 || !(status is Boolean || (status is Number && status.toDouble() in listOf(0.0,1.0)))) invalid("动态点赞状态暂时无法确认，请重试。")
+        }
+        return Post.parse(item)?.takeIf { it.id==id } ?: invalid("动态内容与当前编号不一致。")
+    }
+    suspend fun setDynamicLike(id: String, liked: Boolean): Post {
+        if (!Regex("^[1-9][0-9]{0,31}$").matches(id)) invalid("动态编号无效。")
+        val version=http.generation
+        return dynamicLocks.getOrPut(id) { Mutex() }.withLock {
+            http.check(version); account(); val csrf=http.csrf()
+            val before=dynamic(id,true); http.check(version)
+            if (before.liked==liked) return@withLock before
+            var writeError: Exception?=null
+            try { http.request("/x/dynamic/feed/dyn/thumb",query=mapOf("csrf" to csrf),json=JSONObject().put("dyn_id_str",id).put("up",if(liked) 1 else 2),referer="https://t.bilibili.com/$id") }
+            catch (cancelled: CancellationException) { throw cancelled } catch (error: Exception) { writeError=error }
+            repeat(3) { attempt ->
+                http.check(version)
+                if (attempt>0) kotlinx.coroutines.delay(150)
+                try { val after=dynamic(id,true); http.check(version); if (after.liked==liked) return@withLock after }
+                catch (cancelled: CancellationException) { throw cancelled } catch (error: Exception) { if (writeError==null) writeError=error }
+            }
+            throw writeError ?: BiliFailure("DYNAMIC_LIKE_UNCONFIRMED","点赞结果暂未确认，请刷新动态后再操作。")
+        }
     }
     suspend fun detail(bvid: String): Detail {
         if (!validBvid(bvid)) invalid("BV号不正确。")
@@ -174,7 +201,22 @@ class BiliRepository(val http: BiliHttp) {
         if (data.optJSONArray("replies") == null && !(end && paging.optInt("all_count") == 0)) invalid(data.obj("control").text("show_text","评论暂时无法读取。"))
         val next = paging.obj("pagination_reply").text("next_offset")
         if (!end && (next.isEmpty() || next == cursor)) invalid("评论分页暂时异常。")
-        return Page(data.rows("replies").map { Comment(it.text("rpid_str",it.text("rpid")),User.parse(it.obj("member")),it.obj("content").text("message"),it.optLong("like")) },!end,next.takeUnless { end })
+        return Page(data.rows("replies").map { Comment(it.text("rpid_str",it.text("rpid")),User.parse(it.obj("member")),it.obj("content").text("message"),it.optLong("like"),it.optInt("rcount").coerceAtLeast(0),it.optLong("ctime")) },!end,next.takeUnless { end })
+    }
+    suspend fun commentReplies(oid: String, type: Int = 1, root: String, page: Int = 1): CommentReplyPage {
+        if (!Regex("^[1-9][0-9]{0,39}$").matches(oid) || !Regex("^[1-9][0-9]{0,39}$").matches(root) || type <= 0 || page !in 1..1000) invalid("回复参数无效。")
+        val data = http.request("/x/v2/reply/reply", mapOf("type" to "$type", "oid" to oid, "root" to root, "pn" to "$page", "ps" to "20"))
+        val parent = data.obj("root"); val paging = data.obj("page")
+        fun id(item: JSONObject, key: String) = item.text(key + "_str", item.text(key))
+        val total = paging.optInt("count", -1); val size = paging.optInt("size")
+        if (id(parent,"rpid") != root || (parent.has("oid") && id(parent,"oid") != oid) || paging.optInt("num") != page || total < 0 || size !in 1..20 || (data.optJSONArray("replies") == null && total != 0)) invalid("回复数据不完整或不属于当前评论，请重试。")
+        val items = data.rows("replies").map { item ->
+            if (!Regex("^[1-9][0-9]{0,39}$").matches(id(item,"rpid")) || id(item,"root") != root || (item.has("oid") && id(item,"oid") != oid)) invalid("回复归属校验失败，请重试。")
+            Comment(id(item,"rpid"), User.parse(item.obj("member")), item.obj("content").text("message"), item.optLong("like"), createdAt=item.optLong("ctime"))
+        }
+        val more = page.toLong() * size < total
+        if (more && items.isEmpty()) invalid("回复分页数据不完整，请重试。")
+        return CommentReplyPage(items,total,more)
     }
     suspend fun history(cursor: String? = null): Page<History> {
         account(); var query = mapOf("type" to "archive","ps" to "20")

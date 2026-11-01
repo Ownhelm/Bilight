@@ -46,6 +46,8 @@ import app.bilight.android.core.*
 import app.bilight.android.core.Collection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.ensureActive
+import androidx.compose.ui.platform.testTag
 
 @Composable fun MainApp(app: AppModel) {
     MaterialTheme(colorScheme=lightColorScheme(primary=Pink,secondary=Blue,background=Color.White,surface=Color.White,onSurface=Color(0xff292a32),surfaceContainerLow=Color.White,surfaceContainer=Color.White,surfaceContainerHigh=Color.White,surfaceContainerHighest=Soft,secondaryContainer=Pink.copy(alpha=.1f),onSecondaryContainer=Pink)) {
@@ -157,6 +159,8 @@ import kotlinx.coroutines.launch
 }
 @Composable fun PostCard(app: AppModel,post: Post,nested: Boolean = false,detail: Boolean = false) {
     val expanded=app.expandedPosts[post.id]==true
+    val like=app.dynamicLikeState(post)
+    val selected=app.dynamicLikePending[post.id] ?: like.liked
     var overflowing by remember(post.id) { mutableStateOf(false) }
     var gallery by remember { mutableStateOf<Int?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -174,9 +178,9 @@ import kotlinx.coroutines.launch
                 }
             }
         }
-        if (post.title.isNotEmpty()) Text(post.title,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=12.dp))
-        if (post.text.isNotEmpty()) { Text(post.text,maxLines=if (detail || expanded) Int.MAX_VALUE else 5,overflow=TextOverflow.Ellipsis,modifier=Modifier.padding(top=10.dp),fontSize=15.sp,lineHeight=23.sp,onTextLayout={ if (!expanded) overflowing=it.hasVisualOverflow }); if (!detail && (overflowing || expanded)) TextButton(onClick={ app.expandedPosts[post.id]=!expanded },modifier=Modifier.heightIn(min=44.dp),contentPadding=PaddingValues(0.dp)) { Text(if (expanded) "收起" else "展开") } }
-        post.video?.let { video -> Spacer(Modifier.height(10.dp)); VideoCard(video) { app.open(Route.Watch(video.bvid)) } }
+        if (post.title.isNotEmpty()) Text(post.title,fontWeight=FontWeight.SemiBold,modifier=Modifier.padding(top=12.dp).then(if (!detail) Modifier.clickable { app.open(Route.Dynamic(post)) } else Modifier))
+        if (post.text.isNotEmpty()) { Text(post.text,maxLines=if (detail || expanded) Int.MAX_VALUE else 5,overflow=TextOverflow.Ellipsis,modifier=Modifier.padding(top=10.dp).then(if (!detail) Modifier.clickable { app.open(Route.Dynamic(post)) } else Modifier),fontSize=15.sp,lineHeight=23.sp,onTextLayout={ if (!expanded) overflowing=it.hasVisualOverflow }); if (!detail && (overflowing || expanded)) TextButton(onClick={ app.expandedPosts[post.id]=!expanded },modifier=Modifier.heightIn(min=44.dp),contentPadding=PaddingValues(0.dp)) { Text(if (expanded) "收起" else "展开") } }
+        post.video?.let { video -> Spacer(Modifier.height(10.dp)); VideoCard(video,onTitleClick={ if (detail) app.open(Route.Watch(video.bvid)) else app.open(Route.Dynamic(post)) }) { app.open(Route.Watch(video.bvid)) } }
         if (post.pictures.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
             if (post.pictures.size==1) { val image=post.pictures.first(); RemoteImage(image.url,"查看大图",Modifier.fillMaxWidth().aspectRatio(if (image.width>0 && image.height>0) (image.width.toFloat()/image.height).coerceIn(.75f,1.8f) else 1f).clip(RoundedCornerShape(8.dp)).clickable { gallery=post.pictures.indexOf(image) }) }
@@ -203,11 +207,13 @@ import kotlinx.coroutines.launch
         if (!nested) Row(Modifier.fillMaxWidth(),verticalAlignment=Alignment.CenterVertically) {
             TextButton(onClick=::share) { Icon(Icons.Rounded.Share,"分享动态链接",Modifier.size(17.dp),tint=Muted); Text(if (post.forwards>0) count(post.forwards) else "分享",color=Muted,fontSize=12.sp) }
             Spacer(Modifier.weight(1f))
-            if (post.commentType>0) {
-                if (detail) Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ChatBubbleOutline,"${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) count(post.comments) else "评论",color=Muted,fontSize=12.sp) }
-                else TextButton(onClick={ app.open(Route.Dynamic(post)) }) { Icon(Icons.Rounded.ChatBubbleOutline,"查看评论，共${post.comments}条",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) count(post.comments) else "评论",color=Muted,fontSize=12.sp) }
+            if (detail) Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ChatBubbleOutline,"${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) count(post.comments) else "评论",color=Muted,fontSize=12.sp) }
+            else TextButton(onClick={ app.open(Route.Dynamic(post)) },modifier=Modifier.testTag("dynamic-open-${post.id}")) { Icon(Icons.Rounded.ChatBubbleOutline,"查看动态详情，共${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(if (post.comments>0) "动态 · ${count(post.comments)}" else "查看动态",color=Muted,fontSize=12.sp) }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick={ app.toggleDynamicLike(post) },enabled=!app.dynamicLikePending.containsKey(post.id),modifier=Modifier.heightIn(min=44.dp).testTag("dynamic-like-${post.id}").semantics(mergeDescendants=true) { contentDescription=(if(selected) "取消动态点赞" else "点赞动态")+"，${like.likes}赞"+(if(app.dynamicLikePending.containsKey(post.id)) "，正在处理" else "") }) {
+                Icon(if(selected) Icons.Rounded.ThumbUp else Icons.Rounded.ThumbUpOffAlt,null,Modifier.size(17.dp),tint=if(selected) Pink else Muted)
+                Text(if(like.likes>0) count(like.likes) else "赞",Modifier.padding(start=5.dp),color=if(selected) Pink else Muted,fontSize=12.sp)
             }
-            Spacer(Modifier.weight(1f)); Row(Modifier.semantics(mergeDescendants=true) { contentDescription="${post.likes}赞"+(if (post.liked) "，已点赞" else "") },verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ThumbUpOffAlt,null,Modifier.size(17.dp),tint=if (post.liked) Pink else Muted); Text(if (post.likes>0) count(post.likes) else "赞",Modifier.padding(start=5.dp),color=if (post.liked) Pink else Muted,fontSize=12.sp) }
         }
     }
     gallery?.let { PostGallery(post.pictures,it) { gallery=null } }
@@ -308,8 +314,95 @@ internal class Paging<T> {
     }
 }
 @Composable private fun DynamicScreen(app: AppModel,post: Post) {
-    val paging=remember(post.id) { Paging<Comment>() }; val scope=rememberCoroutineScope()
-    LaunchedEffect(post.id) { if (post.commentType>0 && post.commentId!=null) paging.load { _,cursor -> app.repository.comments(post.commentId,post.commentType,cursor) } }
-    Column(Modifier.safeDrawingPadding()) { SectionTitle("动态",app::back); LazyColumn { item { PostCard(app,post,detail=true) }; items(paging.items) { CommentRow(app,it) }; item { PageMore(paging.busy,paging.more && post.commentType>0,paging.error) { scope.launch { paging.load { _,cursor -> app.repository.comments(post.commentId ?: post.id,post.commentType,cursor) } } } } } }
+    var refresh by remember(post.id) { mutableStateOf(0) }
+    var detailError by remember(post.id) { mutableStateOf<String?>(null) }
+    var reading by remember(post.id) { mutableStateOf(false) }
+    val current=app.dynamicPosts[post.id] ?: post
+    val paging=remember(post.id,current.commentId,current.commentType,app.http.generation) { Paging<Comment>() }
+    val scope=rememberCoroutineScope()
+    LaunchedEffect(post.id,refresh) {
+        val version=app.http.generation; val likeVersion=app.dynamicLikeRevision
+        reading=true; detailError=null
+        try { val result=app.repository.dynamic(post.id); app.http.check(version); app.recordDynamic(result,likeVersion) }
+        catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { if (version==app.http.generation) detailError=failure.message }
+        finally { if (version==app.http.generation) reading=false }
+    }
+    LaunchedEffect(current.commentId,current.commentType) {
+        if (current.commentType>0 && current.commentId!=null) paging.load { _,cursor -> app.repository.comments(current.commentId,current.commentType,cursor) }
+    }
+    Column(Modifier.safeDrawingPadding()) {
+        SectionTitle("动态详情",app::back)
+        LazyColumn {
+            item { PostCard(app,current,detail=true) }
+            if (detailError!=null) item { ErrorNotice(detailError) { refresh++ } }
+            items(paging.items,key={ it.id }) { CommentRow(app,it,current.commentId ?: current.id,current.commentType) }
+            item {
+                // Detail and comments load independently but share one visible progress indicator.
+                if (reading || paging.busy) Loading(if (paging.busy) "正在加载评论" else "正在读取动态")
+                PageMore(false,!reading && !paging.busy && paging.more && current.commentType>0 && current.commentId!=null,paging.error) { scope.launch { paging.load { _,cursor -> app.repository.comments(current.commentId ?: current.id,current.commentType,cursor) } } }
+            }
+        }
+    }
 }
-@Composable fun CommentRow(app: AppModel,comment: Comment) { Row(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp)) { Avatar(comment.user,32) { app.open(Route.Creator(comment.user)) }; Column(Modifier.padding(start=10.dp)) { Text(comment.user.name,color=Muted,fontSize=12.sp); Text(comment.text,Modifier.padding(top=5.dp),fontSize=14.sp,lineHeight=22.sp); if (comment.likes>0) Text("${count(comment.likes)}赞",fontSize=11.sp,color=Muted) } } }
+@Composable fun CommentRow(app: AppModel, comment: Comment, oid: String, type: Int = 1) {
+    key(oid,type,comment.id,app.user?.mid,app.http.generation) { CommentThread(app,comment,oid,type) }
+}
+
+@Composable private fun CommentThread(app: AppModel, comment: Comment, oid: String, type: Int) {
+    var expanded by remember { mutableStateOf(false) }
+    var replies by remember { mutableStateOf(emptyList<Comment>()) }
+    var total by remember { mutableStateOf(comment.replyCount) }
+    var requestedPage by remember { mutableStateOf(1) }
+    var loadedPage by remember { mutableStateOf(0) }
+    var more by remember { mutableStateOf(false) }
+    var busy by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var retry by remember { mutableStateOf(0) }
+    val version = app.http.generation
+    val blue = Color(0xff4d83a1)
+    LaunchedEffect(expanded,requestedPage,retry) {
+        if (!expanded || loadedPage >= requestedPage) { busy=false; return@LaunchedEffect }
+        busy=true; error=null
+        try {
+            val result=app.repository.commentReplies(oid,type,comment.id,requestedPage)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            if (version != app.http.generation) return@LaunchedEffect
+            val ids=replies.map { it.id }.toMutableSet()
+            val additions=result.items.filter { ids.add(it.id) }
+            if (result.more && additions.isEmpty()) invalid("回复分页没有新增内容，请重试。")
+            replies=replies+additions; total=result.total; more=result.more; loadedPage=requestedPage
+        } catch (cancelled: CancellationException) { throw cancelled }
+        catch (failure: Exception) { if (version==app.http.generation) error=failure.message ?: "回复读取失败，请重试。" }
+        finally { busy=false }
+    }
+    Column(Modifier.fillMaxWidth().padding(horizontal=16.dp,vertical=14.dp)) {
+        CommentContentRow(app,comment)
+        if (comment.replyCount>0) Column(Modifier.padding(start=42.dp)) {
+            Row(verticalAlignment=Alignment.CenterVertically,horizontalArrangement=Arrangement.spacedBy(8.dp)) {
+                Text("共${total}条回复",fontSize=12.sp,color=Muted)
+                TextButton(onClick={ expanded=!expanded },modifier=Modifier.heightIn(min=44.dp).testTag("comment-expand-${comment.id}"),contentPadding=PaddingValues(0.dp)) { Text(if (expanded) "收起" else "展开",fontSize=12.sp,color=blue) }
+            }
+            if (expanded) Column(Modifier.fillMaxWidth().padding(start=12.dp).testTag("comment-replies-${comment.id}"),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+                replies.forEach { reply -> key(reply.id) { CommentContentRow(app,reply,true) } }
+                if (busy) Text("正在读取回复…",fontSize=12.sp,color=Muted)
+                error?.let { Text(it,fontSize=12.sp,color=Pink); TextButton(onClick={ retry++ },contentPadding=PaddingValues(0.dp)) { Text("重试",fontSize=12.sp,color=blue) } }
+                if (!busy && error==null && loadedPage>0 && replies.isEmpty()) Text("暂时没有可见回复。",fontSize=12.sp,color=Muted)
+                if (!busy && error==null && more) TextButton(onClick={ requestedPage=loadedPage+1 },modifier=Modifier.testTag("comment-replies-more-${comment.id}"),contentPadding=PaddingValues(0.dp)) { Text("加载更多",fontSize=12.sp,color=blue) }
+            }
+        }
+        HorizontalDivider(Modifier.padding(top=14.dp),thickness=0.5.dp,color=Color(0xfff1f2f3))
+    }
+}
+
+@Composable private fun CommentContentRow(app: AppModel,comment: Comment,reply: Boolean=false) {
+    Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(if(reply) 8.dp else 10.dp)) {
+        Avatar(comment.user,if(reply) 24 else 32) { app.open(Route.Creator(comment.user)) }
+        Column(Modifier.weight(1f)) {
+            Text(comment.user.name,color=Muted,fontSize=12.sp)
+            Text(comment.text,Modifier.padding(top=5.dp),fontSize=if(reply) 13.sp else 14.sp,lineHeight=22.sp)
+            if (comment.createdAt>0) Text(java.text.SimpleDateFormat("yyyy-MM-dd",java.util.Locale.getDefault()).format(java.util.Date(comment.createdAt*1000)),fontSize=11.sp,color=Muted)
+            if (comment.likes>0) Text("${count(comment.likes)}赞",fontSize=11.sp,color=Muted)
+        }
+    }
+}

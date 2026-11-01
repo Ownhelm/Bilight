@@ -6,6 +6,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class DownloadRegressionTest {
+    @Test fun completeChunkedRangeDoesNotRequireContentLength() {
+        assertEquals(100L, ByteResume.validate(206,0,-1,"bytes 0-99/100",null,null).total)
+        val previous = ByteResume("\"same-file\"",100)
+        assertEquals(previous,ByteResume.validate(206,40,-1,"bytes 40-99/100","\"same-file\"",previous))
+        for (range in listOf("bytes 0-99/1000","bytes 1-99/100","bytes 0-99/*","bytes 0-99/9223372036854775808")) {
+            try { ByteResume.validate(206,0,-1,range,null,null); fail("An unproven range cannot complete a download") }
+            catch (_: BiliFailure) { }
+        }
+        try { ByteResume.validate(206,0,50,"bytes 0-99/100",null,null); fail("Length and range must agree") }
+        catch (_: BiliFailure) { }
+    }
     @Test fun resumesOnlyTheSameCompleteByteRange() {
         val previous = ByteResume("\"same-file\"", 100)
         assertEquals(previous, ByteResume.validate(206, 40, 60, "bytes 40-99/100", "\"same-file\"", previous))

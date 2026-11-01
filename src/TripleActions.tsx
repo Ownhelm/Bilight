@@ -5,8 +5,9 @@ import { api, ApiError, errorMessage, isAbort } from './api';
 import { countLabel } from './components';
 import { coinChoices, engagementCounts, favoriteChanged, optimisticEngagement } from './interactionModel';
 import { createLikePress, LIKE_CHARGE_MS } from './likePress';
+import { ShareVideo } from './ShareVideo';
 
-export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string; auth: AuthState | null; onLogin: () => void; snapshot?: VideoInteraction }) {
+export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频', page = 1 }: { bvid: string; auth: AuthState | null; onLogin: () => void; snapshot?: VideoInteraction; title?: string; page?: number }) {
   const [state, setState] = useState<VideoEngagement | null>(null);
   const [optimistic, setOptimistic] = useState<VideoEngagement | null>(null);
   const [busy, setBusy] = useState(false), [working, setWorking] = useState('');
@@ -149,6 +150,7 @@ export function TripleActions({ bvid, auth, onLogin, snapshot }: { bvid: string;
       </button>
       <button type="button" className={`engagement-button${displayState?.coins ? ' done' : ''}`} disabled={disabled} aria-label="投币" title={`投币（W）${displayState?.coins ? `，已投 ${displayState.coins} 枚` : ''}`} onClick={() => void openPanel('coin')}><span className="engagement-icon">{ring()}<Coins weight={displayState?.coins ? 'fill' : 'regular'} size={28} /></span><span>{counts?.coins ? countLabel(counts.coins) : '投币'}</span></button>
       <button type="button" className={`engagement-button${displayState?.favorited ? ' done' : ''}`} disabled={disabled} aria-label="收藏" title={`收藏（E）${displayState?.favorited ? '，已收藏' : ''}`} onClick={() => void openPanel('favorite')}><span className="engagement-icon">{ring()}<Star weight={displayState?.favorited ? 'fill' : 'regular'} size={28} /></span><span>{counts?.favorites ? countLabel(counts.favorites) : '收藏'}</span></button>
+      <ShareVideo key={`${bvid}:${page}`} bvid={bvid} title={title} page={page} />
     </div>
     <div className="triple-submit">{complete && <span className="triple-complete"><Check size={16} />已三连</span>}<button className="triple-refresh" aria-label="刷新三连状态" title="刷新互动状态" disabled={!auth?.authenticated || busy} onClick={() => void submit('refresh')}><ArrowClockwise className={working === 'refresh' ? 'spin' : ''} size={18} /></button></div>
     <p id={`triple-note-${bvid}`} className="triple-note">长按点赞，圆环蓄满即可一键三连；蓄力中松开或移开取消。投币不可撤回，三连收藏到默认收藏夹。</p>

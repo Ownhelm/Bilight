@@ -149,3 +149,5 @@ struct DynamicPost: Hashable, Identifiable {
         return raw.compactMap(PostImage.map).filter { seen.insert($0.url).inserted }
     }
 }
+
+struct DynamicLikeState: Equatable { var liked: Bool; var likes: Int }

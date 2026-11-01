@@ -7,6 +7,7 @@ struct DynamicDetailView: View {
     @State private var busy = true
     @State private var error: String?
     @State private var refresh = 0
+    private var hasCommentTarget: Bool { post?.commentID != nil && (post?.commentType ?? 0) > 0 }
     var body: some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: 20) {
@@ -14,14 +15,14 @@ struct DynamicDetailView: View {
                     DynamicCard(post: post, detail: true)
                     if let oid = post.commentID, post.commentType > 0 {
                         Divider()
-                        CommentsView(oid: oid, commentType: post.commentType).id("\(oid)-\(post.commentType)")
+                        CommentsView(oid: oid, commentType: post.commentType, parentLoading: busy).id("\(oid)-\(post.commentType)")
                     }
                 }
-                if busy { LoadingBlock(label: "正在读取动态") }
+                if busy && !hasCommentTarget { LoadingBlock(label: "正在读取动态") }
                 if let error { FailureBlock(error: error) { refresh += 1 } }
             }.padding(16)
         }.navigationTitle("动态详情").navigationBarTitleDisplayMode(.inline).task(id: "\(id)-\(refresh)") {
-            let generation = app.accountGeneration
+            let generation = app.accountGeneration, likeVersion = app.dynamicLikeRevision
             if post == nil { post = app.dynamics[id] }
             busy = true
             error = nil
@@ -31,7 +32,7 @@ struct DynamicDetailView: View {
                 try Task.checkCancellation()
                 guard app.accountGeneration == generation else { return }
                 post = result
-                app.dynamics[id] = result
+                app.recordDynamic(result, readVersion: likeVersion)
             } catch is CancellationError { return } catch {
                 guard !Task.isCancelled, app.accountGeneration == generation else { return }
                 self.error = error.localizedDescription
