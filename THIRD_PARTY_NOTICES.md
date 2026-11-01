@@ -20,6 +20,8 @@ Bilight 原创代码与自制演示素材采用 MIT 许可。依赖分别沿用�
 | [ZXing](https://github.com/zxing/zxing) | Android 登录二维码 | Apache-2.0，保留其附带声明 |
 | [Kotlin / kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | Android 运行时与协程 | Apache-2.0 |
 
+网页弹幕插件 5.3.0 的本地修订版、变更说明与 MIT 许可见 [`src/vendor/README.md`](src/vendor/README.md)。
+
 网页锁定的完整依赖树以 `package-lock.json` 为准；其余依赖的许可可查看各包的 LICENSE。Docker 保留 npm 包的上游许可，网页所用的主要依赖许可副本见 `docs/licenses/`。Android 依赖版本记录在 Gradle 配置中，主要依赖许可随 APK 打包在 `assets/licenses/`。iOS 使用 Apple 系统框架，没有捆绑第三方播放器 SDK。
 
 [FocuBili](https://github.com/L1Xu4n/FocuBili) 仅作为专注观看的产品参考，未移植其代码。README 布局参考 ArtPlayer 和 Immich 的信息组织方式，未复制其设计素材或代码。

@@ -95,7 +95,7 @@ struct AccountView: View {
                     }
                     busy = false
                 }
-        }.tint(Color.biliPink)
+        }.tint(Color.biliPink).modifier(VideoSharePresentation())
     }
     private func accountLink(_ title: String, symbol: String, route: Route) -> some View {
         Button {

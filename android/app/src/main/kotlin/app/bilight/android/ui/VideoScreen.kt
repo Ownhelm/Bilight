@@ -262,7 +262,8 @@ import kotlin.math.min
     val charge by animateFloatAsState(if (charging) 1f else 0f,tween(if (charging) 1500 else 0,easing=LinearEasing),label="三连蓄力")
     val scope=rememberCoroutineScope()
     val currentState by rememberUpdatedState(state)
-    val busy by rememberUpdatedState(model.actionBusy || !model.networkAvailable || !model.detailLoaded)
+    val canOpenPanels=model.networkAvailable && model.detailLoaded
+    val busy by rememberUpdatedState(model.actionBusy || !canOpenPanels)
     val press=remember(model) { LikePress(scope,{ !busy && currentState?.complete!=true },{ model.write(VideoWrite.Like(currentState?.liked!=true)) },{ model.write(VideoWrite.Triple) },{ charging=it }) }
     val pressLifecycle=LocalLifecycleOwner.current.lifecycle
     DisposableEffect(press,pressLifecycle) {
@@ -296,7 +297,7 @@ import kotlin.math.min
         }
     }
     @Composable fun Action(modifier: Modifier,kind: BiliActionKind,label: String,total: Long?,selected: Boolean,onClick: () -> Unit) {
-        TextButton(onClick=onClick,enabled=!busy,modifier=modifier.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
+        TextButton(onClick=onClick,enabled=canOpenPanels,modifier=modifier.heightIn(min=58.dp),contentPadding=PaddingValues(0.dp)) {
             Column(horizontalAlignment=Alignment.CenterHorizontally) { BiliActionIcon(kind,label,selected); Spacer(Modifier.height(9.dp)); Text(total?.let(::count) ?: "—",fontSize=13.sp,color=Muted) }
         }
     }
@@ -334,7 +335,7 @@ import kotlin.math.min
     val remaining=detail.coinLimit-(current?.coins ?: 0)
     AlertDialog(onDismissRequest=close,title={ Text("投币") },text={ Column {
         if (current==null) Text("请先刷新互动状态。") else if (remaining<=0) Text("本视频已投满硬币。") else { Row { (1..remaining).forEach { n -> FilterChip(selected=selected==n,onClick={ selected=n },label={ Text("${n}枚") },modifier=Modifier.padding(end=8.dp)) } }; Row(verticalAlignment=Alignment.CenterVertically) { Checkbox(like,onCheckedChange={ like=it }); Text("同时点赞") } }
-    } },confirmButton={ if (remaining>0 && current!=null) TextButton(onClick={ model.write(VideoWrite.Coin(current.coins+selected,like)); close() }) { Text("确定") } },dismissButton={ TextButton(onClick=close) { Text("取消") } })
+    } },confirmButton={ if (remaining>0 && current!=null) TextButton(onClick={ model.write(VideoWrite.Coin(current.coins+selected,like)); close() },enabled=!model.actionBusy && model.networkAvailable) { Text("确定") } },dismissButton={ TextButton(onClick=close) { Text("取消") } })
 }
 @Composable private fun FavoriteDialog(app: AppModel,model: PlaybackModel,close: () -> Unit) {
     val detail=model.detail ?: return; val scope=rememberCoroutineScope()
@@ -351,6 +352,7 @@ import kotlin.math.min
     }
     FavoriteSheet(
         folders=folders, selected=selected, error=error, title=title, creating=creating,
+        canConfirm=!model.actionBusy && model.networkAvailable,
         onSelection={ selected=it }, onTitle={ title=it }, close=close,
         confirm={ model.write(VideoWrite.Favorite(selected)); close() },
         create={

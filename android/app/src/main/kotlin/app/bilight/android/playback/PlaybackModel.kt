@@ -118,6 +118,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private var danmakuJob: Job? = null
     private var bufferJob: Job? = null
     private var engagementRead: Job? = null
+    private var statisticsRead: Job? = null
     private var refreshSupport = false
     private var temporarySpeed: Float? = null
     private val version=app.http.generation
@@ -303,7 +304,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     fun readEngagement() { if (!networkAvailable || app.user==null || actionBusy) return; engagementRead?.cancel(); engagementRead=scope.launch { try { val value=app.repository.engagement(route.bvid,true); app.http.check(version); if (!actionBusy) { engagement=value; refreshSupport=false; supportError=null } } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } } }
     fun write(action: VideoWrite) {
         if (!networkAvailable || (offline && !detailLoaded) || !app.requireLogin() || actionBusy) return
-        val d=detail ?: return; actionBusy=true; engagementRead?.cancel()
+        val d=detail ?: return; actionBusy=true; engagementRead?.cancel(); statisticsRead?.cancel()
         val before=engagement; val pending=before ?: Engagement(false,0,false)
         val silent=action !is VideoWrite.Favorite
         engagement=when (action) {
@@ -317,8 +318,12 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
             if (refreshSupport) app.repository.engagement(route.bvid,true)
             app.http.check(version)
             val value=app.repository.write(d,action); app.http.check(version); engagement=value; refreshSupport=false
-            try { val fresh=app.repository.detail(route.bvid); app.http.check(version); detail=if (offline) fresh.copy(parts=listOfNotNull(part)) else fresh }
-            catch (e: CancellationException) { throw e } catch (e: Exception) { if (!silent) supportError="互动已更新，计数暂时无法刷新：${e.message}" }
+            // Public totals must not hold the confirmed engagement write open.
+            statisticsRead=scope.launch {
+                try { val fresh=app.repository.detail(route.bvid); ensureActive(); app.http.check(version); detail=if (offline) fresh.copy(parts=listOfNotNull(part)) else fresh }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { ensureActive(); app.http.check(version); if (!silent) supportError="互动已更新，计数暂时无法刷新：${e.message}" }
+            }
         } catch (e: CancellationException) { if (!closed && app.http.generation==version) engagement=before; throw e }
         catch (e: Exception) { if (!closed && app.http.generation==version) { engagement=before; refreshSupport=true; supportError=if (silent) null else e.message } }
         finally { actionBusy=false } }

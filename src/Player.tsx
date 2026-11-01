@@ -206,7 +206,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     if (!danmaku) { existing?.hide(); setDanmakuBusy(false); return; }
     if (existing) { existing.show(); return; }
     const controller = new AbortController(); setDanmakuBusy(true);
-    Promise.all([api<Danmaku[]>(`/api/videos/${bvid}/danmaku?cid=${cid}`, { signal: controller.signal }), import('artplayer-plugin-danmuku')]).then(async ([items, { default: plugin }]) => {
+    Promise.all([api<Danmaku[]>(`/api/videos/${bvid}/danmaku?cid=${cid}`, { signal: controller.signal }), import('./vendor/artplayer-plugin-danmuku.mjs')]).then(async ([items, { default: plugin }]) => {
       if (controller.signal.aborted || playerRef.current !== player) return;
       const comments: Danmu[] = items.map(item => ({ text: item.text, time: item.time, color: item.color, mode: item.mode === 4 ? 2 : item.mode === 5 ? 1 : 0, style: { fontSize: `${Math.min(36, Math.max(14, item.fontSize))}px` } }));
       await player.plugins.add(plugin({ danmuku: comments, visible: wantedDanmaku.current, emitter: false, heatmap: false, opacity: 0.8, fontSize: 22, antiOverlap: true }));

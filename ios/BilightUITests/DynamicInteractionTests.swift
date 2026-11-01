@@ -35,6 +35,50 @@ final class DynamicInteractionTests: XCTestCase {
         app.navigationBars.buttons.firstMatch.tap()
     }
 
+    func testLikeDoesNotDisableCoinAndFavoriteEntryPoints() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"; app.launch()
+        defer { app.terminate() }
+        let search = app.textFields["search-field"]
+        XCTAssertTrue(search.waitForExistence(timeout: 10)); search.tap(); search.typeText("BV12qnt6VEM1\n")
+        let like = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "点赞，")).firstMatch
+        XCTAssertTrue(like.waitForExistence(timeout: 10)); like.tap()
+        let coin = app.buttons["投币"], favorite = app.buttons["收藏"]
+        XCTAssertTrue(coin.isEnabled); XCTAssertTrue(favorite.isEnabled)
+        coin.tap(); XCTAssertTrue(app.navigationBars["投币"].waitForExistence(timeout: 5)); app.buttons["取消"].tap()
+        XCTAssertTrue(favorite.isEnabled); favorite.tap()
+        XCTAssertTrue(app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH %@", "收藏到")).firstMatch.waitForExistence(timeout: 5))
+        app.buttons["取消"].tap()
+        XCTAssertTrue(coin.isEnabled); XCTAssertTrue(favorite.isEnabled)
+    }
+
+    func testShareFromAccountVideoAppearsAboveTheAccountSheet() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+        let account = app.buttons["我的账号"]
+        XCTAssertTrue(account.waitForExistence(timeout: 10)); account.tap()
+        let creator = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "影视飓风")).firstMatch
+        XCTAssertTrue(creator.waitForExistence(timeout: 10)); creator.tap()
+        let video = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "去了一趟世界尽头")).firstMatch
+        XCTAssertTrue(video.waitForExistence(timeout: 10)); video.tap()
+        let transfer = app.buttons["转发"]
+        XCTAssertTrue(transfer.waitForExistence(timeout: 10)); transfer.tap()
+        let copy = app.buttons["复制链接"]
+        XCTAssertTrue(copy.waitForExistence(timeout: 3), "Share must be presented above videos opened within the account sheet")
+        XCTAssertTrue(copy.isHittable)
+        let capture = XCTAttachment(screenshot: app.screenshot()); capture.name = "share-from-account-visible"; capture.lifetime = .keepAlways; add(capture)
+        copy.tap()
+        XCTAssertTrue(app.staticTexts["链接已复制"].waitForExistence(timeout: 2))
+        transfer.tap(); app.buttons["取消"].tap()
+        XCTAssertFalse(app.buttons["复制链接"].exists)
+        transfer.tap(); app.buttons["系统分享"].tap()
+        XCTAssertTrue(app.otherElements["ActivityListView"].waitForExistence(timeout: 5) || app.buttons["Copy"].exists || app.buttons["拷贝"].exists)
+    }
+
     func testShareSheetCopiesAndDismissesBeforeSystemHandoff() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--demo"]

@@ -22,7 +22,8 @@ struct VideoActionBar: View {
     @ScaledMetric(relativeTo: .caption) private var iconGap: CGFloat = 9
     @ScaledMetric(relativeTo: .caption) private var groupGap: CGFloat = 24
     private enum Panel: String, Identifiable { case coin, favorite; var id: String { rawValue } }
-    private var enabled: Bool { !support.busy && network.available && app.shareVideo == nil }
+    private var canOpenPanels: Bool { network.available && app.shareVideo == nil }
+    private var enabled: Bool { !support.busy && canOpenPanels }
     var body: some View {
         VStack(spacing: 4) {
             ViewThatFits(in: .horizontal) {
@@ -100,12 +101,12 @@ struct VideoActionBar: View {
     private var coinControl: some View {
         Button { open(.coin) } label: {
             actionIcon(.coin, count: support.statistics?.coins, title: "投币", selected: (support.state?.coins ?? 0) > 0)
-        }.disabled(!enabled).accessibilityLabel("投币")
+        }.disabled(!canOpenPanels).accessibilityLabel("投币")
     }
     private var favoriteControl: some View {
         Button { open(.favorite) } label: {
             actionIcon(.favorite, count: support.statistics?.favorites, title: "收藏", selected: support.state?.favorited == true)
-        }.disabled(!enabled).accessibilityLabel("收藏")
+        }.disabled(!canOpenPanels).accessibilityLabel("收藏")
     }
     private var downloadControl: some View {
         Button { if cached { app.navigate(.downloads) } else { onDownload() } } label: {
@@ -178,6 +179,37 @@ struct VideoShareInfo: Identifiable {
     var title: String
     var page: Int
     var id: String { "\(bvid):\(page)" }
+}
+
+/// Present above the navigation container that owns the current video, including the account sheet.
+struct VideoSharePresentation: ViewModifier {
+    @EnvironmentObject private var app: AppModel
+    var isActive = true
+    @State private var systemShare: VideoShareInfo?
+    @State private var copied = false
+    func body(content: Content) -> some View {
+        ZStack {
+            content.accessibilityHidden(isActive && app.shareVideo != nil)
+            if isActive, let share = app.shareVideo {
+                VideoShareSheet(bvid: share.bvid, title: share.title, page: share.page, onClose: { app.shareVideo = nil },
+                    onCopied: { copied = true }, onSystemShare: { app.shareVideo = nil; systemShare = share })
+                    .id(share.id).zIndex(100)
+            }
+            if isActive && copied {
+                VStack { Spacer(); Text("链接已复制").font(.system(size: 12)).padding(.horizontal, 16).padding(.vertical, 9)
+                    .foregroundStyle(.white).background(Color(white: 0.1).opacity(0.92), in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.bottom, 24) }.allowsHitTesting(false).zIndex(101).task {
+                        UIAccessibility.post(notification: .announcement, argument: "链接已复制")
+                        do { try await Task.sleep(for: .seconds(2)); copied = false } catch {}
+                    }
+            }
+        }.sheet(item: $systemShare) { VideoSystemShareSheet(share: $0) }
+            .onChange(of: app.accountGeneration) { _, _ in systemShare = nil; copied = false }
+            .onChange(of: app.path) { _, _ in if isActive { app.shareVideo = nil } }
+            .onChange(of: app.accountPath) { _, _ in if isActive { app.shareVideo = nil } }
+            .onChange(of: isActive) { _, active in if !active { systemShare = nil; copied = false } }
+            .onDisappear { if isActive { app.shareVideo = nil }; systemShare = nil; copied = false }
+    }
 }
 
 struct VideoShareSheet: View {

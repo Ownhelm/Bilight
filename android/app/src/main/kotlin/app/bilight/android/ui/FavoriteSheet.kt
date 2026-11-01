@@ -20,6 +20,7 @@ import app.bilight.android.core.Folder
     folders: List<Folder>?, selected: Set<Long>, error: String?, title: String, creating: Boolean,
     onSelection: (Set<Long>) -> Unit, onTitle: (String) -> Unit,
     close: () -> Unit, confirm: () -> Unit, create: () -> Unit,
+    canConfirm: Boolean = true,
 ) {
     val original=folders.orEmpty().filter { it.selected }.map { it.id }.toSet()
     ModalBottomSheet(
@@ -67,7 +68,7 @@ import app.bilight.android.core.Folder
             Row(Modifier.fillMaxWidth().padding(horizontal=20.dp,vertical=12.dp),
                 horizontalArrangement=Arrangement.spacedBy(12.dp)) {
                 OutlinedButton(onClick=close,modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("取消") }
-                Button(onClick=confirm,enabled=folders!=null && selected!=original && !creating,
+                Button(onClick=confirm,enabled=canConfirm && folders!=null && selected!=original && !creating,
                     modifier=Modifier.weight(1f).heightIn(min=48.dp)) { Text("确定") }
             }
         }

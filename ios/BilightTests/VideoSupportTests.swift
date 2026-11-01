@@ -105,6 +105,33 @@ final class VideoSupportTests: XCTestCase {
         XCTAssertNil(model.state, "An old failure cannot restore the previous account's state")
         XCTAssertNil(model.error)
     }
+    @MainActor func testConfirmedLikeReleasesOtherActionsWhilePublicCountsAreStillLoading() async throws {
+        let lock = NSLock(); var liked = false, posts = 0, reads = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" {
+                XCTAssertEqual(request.url!.path, "/x/web-interface/archive/like")
+                lock.withLock { liked = true; posts += 1 }; return ["code": 0, "data": NSNull()]
+            }
+            XCTAssertEqual(request.url!.path, "/x/web-interface/archive/relation")
+            return lock.withLock { reads += 1; return ["code": 0, "data": ["like": liked, "coin": 0, "favorite": false]] }
+        }
+        _ = try await http.acceptLogin(cookies)
+        MockProtocol.stalledPath = "/x/web-interface/wbi/view"
+        let model = VideoSupportModel()
+        model.reset(VideoStatistics(likes: 10, coins: 20, favorites: 30))
+        model.state = VideoEngagement(liked: false, coins: 0, favorited: false)
+        let write = Task { await model.write(client: client, bvid: bvid, action: .like(true)) }
+        let end = Date().addingTimeInterval(2)
+        while !lock.withLock({ reads >= 2 && posts == 1 }) && Date() < end { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(lock.withLock { reads >= 2 && posts == 1 })
+        XCTAssertEqual(model.state?.liked, true)
+        XCTAssertFalse(model.busy, "Confirmed likes must not keep coin and favorite disabled while only totals are pending")
+        XCTAssertEqual(model.statistics?.likes, 10, "Pending public counts must not be invented")
+        model.reset(nil); write.cancel(); _ = await write.value
+        MockProtocol.stalledPath = nil
+        await client.logout()
+    }
     private let bvid = "BV0000000001"
     private var cookies: [HTTPCookie] {
         ["SESSDATA", "bili_jct"].map {

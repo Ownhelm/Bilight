@@ -272,6 +272,20 @@ class PlaybackPreferencesTest {
             main { assertEquals(before,model.engagement); assertNull(model.supportError) }
         }
     }
+    @Test fun confirmedLikeUnlocksOtherActionsBeforePublicCountsReturn() = fixture(authenticated=true) { f ->
+        lateinit var model: PlaybackModel
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
+        await("The initial account engagement did not load") { model.engagement!=null && model.detailLoaded }
+        val reads=f.detailReads.get()
+        f.detailGate=CountDownLatch(1)
+        try {
+            main { model.write(VideoWrite.Like(true)) }
+            await("Confirmed like did not start refreshing public totals") { f.likePosts.get()==1 && f.detailReads.get()>reads }
+            await("Public totals must not keep coin and favorite locked after a confirmed like") { !model.actionBusy }
+            main { assertTrue(model.engagement!!.liked); assertEquals(0L,model.detail!!.statistics.likes) }
+            assertEquals("The like must only be submitted once",1,f.likePosts.get())
+        } finally { f.detailGate!!.countDown() }
+    }
     @Test fun captionsSpeedAndDanmakuFollowExplicitChoicesAcrossVideosAndRecreatedPlayers() = fixture(8) { f ->
         lateinit var model: PlaybackModel
         fun open(bvid: String) {
@@ -413,16 +427,22 @@ class PlaybackPreferencesTest {
         @Volatile var danmakuGate: CountDownLatch?=null
         @Volatile var engagementGate: CountDownLatch?=null
         @Volatile var failEngagement=false
+        @Volatile var liked=false
+        val likePosts=AtomicInteger()
+        val detailReads=AtomicInteger()
+        @Volatile var detailGate: CountDownLatch?=null
         private val file=File(app.cacheDir,"preferences-fixture.mp4").also { encodedFixture(it,audio,durationSeconds) }
         private val bytes=file.readBytes()
         private val api=OkHttpClient.Builder().addInterceptor { chain ->
             val request=chain.request(); val path=request.url.encodedPath
             val text=when (path) {
                 "/x/web-interface/nav" -> """{"code":0,"data":{"isLogin":$authenticated,"mid":900000003,"uname":"隔离测试","wbi_img":{"img_url":"https://i0.hdslb.com/${"a".repeat(32)}.png","sub_url":"https://i0.hdslb.com/${"b".repeat(32)}.png"}}}"""
-                "/x/web-interface/archive/relation" -> { check(engagementGate?.await(5,TimeUnit.SECONDS)!=false); if (failEngagement) throw java.io.IOException("Isolated engagement failure"); """{"code":0,"data":{"like":false,"coin":0,"favorite":false}}""" }
+                "/x/web-interface/archive/relation" -> { check(engagementGate?.await(5,TimeUnit.SECONDS)!=false); if (failEngagement) throw java.io.IOException("Isolated engagement failure"); """{"code":0,"data":{"like":$liked,"coin":0,"favorite":false}}""" }
+                "/x/frontend/finger/spi" -> """{"code":0,"data":{"b_3":"fixture-only","b_4":"fixture-only"}}"""
+                "/x/web-interface/archive/like" -> { check(request.method=="POST"); likePosts.incrementAndGet(); liked=true; """{"code":0,"data":{}}""" }
                 "/x/relation" -> """{"code":0,"data":{"attribute":0}}"""
                 "/x/v2/history/report" -> """{"code":0,"data":{}}"""
-                "/x/web-interface/wbi/view" -> """{"code":0,"data":{"bvid":"${request.url.queryParameter("bvid")}","aid":42,"title":"偏好恢复测试","duration":1,"owner":{"mid":42,"name":"隔离测试"},"pages":[{"cid":43,"page":1,"part":"第一段","duration":1},{"cid":44,"page":2,"part":"第二段","duration":1}],"stat":{}}}"""
+                "/x/web-interface/wbi/view" -> { detailReads.incrementAndGet(); check(detailGate?.await(15,TimeUnit.SECONDS)!=false); """{"code":0,"data":{"bvid":"${request.url.queryParameter("bvid")}","aid":42,"title":"偏好恢复测试","duration":1,"owner":{"mid":42,"name":"隔离测试"},"pages":[{"cid":43,"page":1,"part":"第一段","duration":1},{"cid":44,"page":2,"part":"第二段","duration":1}],"stat":{}}}""" }
                 "/x/player/wbi/playurl" -> {
                     val preferred=request.url.queryParameter("qn")!!.toInt(); requestedQualities+=preferred
                     val quality=minOf(preferred,if(request.url.queryParameter("bvid")=="BV12qnt6VEM1") 120 else 80)
@@ -475,7 +495,7 @@ class PlaybackPreferencesTest {
         }
         fun close() {
             main { cachedIds.forEach(owner.downloads::remove) }
-            subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
+            subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); detailGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
         }
     }
 }

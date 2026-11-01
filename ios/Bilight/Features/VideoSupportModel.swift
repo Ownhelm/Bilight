@@ -7,12 +7,15 @@ import SwiftUI
     @Published var error: String?
     @Published var refreshRequired = false
     private var operation = UUID()
+    private var statisticsRequest: Task<Void, Never>?
     func reset(_ statistics: VideoStatistics?) {
+        statisticsRequest?.cancel(); statisticsRequest = nil
         operation = UUID(); state = nil; self.statistics = statistics
         busy = false; error = nil; refreshRequired = false
     }
     func refresh(client: BiliClient, bvid: String, authenticated: Bool, refreshCounts: Bool = false) async {
         guard !busy else { return }
+        statisticsRequest?.cancel(); statisticsRequest = nil
         let token = UUID(); operation = token; busy = true; error = nil
         defer { if operation == token { busy = false } }
         do {
@@ -31,6 +34,7 @@ import SwiftUI
     }
     func write(client: BiliClient, bvid: String, action: VideoWrite) async -> Bool {
         guard !busy else { return false }
+        statisticsRequest?.cancel(); statisticsRequest = nil
         let token = UUID(); operation = token; busy = true; error = nil
         let before = state
         var pending = state ?? VideoEngagement(liked: false, coins: 0, favorited: false)
@@ -55,7 +59,12 @@ import SwiftUI
                 return false
             }
             refreshRequired = false
-            if let counts = try? await client.videoStatistics(bvid), operation == token { statistics = counts }
+            // Confirmed engagement is usable immediately; public totals are a separate read.
+            statisticsRequest = Task { [weak self] in
+                guard let counts = try? await client.videoStatistics(bvid), !Task.isCancelled,
+                    let self, self.operation == token else { return }
+                self.statistics = counts
+            }
             return !refreshRequired
         } catch {
             guard operation == token, !Task.isCancelled else { return false }

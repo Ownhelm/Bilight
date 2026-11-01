@@ -76,7 +76,7 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 目前支持普通 UP 主视频，不包含直播和番剧。画质和内容访问仍受账号会员权限、地区及平台限制；网页端若被浏览器拦截自动播放，点击播放即可。
 
-本次更新见 [v0.1.7 更新说明](docs/release-v0.1.7.md)。
+本次更新见 [v0.1.8 更新说明](docs/release-v0.1.8.md)。
 
 ## 快速开始
 
@@ -113,7 +113,7 @@ docker compose up -d --build
 
 ### Android：安装 APK（预览版）
 
-支持 Android 8.0 及以上。下载 [Android 预览版 APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.7/Bilight-v0.1.7-android-preview.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
+支持 Android 8.0 及以上。下载 [Android 预览版 APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.8/Bilight-v0.1.8-android-preview.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
 
 APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
 
