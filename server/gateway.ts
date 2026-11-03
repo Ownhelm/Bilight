@@ -499,24 +499,41 @@ export class BiliGateway {
   async playback(bvid: string, cid: number, quality = 127): Promise<PlaybackSource> {
     validBvid(bvid); integer(cid, '分 P 编号'); integer(quality, '画质');
     // Optional metadata has its own route: a slow subtitle service must not gate the first frame.
-    const data = await this.transport.request<RecordValue>(`${API}/x/player/wbi/playurl`, { wbi: true, query: { bvid, cid, qn: quality, fnval: 4048, fnver: 0, fourk: 1 } });
+    const jar = this.transport.jar;
+    const read = async (fnval: number) => {
+      if (this.transport.jar !== jar) throw new BiliError('LOGIN_REQUIRED', '账号状态已变化，请重试', 401);
+      const data = await this.transport.request<RecordValue>(`${API}/x/player/wbi/playurl`, { wbi: true, query: { bvid, cid, qn: quality, fnval, fnver: 0, fourk: 1 } });
+      if (this.transport.jar !== jar) throw new BiliError('LOGIN_REQUIRED', '账号状态已变化，请重试', 401);
+      return data;
+    };
+    const data = await read(4048);
+    try { return this.playbackSource(data, cid, quality); }
+    catch (error) { if (!(error instanceof BiliError) || error.code !== 'UNSUPPORTED_PLAYBACK') throw error; }
+    // A successful but unusable DASH response may still have an official progressive MP4.
+    // Never retry permission, risk-control or network failures, or construct a media URL.
+    return this.playbackSource(await read(1), cid, quality);
+  }
+
+  private playbackSource(data: RecordValue, cid: number, quality: number): PlaybackSource {
     const subtitles: Subtitle[] = [];
-    const dash = object(data.dash), videos = array(dash.video).filter(track => /^avc[13]\./i.test(String(track.codecs))), audios = array(dash.audio).filter(track => /^mp4a\./i.test(String(track.codecs)));
+    const dash = object(data.dash);
+    const videos = array(dash.video).filter(track => /^avc[13]\./i.test(String(track.codecs))).map(track => this.dashTrack(track)).filter((track): track is DashTrack => Boolean(track));
+    const audios = array(dash.audio).filter(track => /^mp4a\./i.test(String(track.codecs))).map(track => this.dashTrack(track)).filter((track): track is DashTrack => Boolean(track));
     const accepted = Array.isArray(data.accept_quality) ? data.accept_quality : [], labels = Array.isArray(data.accept_description) ? data.accept_description : [];
     const label = (id: number) => clean(labels[accepted.indexOf(id)] ?? array(data.support_formats).find(item => number(item.quality) === id)?.new_description ?? `${id}`, 100);
     if (videos.length) {
       const ids = [...new Set(videos.map(track => number(track.id)))].sort((a, b) => b - a);
       const selectedId = ids.find(id => id <= quality) ?? ids.at(-1);
       const selected = videos.filter(track => number(track.id) === selectedId).sort((a, b) => number(b.bandwidth) - number(a.bandwidth))[0];
-      const video = this.dashTrack(selected), audio = audios.length ? this.dashTrack(audios.sort((a, b) => number(b.bandwidth) - number(a.bandwidth))[0]) : undefined;
+      const video = selected, audio = audios.sort((a, b) => b.bandwidth - a.bandwidth)[0];
       if (!video || (array(dash.audio).length > 0 && !audio)) throw new BiliError('UNSUPPORTED_PLAYBACK', '当前视频没有可用的 AVC/AAC 播放轨道', 422);
       return { cid, quality: video.id, qualities: ids.map(id => ({ id, label: label(id) })), duration: number(dash.duration, number(data.timelength) / 1000), video, ...(audio ? { audio } : {}), subtitles };
     }
     const segments = array(data.durl).map(segment => ({ url: https(segment.url), length: number(segment.length) })).filter(segment => segment.url && segment.length > 0);
     const progressiveMp4 = /mp4/i.test(String(data.format ?? '')) || segments.every(segment => /\.mp4(?:$|\?)/i.test(segment.url));
-    if (!segments.length || !progressiveMp4) throw new BiliError('UNSUPPORTED_PLAYBACK', '当前视频没有浏览器支持的 AVC/AAC 播放流', 422);
+    if (array(data.durl).length !== 1 || segments.length !== 1 || !progressiveMp4 || !number(data.quality)) throw new BiliError('UNSUPPORTED_PLAYBACK', '当前视频没有浏览器支持的 AVC/AAC 播放流', 422);
     // durl is returned only when upstream actually supplied progressive media, never inferred from DASH.
-    return { cid, quality: number(data.quality, quality), qualities: accepted.map((id: unknown) => ({ id: number(id), label: label(number(id)) })), duration: number(data.timelength) / 1000, segments, subtitles };
+    return { cid, quality: number(data.quality), qualities: [{ id: number(data.quality), label: label(number(data.quality)) }], duration: number(data.timelength) / 1000, segments, subtitles };
   }
 
   private dashTrack(raw: RecordValue): DashTrack | undefined {

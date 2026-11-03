@@ -551,6 +551,66 @@ test('playback selects AVC and AAC, keeps byte ranges and derives only offered A
   assert.equal((await gateway.subtitles(BV1, 5))[0].url, 'https://aisubtitle.hdslb.com/file.json');
 });
 
+test('playback skips incomplete preferred AVC and AAC tracks before selecting a usable source', async () => {
+  for (const [video, audio] of [
+    [[{ ...track(120, 'avc1.640033'), segment_base: {} }, track(80, 'avc1.640032')], [track(30216, 'mp4a.40.2')]],
+    [[track(80, 'avc1.640032')], [{ ...track(30280, 'mp4a.40.2', 9000), segment_base: {} }, track(30216, 'mp4a.40.2')]],
+    [[{ ...track(80, 'avc1.640032', 9000), base_url: '' }, track(80, 'avc1.640032')], [track(30216, 'mp4a.40.2')]],
+  ]) {
+    const { gateway, calls } = fixture(() => ({ dash: { duration: 60, video, audio } }));
+    const result = await gateway.playback(BV1, 5);
+    assert.equal(result.quality, 80); assert.equal(result.audio?.id, 30216);
+    assert.deepEqual(result.qualities.map(item => item.id), [80]); assert.equal(calls.length, 1);
+  }
+});
+
+test('unusable DASH reads the official MP4 once with the same part and preferred quality', async () => {
+  const { gateway, calls } = fixture(({ options }) => options.query?.fnval === 1
+    ? { format: 'mp4', quality: 64, accept_quality: [120, 80, 64], timelength: 60000, durl: [{ url: 'https://upos.bilivideo.com/video.mp4', length: 60000 }] }
+    : { dash: { video: [{ ...track(120, 'avc1.640033'), segment_base: {} }], audio: [track(30280, 'mp4a.40.2')] } });
+  const result = await gateway.playback(BV1, 5, 120);
+  assert.equal(result.quality, 64); assert.equal(result.segments?.length, 1);
+  assert.deepEqual(result.qualities.map(item => item.id), [64]);
+  assert.deepEqual(calls.map(call => call.options.query), [4048, 1].map(fnval => ({ bvid: BV1, cid: 5, qn: 120, fnval, fnver: 0, fourk: 1 })));
+});
+
+test('playback keeps upstream failures and never retries a failed request as MP4', async () => {
+  for (const code of ['-101', '-403', '412', 'UPSTREAM_UNAVAILABLE']) {
+    const error = new BiliError(code, 'Actual upstream failure');
+    const { gateway, calls } = fixture(() => { throw error; });
+    await assert.rejects(gateway.playback(BV1, 5), value => value === error);
+    assert.equal(calls.length, 1);
+    const fallback = fixture(({ options }) => { if (options.query?.fnval === 1) throw error; return { dash: { video: [], audio: [] } }; });
+    await assert.rejects(fallback.gateway.playback(BV1, 5), value => value === error);
+    assert.equal(fallback.calls.length, 2);
+  }
+});
+
+test('playback discards a changed account before fallback or returning a late MP4', async () => {
+  for (const changedAt of [4048, 1]) {
+    const { gateway, transport, calls } = fixture(({ options }) => {
+      if (options.query?.fnval === changedAt) transport.jar = new CookieJar();
+      return options.query?.fnval === 1 ? { format: 'mp4', quality: 64, durl: [{ url: 'https://upos.bilivideo.com/video.mp4', length: 1000 }] } : {};
+    });
+    await assert.rejects(gateway.playback(BV1, 5), { code: 'LOGIN_REQUIRED' });
+    assert.equal(calls.length, changedAt === 4048 ? 1 : 2);
+  }
+});
+
+test('MP4 fallback requires one complete real file and does not list unavailable qualities', async () => {
+  const segment = { url: 'https://upos.bilivideo.com/video.mp4', length: 1000 };
+  for (const payload of [
+    { format: 'mp4', quality: 64, durl: [segment, segment] },
+    { format: 'mp4', quality: 64, durl: [segment, { url: '', length: 1000 }] },
+    { format: 'mp4', durl: [segment] },
+    { format: 'flv720', quality: 64, durl: [{ ...segment, url: 'https://upos.bilivideo.com/video.flv' }] },
+  ]) {
+    const { gateway, calls } = fixture(() => payload);
+    await assert.rejects(gateway.playback(BV1, 5), { code: 'UNSUPPORTED_PLAYBACK' });
+    assert.equal(calls.length, 2, 'Unsupported media is tried at most once in each format');
+  }
+});
+
 test('subtitle metadata keeps an actual failure visible without affecting available playback', async () => {
   const { gateway } = fixture(({ url }) => url.endsWith('/playurl')
     ? { dash: { duration: 60, video: [track(80, 'avc1.640032')], audio: [] } }

@@ -184,10 +184,10 @@ function Video({ auth, authGeneration, onLogin }: { auth: AuthState | null; auth
   if (!data || !part) return <div className="page-container"><Empty title="这个视频暂时无法播放" /></div>;
   return <div className="page-container watch-page"><div className="watch-title"><h1>{data.title}</h1><p><span>{countLabel(data.views)} 播放</span><span>{dateLabel(data.publishedAt)}</span><span className="watch-bvid">{data.bvid}</span></p></div>
     <div className={`watch-layout${data.parts.length > 1 ? ' has-parts' : ''}`}><div className="watch-primary"><VideoPlayer key={`${data.bvid}:${part.cid}`} bvid={data.bvid} cid={part.cid} poster={data.cover} startTime={Math.max(0, Math.min(part.duration, Number(params.get('t')) || 0))} accountMid={auth?.authenticated ? auth.user?.mid : undefined} />
-      <TripleActions key={`${data.bvid}:${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} bvid={data.bvid} auth={auth} onLogin={onLogin} snapshot={data.interaction} title={data.title} page={part.page} />
+      <TripleActions key={`actions:${data.bvid}:${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} bvid={data.bvid} auth={auth} onLogin={onLogin} snapshot={data.interaction} title={data.title} page={part.page} />
       <Link className="watch-creator" to={`/creator/${data.owner.mid}`}><img src={data.owner.avatar} alt="" referrerPolicy="no-referrer" /><div><strong>{data.owner.name}</strong><span>查看 UP 主的视频</span></div><ArrowRight size={18} /></Link>
       {data.description && <details className="video-description"><summary>视频简介<CaretDown size={15} /></summary><p>{data.description}</p></details>}
-      <Comments key={`${data.bvid}:${auth?.user?.mid ?? 0}:${authGeneration}`} bvid={data.bvid} />
+      <Comments key={`comments:${data.bvid}:${auth?.user?.mid ?? 0}:${authGeneration}`} bvid={data.bvid} />
     </div>{data.parts.length > 1 && <aside className="parts-panel" aria-label="视频分P"><div className="parts-heading"><h2>分 P 列表</h2><span>{part.page} / {data.parts.length}</span></div><p className="parts-note">点击切换分 P</p><div className="parts-list">{data.parts.map(item => <button key={item.cid} className={item.cid === part.cid ? 'active' : ''} onClick={() => setParams({ p: String(item.page) })} aria-current={item.cid === part.cid ? 'true' : undefined}><span className="part-number">{String(item.page).padStart(2, '0')}</span><span className="part-title">{item.title}</span><span className="part-duration">{duration(item.duration)}</span></button>)}</div></aside>}</div>
   </div>;
 }

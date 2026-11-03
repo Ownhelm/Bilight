@@ -40,6 +40,14 @@ BILIGHT_DESTINATION='platform=iOS Simulator,name=你的模拟器名称' bash ios
 
 默认测试使用假上游与隔离存储；不要在自动化测试中发送真实短信、投币、点赞、关注或收藏。修改播放行为时另行核对暂停、切换分 P、全屏与进度，测试通过不等于真实账号验收。
 
+网页分 P 回归使用 Playwright CLI 与现有合成视频，模拟登录态，检查连续切换及浏览器前进／后退后只有一个三连栏、播放器和评论区。先启动 Vite，再在另一终端执行；所有 API 均被离线样本接管：
+
+```bash
+npx @playwright/cli -s=watch-parts open http://127.0.0.1:5173 --browser chrome
+npx @playwright/cli -s=watch-parts run-code "$(cat tests/browser/watch-parts.js)"
+npx @playwright/cli -s=watch-parts close
+```
+
 图文触控回归使用合成离线样本，不恢复账号或读取 Keychain：
 
 ```bash
