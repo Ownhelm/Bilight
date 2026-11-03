@@ -85,11 +85,14 @@ import androidx.compose.ui.platform.testTag
         if (app.tab == 0) SearchScreen(app,Modifier.padding(padding),(padding.calculateBottomPadding()-padding.calculateTopPadding())/2) else key(app.sessionRevision) { FollowingScreen(app,Modifier.padding(padding)) }
     }
 }
+@Composable private fun CapsuleSearchField(value: String,onValueChange: (String) -> Unit,placeholder: String,clearLabel: String,onClear: () -> Unit,onSearch: () -> Unit,modifier: Modifier = Modifier,autoCorrectEnabled: Boolean = true) {
+    OutlinedTextField(value=value,onValueChange=onValueChange,modifier=modifier.fillMaxWidth().heightIn(min=52.dp),shape=RoundedCornerShape(100),singleLine=true,placeholder={ Text(placeholder,color=Muted,fontSize=14.sp,maxLines=1,overflow=TextOverflow.Ellipsis) },leadingIcon={ Icon(Icons.Rounded.Search,null,tint=Muted) },trailingIcon={
+        if (value.isNotEmpty()) IconButton(onClick=onClear) { Icon(Icons.Rounded.Close,clearLabel) }
+    },keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search,autoCorrectEnabled=autoCorrectEnabled),keyboardActions=KeyboardActions(onSearch={ onSearch() }),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color(0xffe5e6eb),focusedBorderColor=Pink,unfocusedContainerColor=Soft,focusedContainerColor=Color.White))
+}
 @Composable private fun SearchField(app: AppModel,modifier: Modifier = Modifier) {
-    val focus = LocalFocusManager.current
-    OutlinedTextField(value=app.keyword,onValueChange={ app.keyword=it },modifier=modifier.fillMaxWidth().heightIn(min=52.dp),shape=RoundedCornerShape(100),singleLine=true,placeholder={ Text("搜索视频、UP主或BV号",color=Muted,fontSize=14.sp,maxLines=1,overflow=TextOverflow.Ellipsis) },leadingIcon={ Icon(Icons.Rounded.Search,null,tint=Muted) },trailingIcon={
-        if (app.keyword.isNotEmpty()) IconButton(onClick={ app.keyword=""; app.searched=false }) { Icon(Icons.Rounded.Close,"清空搜索") }
-    },keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search),keyboardActions=KeyboardActions(onSearch={ focus.clearFocus(); app.search() }),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color(0xffe5e6eb),focusedBorderColor=Pink,unfocusedContainerColor=Soft,focusedContainerColor=Color.White))
+    val focus=LocalFocusManager.current
+    CapsuleSearchField(app.keyword,{ app.keyword=it },"搜索视频、UP主或BV号","清空搜索",{ app.keyword=""; app.searched=false },{ focus.clearFocus(); app.search() },modifier)
 }
 @Composable private fun SearchScreen(app: AppModel,modifier: Modifier,centerCorrection: androidx.compose.ui.unit.Dp) {
     val focus = LocalFocusManager.current
@@ -234,6 +237,7 @@ import androidx.compose.ui.platform.testTag
 }
 
 internal class Paging<T> {
+    val listState = androidx.compose.foundation.lazy.LazyListState()
     val items = mutableStateListOf<T>(); var busy by mutableStateOf(false); var error by mutableStateOf<String?>(null); var more by mutableStateOf(true); var page by mutableIntStateOf(0); var cursor: String?=null
     suspend fun load(reset: Boolean = false, read: suspend (Int,String?) -> Page<T>) {
         if (busy || !reset && !more) return
@@ -246,38 +250,74 @@ internal class Paging<T> {
     }
 }
 @Composable private fun <T> Paged(title: String,app: AppModel,identity: Any,read: suspend (Int,String?) -> Page<T>,item: @Composable (T) -> Unit) {
-    val paging = remember(identity,app.user?.mid) { Paging<T>() }; val scope=rememberCoroutineScope()
-    LaunchedEffect(identity,app.user?.mid) { paging.load(read=read) }
-    Column(Modifier.safeDrawingPadding()) { SectionTitle(title,app::back); LazyColumn(contentPadding=PaddingValues(horizontal=16.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { items(paging.items) { item(it) }; if (paging.page>0 && !paging.busy && paging.items.isEmpty() && paging.error==null) item { EmptyNotice("暂无内容") }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load(read=read) } } } } }
+    val paging = remember(identity,app.sessionRevision) { app.browseState(identity) { Paging<T>() } }; val scope=rememberCoroutineScope()
+    LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load(read=read) }
+    Column(Modifier.safeDrawingPadding()) { SectionTitle(title,app::back); LazyColumn(state=paging.listState,contentPadding=PaddingValues(horizontal=16.dp,vertical=12.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { items(paging.items) { item(it) }; if (paging.page>0 && !paging.busy && paging.items.isEmpty() && paging.error==null) item { EmptyNotice("暂无内容") }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load(read=read) } } } } }
 }
-@Composable private fun PeopleScreen(app: AppModel,frequent: Boolean) { Paged(if (frequent) "常访问的UP主" else "我的关注的人",app,frequent,{ page,_ -> app.repository.people(page,frequent) }) { UserRow(app,it) } }
+@Composable private fun PeopleScreen(app: AppModel,frequent: Boolean) {
+    if (frequent) { Paged("常访问的UP主",app,true,{ page,_ -> app.repository.people(page,true) }) { UserRow(app,it) }; return }
+    val search=app.peopleSearch; val focus=LocalFocusManager.current
+    val searching=search.keyword.isNotBlank()
+    val matches=(if (searching) search.matches() else search.items.orEmpty()).filter { app.relations[it.mid]?.following!=false }
+    LaunchedEffect(app.sessionRevision) { app.enterPeople() }
+    Column(Modifier.safeDrawingPadding()) {
+        SectionTitle("我的关注的人",app::back)
+        CapsuleSearchField(search.keyword,{ search.keyword=it },"搜索我关注的人","清空关注搜索",{ search.keyword="" },{ focus.clearFocus() },
+            Modifier.padding(horizontal=16.dp,vertical=8.dp).testTag("people-search-field"),autoCorrectEnabled=false)
+        LazyColumn(contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
+            if (search.items==null && search.busy) item { Loading("正在读取关注名单") }
+            if (search.error!=null) item {
+                ErrorNotice("关注名单更新失败：${search.error}")
+                TextButton(onClick=app::enterPeople) { Text("重试更新") }
+            }
+            if (search.items!=null) {
+                if (matches.isEmpty()) item {
+                    EmptyNotice(if (!search.complete) "正在更新关注名单，已读取的用户中暂未找到匹配。" else if (searching) "没有匹配的关注用户，试试名字或拼音。" else "还没有关注 UP 主")
+                } else {
+                    if (searching) item { Text("找到 ${matches.size} 个用户关注用户",fontSize=12.sp,color=Muted) }
+                    items(matches,key={ it.mid }) { UserRow(app,it) }
+                }
+            }
+        }
+    }
+}
+private class CreatorBrowseState(user: User) {
+    val mode=mutableIntStateOf(0); val info=mutableStateOf(user); val error=mutableStateOf<String?>(null)
+    var profileLoaded=false
+    val videos=Paging<Video>(); val collections=Paging<Collection>()
+}
 @Composable private fun CreatorScreen(app: AppModel,user: User) {
-    var mode by rememberSaveable(user.mid) { mutableIntStateOf(0) }
-    var info by remember(user.mid) { mutableStateOf(user) }
-    var error by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(user.mid) { try { info=app.repository.creator(user.mid) } catch (e: Exception) { error=e.message } }
+    val state=remember(user.mid,app.sessionRevision) { app.browseState("creator:${user.mid}") { CreatorBrowseState(user) } }
+    var mode by state.mode
+    var info by state.info
+    var error by state.error
+    LaunchedEffect(state) { if (!state.profileLoaded) { try { info=app.repository.creator(user.mid); state.profileLoaded=true } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; state.profileLoaded=true } } }
     Column(Modifier.safeDrawingPadding()) {
         SectionTitle(info.name,app::back)
         Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically) { Avatar(info,56); Column(Modifier.weight(1f).padding(horizontal=12.dp)) { Text(info.name,fontSize=20.sp,fontWeight=FontWeight.Bold); Text(info.sign,fontSize=12.sp,color=Muted,maxLines=3,overflow=TextOverflow.Ellipsis) }; FollowButton(app,info.mid) }
         ErrorNotice(error)
         TabRow(mode) { listOf("投稿","合集和列表").forEachIndexed { i,label -> Tab(selected=mode==i,onClick={ mode=i },text={ Text(label) }) } }
         if (mode==0) {
-            val paging=remember(user.mid) { Paging<Video>() }; val scope=rememberCoroutineScope()
-            LaunchedEffect(user.mid) { paging.load { p,_ -> app.repository.creatorVideos(info,p) } }
-            LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) { items(paging.items.chunked(2)) { VideoRow(app,it) }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.creatorVideos(info,p) } } } } }
+            val paging=state.videos; val scope=rememberCoroutineScope()
+            LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load { p,_ -> app.repository.creatorVideos(info,p) } }
+            LazyColumn(state=paging.listState,contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(20.dp)) { items(paging.items.chunked(2)) { VideoRow(app,it) }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.creatorVideos(info,p) } } } } }
         } else {
-            val paging=remember(user.mid) { Paging<Collection>() }; val scope=rememberCoroutineScope()
-            LaunchedEffect(user.mid) { paging.load { p,_ -> app.repository.collections(user.mid,p) } }
-            LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { items(paging.items) { c -> Row(Modifier.clickable { app.open(Route.Catalog(info,c)) },verticalAlignment=Alignment.CenterVertically) { RemoteImage(c.cover,c.title,Modifier.size(100.dp,64.dp).clip(RoundedCornerShape(6.dp))); Column(Modifier.padding(start=12.dp)) { Text(c.title); Text("${if (c.series) "列表" else "合集"} · ${c.total}个视频",fontSize=12.sp,color=Muted) } } }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.collections(user.mid,p) } } } } }
+            val paging=state.collections; val scope=rememberCoroutineScope()
+            LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load { p,_ -> app.repository.collections(user.mid,p) } }
+            LazyColumn(state=paging.listState,contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(16.dp)) { items(paging.items) { c -> Row(Modifier.clickable { app.open(Route.Catalog(info,c)) },verticalAlignment=Alignment.CenterVertically) { RemoteImage(c.cover,c.title,Modifier.size(100.dp,64.dp).clip(RoundedCornerShape(6.dp))); Column(Modifier.padding(start=12.dp)) { Text(c.title); Text("${if (c.series) "列表" else "合集"} · ${c.total}个视频",fontSize=12.sp,color=Muted) } } }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.collections(user.mid,p) } } } } }
         }
     }
 }
 @Composable private fun CatalogScreen(app: AppModel,route: Route.Catalog) { Paged(route.collection.title,app,route.collection,{ page,_ -> val result=app.repository.collection(route.user,route.collection,page); Page(result.items.chunked(2),result.more) }) { VideoRow(app,it) } }
+private class FavoritesBrowseState {
+    val collected=mutableStateOf(false); val created=Paging<Folder>(); val collectedFolders=Paging<Folder>()
+}
 @Composable private fun FavoritesScreen(app: AppModel) {
-    var collected by rememberSaveable { mutableStateOf(false) }
+    val state=remember(app.sessionRevision) { app.browseState("favorites") { FavoritesBrowseState() } }
+    var collected by state.collected
     Column(Modifier.safeDrawingPadding()) { SectionTitle("我的收藏",app::back); TabRow(if (collected) 1 else 0) { listOf("我创建的","我收藏的").forEachIndexed { i,label -> Tab(selected=collected==(i==1),onClick={ collected=i==1 },text={ Text(label) }) } }; key(collected) {
-        val paging=remember { Paging<Folder>() }; val scope=rememberCoroutineScope(); LaunchedEffect(Unit) { paging.load { p,_ -> app.repository.folders(collected,p) } }
-        LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+        val paging=if (collected) state.collectedFolders else state.created; val scope=rememberCoroutineScope(); LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load { p,_ -> app.repository.folders(collected,p) } }
+        LazyColumn(state=paging.listState,contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             items(paging.items) { folder -> Row(Modifier.fillMaxWidth().clickable(enabled=!folder.unavailable && folder.type in listOf(11,21)) { app.open(Route.Favorite(folder)) }) {
                 RemoteImage(folder.cover,folder.title,Modifier.size(96.dp,64.dp).clip(RoundedCornerShape(8.dp)))
                 Column(Modifier.padding(start=12.dp)) {

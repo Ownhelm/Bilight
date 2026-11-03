@@ -11,6 +11,8 @@ struct SearchView: View {
     @State private var busy = false
     @State private var error: String?
     @State private var refresh = 0
+    @State private var loadedRequest: String?
+    private var requestID: String { "\(submitted)-\(users)-\(page)-\(refresh)" }
     @FocusState private var focused: Bool
     @State private var introHeight: CGFloat = 80
     @State private var barHeight: CGFloat = 44
@@ -89,10 +91,11 @@ struct SearchView: View {
                             PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                         }
                     }.padding(.horizontal, 16).padding(.bottom, 20)
-                }.scrollDismissesKeyboard(.interactively)
+                }.scrollDismissesKeyboard(.interactively).id(requestID)
             }
-        }.task(id: "\(submitted)-\(users)-\(page)-\(refresh)") {
-            guard !submitted.isEmpty else { return }
+        }.task(id: requestID) {
+            guard !submitted.isEmpty, loadedRequest != requestID else { return }
+            let identity = requestID
             busy = true
             error = nil
             result = nil
@@ -100,6 +103,7 @@ struct SearchView: View {
                 let value = try await app.client.search(submitted, users: users, page: page)
                 try Task.checkCancellation()
                 result = value
+                loadedRequest = identity
                 for user in value.users { app.register(user) }
             } catch is CancellationError { return } catch {
                 if Task.isCancelled { return }

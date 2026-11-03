@@ -9,6 +9,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CollectedFoldersTest {
+    @Test fun collectedBiliimgCoversSurviveDirectoryParsing() = runBlocking {
+        val cover="https://archive.biliimg.com/bfs/archive/62e05dd136b5e9ae0d6b7662682229408d44c2d3.jpg"
+        fixture({ JSONObject("""{"count":1,"has_more":false,"list":[{"id":100,"mid":7,"title":"合集","media_count":5,"type":21,"cover":"$cover"}]}""") }) { repository ->
+            assertEquals(cover,repository.folders(true).items.single().cover)
+        }
+    }
     private suspend fun fixture(dispatch: (RecordedRequest) -> JSONObject, errorCode: Int = 0, test: suspend (BiliRepository) -> Unit) {
         val server=MockWebServer()
         server.dispatcher=object: Dispatcher() {

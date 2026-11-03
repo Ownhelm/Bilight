@@ -20,7 +20,7 @@ func secureURL(_ value: Any?) -> URL? {
     guard let text = value as? String, var parts = URLComponents(string: text.hasPrefix("//") ? "https:\(text)" : text)
     else { return nil }
     if parts.scheme == "http", let host = parts.host,
-        ["hdslb.com", "bilivideo.com", "bilivideo.cn"].contains(where: { host == $0 || host.hasSuffix(".\($0)") })
+        ["hdslb.com", "biliimg.com", "bilivideo.com", "bilivideo.cn"].contains(where: { host == $0 || host.hasSuffix(".\($0)") })
     {
         parts.scheme = "https"
     }
@@ -180,7 +180,7 @@ struct SearchResult {
     var users: [User]
     var hasMore: Bool
 }
-struct Relation {
+struct Relation: Codable {
     var following: Bool
     var mutual: Bool
     var blocked: Bool

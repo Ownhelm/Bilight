@@ -13,6 +13,8 @@ struct CreatorView: View {
     @State private var catalog: Page<CreatorCollection>?
     @State private var error: String?
     @State private var busy = true
+    @State private var loadedRequest: String?
+    private var requestID: String { "\(tab == 0 ? "videos-\(videoPage)" : "catalog-\(catalogPage)")-\(refresh)" }
     private var owner: User { user ?? app.people[mid] ?? User(mid: mid, name: "UP 主", avatar: nil) }
     var body: some View {
         ScrollView {
@@ -79,8 +81,9 @@ struct CreatorView: View {
                     PageButtons(page: catalogPage, more: catalog.hasMore, busy: busy) { catalogPage = $0 }
                 }
             }.padding(18).padding(.bottom, 20)
-        }.navigationTitle("UP 主主页").navigationBarTitleDisplayMode(.inline)
+        }.id(requestID).navigationTitle("UP 主主页").navigationBarTitleDisplayMode(.inline)
             .task {
+                guard user == nil else { return }
                 let generation = app.accountGeneration
                 do {
                     let value = try await app.client.creator(mid)
@@ -90,7 +93,9 @@ struct CreatorView: View {
                     app.register(value)
                 } catch is CancellationError {} catch { profileError = error.localizedDescription }
             }
-            .task(id: "\(tab == 0 ? "videos-\(videoPage)" : "catalog-\(catalogPage)")-\(refresh)") {
+            .task(id: requestID) {
+                guard loadedRequest != requestID else { return }
+                let identity = requestID
                 busy = true
                 error = nil
                 do {
@@ -103,6 +108,7 @@ struct CreatorView: View {
                         try Task.checkCancellation()
                         catalog = value
                     }
+                    loadedRequest = identity
                 } catch is CancellationError { return } catch {
                     if Task.isCancelled { return }
                     self.error = error.localizedDescription
@@ -120,6 +126,8 @@ struct CollectionView: View {
     @State private var refresh = 0
     @State private var error: String?
     @State private var busy = true
+    @State private var loadedRequest: String?
+    private var requestID: String { "\(page)-\(refresh)" }
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -142,7 +150,9 @@ struct CollectionView: View {
                     PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                 }
             }.padding(18)
-        }.navigationTitle(collection.kind.title).navigationBarTitleDisplayMode(.inline).task(id: "\(page)-\(refresh)") {
+        }.id(requestID).navigationTitle(collection.kind.title).navigationBarTitleDisplayMode(.inline).task(id: requestID) {
+            guard loadedRequest != requestID else { return }
+            let identity = requestID
             busy = true
             error = nil
             do {
@@ -151,6 +161,7 @@ struct CollectionView: View {
                     owner: app.people[collection.mid] ?? User(mid: collection.mid, name: "UP 主", avatar: nil))
                 try Task.checkCancellation()
                 result = value
+                loadedRequest = identity
             } catch is CancellationError { return } catch {
                 if Task.isCancelled { return }
                 self.error = error.localizedDescription

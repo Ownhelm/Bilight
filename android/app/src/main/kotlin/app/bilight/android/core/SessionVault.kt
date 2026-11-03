@@ -14,6 +14,16 @@ import javax.crypto.spec.GCMParameterSpec
 /** Session bytes never enter SharedPreferences, backups, logs or another application's cookie store. */
 interface SecureStore { fun load(): ByteArray?; fun save(bytes: ByteArray); fun clear() }
 class SessionVault(context: Context, private val name: String = "session"): SecureStore {
+    companion object {
+        internal fun peopleCacheNames(names: List<String>,keepUid: Long?): List<String> = names.mapNotNull { file ->
+            Regex("^(people-([1-9][0-9]*))\\.enc(?:\\.bak|\\.new)?$").matchEntire(file)?.let { match ->
+                match.groupValues[1].takeIf { match.groupValues[2].toLongOrNull()!=keepUid }
+            }
+        }.distinct()
+        fun clearOtherPeople(context: Context,keepUid: Long?) {
+            peopleCacheNames(context.noBackupFilesDir.list()?.toList().orEmpty(),keepUid).forEach { SessionVault(context,it).clear() }
+        }
+    }
     init { require(Regex("^[a-z0-9-]+$").matches(name)) }
     private val file = AtomicFile(File(context.noBackupFilesDir, "$name.enc"))
     private val alias = "app.bilight.android.$name.v1"

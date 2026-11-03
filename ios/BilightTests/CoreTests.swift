@@ -31,7 +31,55 @@ final class MockProtocol: URLProtocol {
     }
     override func stopLoading() {}
 }
+private final class CoverImageProtocol: URLProtocol {
+    static var data = Data()
+    static var requests: [URLRequest] = []
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        Self.requests.append(request)
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "image/png"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Self.data)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
 final class CoreTests: XCTestCase {
+    func testBiliimgImagePolicyKeepsHttpsAndHostBoundaries() throws {
+        let cover = "https://archive.biliimg.com/bfs/archive/cover.jpg"
+        XCTAssertEqual(secureURL(cover.replacingOccurrences(of: "https:", with: "http:"))?.absoluteString, cover)
+        XCTAssertEqual(secureURL("//archive.biliimg.com/bfs/archive/cover.jpg")?.absoluteString, cover)
+        XCTAssertTrue(ImageRepository.allowed(URL(string: cover)!))
+        XCTAssertFalse(MediaLoader.allowed(URL(string: cover)!))
+        for value in [
+            "http://archive.biliimg.com/cover.jpg", "https://evilbiliimg.com/cover.jpg",
+            "https://archive.biliimg.com.evil.invalid/cover.jpg", "https://user:secret@archive.biliimg.com/cover.jpg",
+            "https://archive.biliimg.com:8443/cover.jpg", "https://127.0.0.1/cover.jpg"
+        ] { XCTAssertFalse(ImageRepository.allowed(URL(string: value)!)) }
+    }
+    @MainActor func testCollectedBiliimgCoverLoadsThroughImageRepository() async throws {
+        let cover = "https://archive.biliimg.com/bfs/archive/62e05dd136b5e9ae0d6b7662682229408d44c2d3.jpg"
+        let folder = try FavoriteFolder.map(["id": 100, "mid": 7, "title": "合集", "media_count": 5, "type": 21, "cover": cover])
+        let url = try XCTUnwrap(folder.cover)
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [CoverImageProtocol.self]
+        config.httpCookieStorage = nil
+        let session = URLSession(configuration: config)
+        defer { session.invalidateAndCancel() }
+        CoverImageProtocol.requests = []
+        CoverImageProtocol.data = UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).image { context in
+            UIColor.systemPink.setFill(); context.fill(CGRect(x: 0, y: 0, width: 4, height: 4))
+        }.pngData()!
+        let repository = ImageRepository(session: session)
+        let image = try await repository.image(url)
+        XCTAssertGreaterThan(image.size.width, 0)
+        _ = try await repository.image(url)
+        XCTAssertEqual(CoverImageProtocol.requests.count, 1)
+        XCTAssertEqual(CoverImageProtocol.requests.first?.value(forHTTPHeaderField: "Referer"), "https://www.bilibili.com/")
+        XCTAssertNil(CoverImageProtocol.requests.first?.value(forHTTPHeaderField: "Cookie"))
+        XCTAssertFalse(MediaLoader.allowed(url), "An image host must not become a video-stream source")
+    }
     @MainActor func testPortraitVideoManualFullscreenSurvivesLandscapeAndPortrait() async throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
         let previousWindow = scene.keyWindow
@@ -515,6 +563,158 @@ final class CoreTests: XCTestCase {
             _ = try await client.followedPeople(mid: 4, page: 1)
             XCTFail("A different account must not receive personal data")
         } catch let failure as BiliFailure { XCTAssertEqual(failure.code, "-101") }
+    }
+    func testAccountPeopleKeepVerifiedFollowsWhoseNameIsEmpty() async throws {
+        let (client, http, _) = fixture { request in
+            if request.url!.path.hasSuffix("/nav") { return ["code": 0, "data": ["isLogin": true, "mid": 3, "uname": "Viewer"]] }
+            return ["code": 0, "data": ["total": 2, "list": [
+                ["mid": 8, "uname": "影视飓风", "attribute": 2],
+                ["mid": 9, "uname": "", "attribute": 2],
+            ]]]
+        }
+        _ = try await http.acceptLogin(testCookies)
+        let page = try await client.followedPeople(mid: 3, page: 1)
+        XCTAssertEqual(page.items.map(\.id), [8, 9])
+        XCTAssertEqual(page.items[1].user.name, "UP主 9")
+        XCTAssertFalse(page.hasMore)
+        XCTAssertThrowsError(try FollowedPerson.map(["mid": 10, "uname": "", "attribute": 0]))
+    }
+    @MainActor private func waitForPeopleSearch(_ search: FollowedPeopleSearch) async throws {
+        let deadline = Date().addingTimeInterval(5)
+        while search.busy && Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(search.busy, "Search refresh did not finish")
+    }
+    @MainActor func testFollowedPeopleSearchIncludesLaterPagesAndCompletesSubstringNames() async throws {
+        let search = FollowedPeopleSearch()
+        search.account(3)
+        var pages: [Int] = []
+        search.enter { page in
+            pages.append(page)
+            let names = page == 1 ? [(8, "影视飓风"), (9, "超Carry的柴西")] : [(10, "小鹿Lawrence"), (8, "影视飓风")]
+            return Page(items: try names.map { try FollowedPerson.map(["mid": $0.0, "uname": $0.1, "attribute": 2]) }, hasMore: page == 1)
+        }
+        try await waitForPeopleSearch(search)
+        XCTAssertEqual(pages, [1, 2])
+        for query in ["飓", "yingshi", "ju feng", "YSJF", "yǐng shì"] { XCTAssertEqual(search.matches(query).map(\.id), [8], query) }
+        for query in [" law ", "xiaolu", "XLL"] { XCTAssertEqual(search.matches(query).map(\.id), [10], query) }
+        for query in ["ＣＡＲＲＹ", "chaocarry", "ccdcx"] { XCTAssertEqual(search.matches(query).map(\.id), [9], query) }
+        XCTAssertTrue(search.matches("不存在").isEmpty)
+        XCTAssertTrue(search.matches("  ").isEmpty)
+        XCTAssertEqual(search.items?.count, 3)
+        XCTAssertTrue(search.hasSnapshot)
+        XCTAssertEqual(pages, [1, 2], "Typing must not perform new network reads")
+        search.account(4)
+        XCTAssertNil(search.items)
+        XCTAssertTrue(search.matches("law").isEmpty)
+        search.enter { _ in Page(items: [], hasMore: false) }
+        try await waitForPeopleSearch(search)
+        XCTAssertTrue(search.items?.isEmpty == true)
+    }
+    @MainActor func testFollowedPeopleSearchNeverTreatsPartialFailureAsNoMatches() async throws {
+        let search = FollowedPeopleSearch()
+        search.account(3)
+        search.enter { page in
+            if page == 2 { throw BiliFailure(code: "-352", message: "读取失败") }
+            return Page(items: [try FollowedPerson.map(["mid": 8, "uname": "影视飓风", "attribute": 2])], hasMore: true)
+        }
+        try await waitForPeopleSearch(search)
+        XCTAssertEqual(search.items?.count, 1, "First sync can display the pages already received")
+        XCTAssertFalse(search.hasSnapshot, "Partial results must never be marked as a complete snapshot")
+        XCTAssertNotNil(search.error)
+        search.enter { _ in Page(items: [], hasMore: false) }
+        try await waitForPeopleSearch(search)
+        XCTAssertNil(search.error)
+        XCTAssertTrue(search.items?.isEmpty == true)
+        XCTAssertTrue(search.hasSnapshot)
+    }
+    @MainActor func testFollowedPeopleCacheReopensOfflineAndRetainsSnapshotOnRefreshFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = SymmetricKey(size: .bits256)
+        let first = FollowedPeopleSearch(cache: FollowedPeopleCache(directory: directory, key: key))
+        first.account(3)
+        first.enter { _ in Page(items: [try FollowedPerson.map(["mid": 8, "uname": "影视飓风", "attribute": 2])], hasMore: false) }
+        try await waitForPeopleSearch(first)
+        let file = directory.appendingPathComponent("FollowedPeople/3.sealed")
+        let bytes = try Data(contentsOf: file)
+        XCTAssertNil(bytes.range(of: Data("影视飓风".utf8)), "The roster must not be plaintext on disk")
+        let reopened = FollowedPeopleSearch(cache: FollowedPeopleCache(directory: directory, key: key))
+        reopened.account(3)
+        reopened.enter { _ in throw URLError(.notConnectedToInternet) }
+        try await waitForPeopleSearch(reopened)
+        XCTAssertTrue(reopened.hasSnapshot)
+        XCTAssertEqual(reopened.matches("ysjf").map(\.id), [8])
+        XCTAssertNotNil(reopened.error)
+        reopened.enter { _ in throw BiliFailure(code: "-352", message: "刷新失败") }
+        XCTAssertEqual(reopened.matches("yingshi").map(\.id), [8], "Background refresh cannot hide old cards")
+        try await waitForPeopleSearch(reopened)
+        XCTAssertEqual(reopened.items?.count, 1)
+        reopened.account(4)
+        reopened.enter { _ in Page(items: [], hasMore: false) }
+        try await waitForPeopleSearch(reopened)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path), "Changing account must erase the old snapshot")
+        XCTAssertTrue(reopened.items?.isEmpty == true)
+        let nextFile = directory.appendingPathComponent("FollowedPeople/4.sealed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: nextFile.path))
+        reopened.account(nil)
+        let deadline = Date().addingTimeInterval(2)
+        while FileManager.default.fileExists(atPath: nextFile.path) && Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: nextFile.path), "Logout must erase the snapshot")
+    }
+    @MainActor func testFollowedPeopleStartupWithoutAnAccountErasesThePreviousSnapshot() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let key = SymmetricKey(size: .bits256)
+        let previous = FollowedPeopleSearch(cache: FollowedPeopleCache(directory: directory, key: key))
+        previous.account(3)
+        previous.enter { _ in Page(items: [try FollowedPerson.map(["mid": 8, "uname": "女流", "attribute": 2])], hasMore: false) }
+        try await waitForPeopleSearch(previous)
+        XCTAssertEqual(previous.matches("nvliu").map(\.id), [8])
+        let file = directory.appendingPathComponent("FollowedPeople/3.sealed")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: file.path))
+        let loggedOut = FollowedPeopleSearch(cache: FollowedPeopleCache(directory: directory, key: key))
+        loggedOut.account(nil)
+        let deadline = Date().addingTimeInterval(2)
+        while FileManager.default.fileExists(atPath: file.path) && Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: file.path))
+        XCTAssertNil(loggedOut.items)
+    }
+    @MainActor func testFollowedPeopleOldResponseCannotWriteIntoTheNewAccount() async throws {
+        let search = FollowedPeopleSearch()
+        var pending: CheckedContinuation<Page<FollowedPerson>, Never>?
+        search.account(3)
+        search.enter { _ in await withCheckedContinuation { pending = $0 } }
+        while pending == nil { try await Task.sleep(for: .milliseconds(5)) }
+        search.account(4)
+        search.enter { _ in Page(items: [], hasMore: false) }
+        try await waitForPeopleSearch(search)
+        pending?.resume(returning: Page(items: [try FollowedPerson.map(["mid": 8, "uname": "旧账号关注", "attribute": 2])], hasMore: false))
+        try await Task.sleep(for: .milliseconds(30))
+        XCTAssertTrue(search.items?.isEmpty == true)
+        XCTAssertNil(search.error)
+    }
+    @MainActor func testFollowedPeopleUnfollowDuringRefreshCannotBeRestoredByTheOldRead() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = FollowedPeopleCache(directory: directory, key: SymmetricKey(size: .bits256))
+        let search = FollowedPeopleSearch(cache: cache)
+        let person = try FollowedPerson.map(["mid": 8, "uname": "影视飓风", "attribute": 2])
+        search.account(3)
+        search.enter { _ in Page(items: [person], hasMore: false) }
+        try await waitForPeopleSearch(search)
+        var pending: CheckedContinuation<Page<FollowedPerson>, Never>?
+        search.enter { _ in await withCheckedContinuation { pending = $0 } }
+        while pending == nil { try await Task.sleep(for: .milliseconds(5)) }
+        search.remove(8)
+        pending?.resume(returning: Page(items: [person], hasMore: false))
+        try await waitForPeopleSearch(search)
+        XCTAssertTrue(search.items?.isEmpty == true)
+        let reopened = FollowedPeopleSearch(cache: cache)
+        reopened.account(3)
+        reopened.enter { _ in throw URLError(.notConnectedToInternet) }
+        try await waitForPeopleSearch(reopened)
+        XCTAssertTrue(reopened.hasSnapshot)
+        XCTAssertTrue(reopened.items?.isEmpty == true)
     }
     func testAccountNullListsAreEmptyOnlyWithAnExplicitZeroCount() async throws {
         var total = 0

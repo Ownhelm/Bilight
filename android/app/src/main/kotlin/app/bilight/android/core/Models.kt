@@ -17,7 +17,7 @@ fun bvidFrom(value: String): String? = Regex("(?<![0-9A-Za-z])BV[0-9A-Za-z]{10}(
 fun secureUrl(raw: String): String? {
     val value = if (raw.startsWith("//")) "https:$raw" else raw
     val url = value.toHttpUrlOrNull() ?: return null
-    val allowed = listOf("hdslb.com", "bilivideo.com", "bilivideo.cn", "bilibili.com", "b23.tv").any { url.host == it || url.host.endsWith(".$it") }
+    val allowed = listOf("hdslb.com", "biliimg.com", "bilivideo.com", "bilivideo.cn", "bilibili.com", "b23.tv").any { url.host == it || url.host.endsWith(".$it") }
     if (!allowed || url.username.isNotEmpty() || url.password.isNotEmpty() || url.port !in listOf(80, 443)) return null
     return url.newBuilder().scheme("https").port(443).build().toString()
 }

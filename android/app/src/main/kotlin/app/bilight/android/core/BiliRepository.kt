@@ -238,7 +238,12 @@ class BiliRepository(val http: BiliHttp) {
     suspend fun people(page: Int, frequent: Boolean): Page<User> {
         val uid = account(); val data = http.request("/x/relation/followings",mapOf("vmid" to "$uid","pn" to "$page","ps" to "20","order_type" to if (frequent) "attention" else ""))
         if (!data.has("total") || data.optJSONArray("list") == null && data.optInt("total") > 0) invalid()
-        return Page(data.rows("list").map { if (!Relation.parse(it).following) invalid(); User.parse(it) },page*20 < data.optInt("total"))
+        return Page(data.rows("list").map {
+            if (!Relation.parse(it).following) invalid()
+            val user=User.parse(it)
+            if (user.mid<=0) invalid()
+            if (user.name.isBlank()) user.copy(name="UP主 ${user.mid}") else user
+        },page*20 < data.optInt("total"))
     }
     private fun folder(r: JSONObject, allowIncomplete: Boolean = false): Folder {
         val incomplete=r.optLong("id") <= 0 || r.opt("title") !is String || r.opt("media_count") !is Number

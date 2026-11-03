@@ -39,12 +39,46 @@ final class DemoProtocol: URLProtocol {
         do {
             guard request.httpMethod == "GET", let url = request.url,
                 let file = Bundle.main.url(forResource: "fixtures", withExtension: "json"),
-                let fixtures = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? JSON,
-                var data = fixtures[url.path] as? JSON
+                let fixtures = try JSONSerialization.jsonObject(with: Data(contentsOf: file)) as? JSON
+            else { throw BiliFailure(code: "DEMO_ONLY", message: "此操作未纳入离线演示。") }
+            let browseRegression = ProcessInfo.processInfo.arguments.contains("--browse-return-regression")
+            let favoritePaths = ["/x/v3/fav/folder/created/list", "/x/v3/fav/folder/collected/list", "/x/v3/fav/resource/list"]
+            guard var data = fixtures[url.path] as? JSON ?? (browseRegression && favoritePaths.contains(url.path) ? [:] : nil)
             else { throw BiliFailure(code: "DEMO_ONLY", message: "此操作未纳入离线演示。") }
             let query = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
             let preview = obj(fixtures["_preview"])
             func parameter(_ name: String) -> String { query.first { $0.name == name }?.value ?? "" }
+            // A separate, explicit test flag supplies long lists without changing publication previews.
+            if browseRegression,
+                (["/x/web-interface/wbi/search/type", "/x/space/wbi/arc/search"] + favoritePaths).contains(url.path)
+            {
+                let page = max(1, Int(parameter(url.path.hasSuffix("/search/type") ? "page" : "pn")) ?? 1)
+                let template = list(obj(fixtures["/x/web-interface/wbi/search/type"])["result"]).first!
+                let values: [JSON] = (1...30).map { index in
+                    var value = template
+                    value["bvid"] = String(format: "BV%010d", (page - 1) * 30 + index)
+                    value["title"] = "浏览回归 \(page)-\(index)"
+                    value["pic"] = ""; value["cover"] = ""
+                    return value
+                }
+                let folder: JSON = ["id": 9, "mid": 7, "title": "浏览回归收藏夹", "media_count": 40, "type": 11]
+                data = url.path.hasSuffix("/search/type")
+                    ? ["result": values, "numPages": 2, "numResults": 60]
+                    : ["list": ["vlist": values], "page": ["count": 60]]
+                if favoritePaths.contains(url.path) {
+                    if url.path.hasSuffix("/resource/list") {
+                        let medias = values.prefix(20).enumerated().map { index, value -> JSON in
+                            var item = value; item["id"] = (page - 1) * 20 + index + 1; item["type"] = 2
+                            return item
+                        }
+                        data = ["info": folder, "medias": medias, "has_more": page < 2]
+                    } else { data = ["count": 1, "list": [folder], "has_more": false] }
+                }
+                let body = try JSONSerialization.data(withJSONObject: ["code": 0, "data": data])
+                client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: body); client?.urlProtocolDidFinishLoading(self)
+                return
+            }
             if ["/x/web-interface/view", "/x/web-interface/wbi/view"].contains(url.path) {
                 guard let video = obj(preview["videos"])[parameter("bvid")] as? JSON else { throw BiliFailure.invalid }
                 data = video

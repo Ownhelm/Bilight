@@ -9,6 +9,8 @@ struct FavoriteFoldersView: View {
     @State private var busy = true
     @State private var error: String?
     @State private var showCreate = false
+    @State private var loadedRequest: String?
+    private var requestID: String { "\(tab)-\(page)-\(refresh)" }
     var body: some View {
         VStack(spacing: 0) {
             ContentTabs(titles: ["我创建的", "我收藏的"], selection: $tab).padding(.horizontal, 18)
@@ -74,7 +76,7 @@ struct FavoriteFoldersView: View {
                         PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                     }
                 }.padding(.horizontal, 18)
-            }
+            }.id(requestID)
         }.navigationTitle("我的收藏").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -99,7 +101,9 @@ struct FavoriteFoldersView: View {
                     app.navigate(.favoriteFolder(folder))
                 }.environmentObject(app)
             }
-            .task(id: "\(tab)-\(page)-\(refresh)") {
+            .task(id: requestID) {
+                guard loadedRequest != requestID else { return }
+                let identity = requestID
                 guard let mid = app.user?.mid else {
                     busy = false
                     return
@@ -111,6 +115,7 @@ struct FavoriteFoldersView: View {
                     try Task.checkCancellation()
                     guard app.user?.mid == mid else { return }
                     result = value
+                    loadedRequest = identity
                 } catch is CancellationError { return } catch {
                     if Task.isCancelled { return }
                     self.error = error.localizedDescription
@@ -135,6 +140,8 @@ struct FavoriteContentsView: View {
     @State private var result: Page<FavoriteItem>?
     @State private var busy = true
     @State private var error: String?
+    @State private var loadedRequest: String?
+    private var requestID: String { "\(page)-\(order)-\(keyword)-\(refresh)" }
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
@@ -200,7 +207,7 @@ struct FavoriteContentsView: View {
                         PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                     }
                 }.padding(.horizontal, 18)
-            }.scrollDismissesKeyboard(.interactively)
+            }.scrollDismissesKeyboard(.interactively).id(requestID)
         }.navigationTitle(folder.title).navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -216,7 +223,9 @@ struct FavoriteContentsView: View {
                     }.accessibilityLabel("收藏夹排序")
                 }
             }.onChange(of: order) { _, _ in page = 1 }
-            .task(id: "\(page)-\(order)-\(keyword)-\(refresh)") {
+            .task(id: requestID) {
+                guard loadedRequest != requestID else { return }
+                let identity = requestID
                 guard let mid = app.user?.mid else {
                     busy = false
                     return
@@ -229,6 +238,7 @@ struct FavoriteContentsView: View {
                     try Task.checkCancellation()
                     guard app.user?.mid == mid else { return }
                     result = value
+                    loadedRequest = identity
                 } catch is CancellationError { return } catch {
                     if Task.isCancelled { return }
                     self.error = error.localizedDescription

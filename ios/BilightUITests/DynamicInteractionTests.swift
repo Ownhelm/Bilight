@@ -1,6 +1,107 @@
 import XCTest
 
 final class DynamicInteractionTests: XCTestCase {
+    func testConnectedPhoneFollowedPeopleLoadsWithoutIncompleteDataError() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["我的账号"].waitForExistence(timeout: 15)); app.buttons["我的账号"].tap()
+        let entry = app.buttons["我的关注的人"]
+        XCTAssertTrue(entry.waitForExistence(timeout: 10), "本人已登录账号是此只读烟测的前提")
+        entry.tap()
+        let field = app.textFields["people-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("a\n")
+        let error = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "返回的数据不完整")).firstMatch
+        let loaded = app.staticTexts["people-search-complete"]
+        let deadline = Date().addingTimeInterval(35)
+        while !error.exists && !loaded.exists && Date() < deadline { Thread.sleep(forTimeInterval: 0.3) }
+        XCTAssertFalse(error.exists, "真实关注名单不能因兼容性解析失败而不可用")
+        XCTAssertTrue(loaded.exists, "真实关注名单应完成本地索引建立")
+    }
+    func testConnectedPhoneFollowedPeopleRestoresLocalSearchWithoutWaitingForRefresh() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["我的账号"].waitForExistence(timeout: 15)); app.buttons["我的账号"].tap()
+        app.buttons["我的关注的人"].tap()
+        let field = app.textFields["people-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("a\n")
+        XCTAssertTrue(app.staticTexts["people-search-complete"].waitForExistence(timeout: 3), "重新打开应直接检索已缓存名单，不等待完整网络刷新")
+    }
+    func testFollowedPeopleSearchUsesOnlyAvatarAndNameResults() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"; app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["我的账号"].waitForExistence(timeout: 10)); app.buttons["我的账号"].tap()
+        app.buttons["我的关注的人"].tap()
+        let field = app.textFields["people-search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 5)); field.tap(); field.typeText("a")
+        XCTAssertTrue(app.staticTexts["找到 2 个用户关注用户"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.staticTexts["UP主名字补全"].exists)
+        XCTAssertFalse(app.buttons["people-completion-37029661"].exists)
+        let keyboard = XCTAttachment(screenshot: app.screenshot())
+        keyboard.name = "ios-search-keyboard"; keyboard.lifetime = .keepAlways; add(keyboard)
+        field.typeText("\n")
+        XCTAssertTrue(app.staticTexts["小鹿Lawrence"].exists)
+        XCTAssertTrue(app.staticTexts["超Carry的柴西"].exists)
+        let screenshot = XCTAttachment(screenshot: app.screenshot())
+        screenshot.name = "ios-search-results"; screenshot.lifetime = .keepAlways; add(screenshot)
+        app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "小鹿Lawrence")).firstMatch.tap()
+        XCTAssertTrue(app.navigationBars["UP 主主页"].waitForExistence(timeout: 5))
+        app.navigationBars.buttons.firstMatch.tap()
+        XCTAssertTrue(field.waitForExistence(timeout: 5))
+        XCTAssertEqual(field.value as? String, "a")
+        XCTAssertTrue(app.staticTexts["找到 2 个用户关注用户"].exists)
+        app.buttons["清空关注搜索"].tap()
+        XCTAssertTrue(app.staticTexts["影视飓风"].waitForExistence(timeout: 5))
+        field.tap(); field.typeText("NoSuchFollowedPerson")
+        XCTAssertTrue(app.staticTexts["没有匹配的关注用户"].waitForExistence(timeout: 5))
+    }
+    func testSearchReturnsToTheSamePageAndPositionAfterVideo() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo", "--browse-return-regression"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"; app.launch()
+        defer { app.terminate() }
+        let field = app.textFields["search-field"]
+        XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("浏览回归\n")
+        try checkBrowseReturn(app)
+    }
+    func testCreatorReturnsToTheSamePageAndPositionAfterVideo() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo", "--browse-return-regression"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"; app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["我的账号"].waitForExistence(timeout: 10)); app.buttons["我的账号"].tap()
+        let creator = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "影视飓风")).firstMatch
+        XCTAssertTrue(creator.waitForExistence(timeout: 10)); creator.tap()
+        try checkBrowseReturn(app)
+    }
+    func testFavoriteReturnsToTheSamePageAndPositionAfterVideo() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication(); app.launchArguments = ["--demo", "--browse-return-regression"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"; app.launch()
+        defer { app.terminate() }
+        XCTAssertTrue(app.buttons["我的账号"].waitForExistence(timeout: 10)); app.buttons["我的账号"].tap()
+        app.buttons["我的收藏"].tap(); app.buttons["我收藏的"].tap()
+        let folder = app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "浏览回归收藏夹")).firstMatch
+        XCTAssertTrue(folder.waitForExistence(timeout: 10)); folder.tap()
+        try checkBrowseReturn(app, targetTitle: "浏览回归 2-17")
+    }
+    private func checkBrowseReturn(_ app: XCUIApplication, targetTitle: String = "浏览回归 2-27") throws {
+        let next = app.buttons["下一页"]
+        for _ in 0..<10 { if next.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(next.isHittable); next.tap()
+        let target = app.buttons[targetTitle]
+        for _ in 0..<10 { if target.isHittable { break }; app.swipeUp() }
+        XCTAssertTrue(target.isHittable)
+        let before = target.frame
+        target.tap(); XCTAssertTrue(app.navigationBars["视频"].waitForExistence(timeout: 10))
+        app.navigationBars["视频"].buttons.firstMatch.tap()
+        XCTAssertTrue(target.waitForExistence(timeout: 5)); XCTAssertTrue(target.isHittable, "Returning from video lost the visible item")
+        XCTAssertEqual(target.frame.minY, before.minY, accuracy: 3, "Returning from video reset the scroll offset")
+        XCTAssertTrue(app.staticTexts["第 2 页"].exists)
+    }
     func testConnectedPhoneOpensVideoDynamicWithoutChangingLikes() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launch()

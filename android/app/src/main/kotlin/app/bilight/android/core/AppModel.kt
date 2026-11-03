@@ -23,7 +23,7 @@ sealed interface Route {
     data object Downloads: Route
 }
 /** Session-owned reads outlive composables, but never outlive the account that started them. */
-class AppModel @JvmOverloads constructor(application: Application, val http: BiliHttp = (application as app.bilight.android.BilightApplication).http, private val playbackFactory: ((AppModel,Route.Watch) -> PlaybackModel)? = null): AndroidViewModel(application) {
+class AppModel @JvmOverloads constructor(application: Application, val http: BiliHttp = (application as app.bilight.android.BilightApplication).http, private val peopleStoreFactory: (Long) -> SecureStore = { SessionVault(application,"people-$it") }, private val playbackFactory: ((AppModel,Route.Watch) -> PlaybackModel)? = null): AndroidViewModel(application) {
     private val services = application as app.bilight.android.BilightApplication
     val repository = if (http===services.http) services.repository else BiliRepository(http)
     val downloads = if (http===services.http) services.downloads else app.bilight.android.downloads.DownloadStore(application,repository)
@@ -45,6 +45,10 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     private var accountVersion = -1L
     var tab by mutableIntStateOf(0)
     val routes = mutableStateListOf<Route>()
+    private val browseStates = mutableMapOf<Triple<Int,Route?,Any>,Any>()
+    @Suppress("UNCHECKED_CAST")
+    internal fun <T: Any> browseState(identity: Any, create: () -> T): T =
+        browseStates.getOrPut(Triple(routes.lastIndex,routes.lastOrNull(),identity),create) as T
     val following = mutableStateListOf<Post>()
     val expandedPosts = mutableStateMapOf<String,Boolean>()
     val dynamicPosts = mutableStateMapOf<String,Post>()
@@ -69,6 +73,65 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     val relations = mutableStateMapOf<Long,Relation>()
     val followBusy = mutableStateMapOf<Long,Boolean>()
     private val accountJobs = mutableListOf<Job>()
+    internal val peopleSearch = PeopleSearch()
+    private var peopleUid: Long? = null
+    private var peopleStore: SecureStore? = null
+    private var peopleJob: Job? = null
+    private var peopleCleanup: Job? = null
+    private fun peopleAccount(mid: Long?) {
+        if (peopleUid==mid && accountVersion==http.generation) return
+        val old=peopleStore; val reading=peopleJob; val cleanup=peopleCleanup
+        reading?.cancel(); peopleSearch.reset(); peopleJob=null
+        peopleCleanup=viewModelScope.launch {
+            cleanup?.join(); reading?.join()
+            try { kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                old?.clear()
+                SessionVault.clearOtherPeople(getApplication(),mid)
+            } }
+            catch (e: CancellationException) { throw e }
+            catch (_: Exception) { error="旧账号的本地关注名单未能清理，请重试退出登录。" }
+        }
+        peopleUid=mid; peopleStore=mid?.let(peopleStoreFactory)
+    }
+    fun enterPeople() {
+        val uid=user?.mid ?: return
+        val store=peopleStore ?: return
+        if (peopleJob?.isActive==true) return
+        val version=http.generation; val cleanup=peopleCleanup
+        peopleJob=viewModelScope.launch {
+            try {
+                cleanup?.join(); http.check(version)
+                peopleSearch.restore(uid,store); http.check(version)
+                peopleSearch.refresh(uid,store) { page -> repository.people(page,false).also { http.check(version) } }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { if (version==http.generation) error=e.message }
+        }
+    }
+    private fun removePerson(mid: Long) {
+        peopleSearch.remove(mid)
+        val previous=peopleJob; previous?.cancel()
+        val uid=peopleUid ?: return; val store=peopleStore ?: return
+        val values=peopleSearch.items ?: return
+        val version=http.generation
+        if (!peopleSearch.complete) {
+            peopleJob=viewModelScope.launch {
+                try {
+                    previous?.join(); http.check(version)
+                    peopleSearch.refresh(uid,store) { page -> repository.people(page,false).also { http.check(version) } }
+                } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { if (version==http.generation) error=e.message }
+            }
+            return
+        }
+        peopleJob=viewModelScope.launch {
+            try {
+                previous?.join(); http.check(version)
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { store.save(PeopleSearch.encode(uid,values)) }
+                http.check(version)
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { if (version==http.generation) error="本地关注名单未能更新，下次进入时会重新读取。" }
+        }
+    }
     var historyError by mutableStateOf<String?>(null); private set
     private val reporter = HistoryReporter(viewModelScope, { report -> http.check(report.version); repository.reportHistory(report.detail,report.part,report.progress); http.check(report.version) }, { historyError=it })
     fun retryHistory() { if (user != null) reporter.retry() }
@@ -111,6 +174,7 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     fun update(value: User?, initialRestore: Boolean = false) {
         // Loading the existing session must not close a public page already opened during startup.
         val keepNavigation=initialRestore && accountVersion == -1L && user==null
+        peopleAccount(value?.mid)
         if (!keepNavigation && (value?.mid != user?.mid || accountVersion!=http.generation)) {
             sessionRevision++; searchRevision++
             currentPlayback?.close(); currentPlayback=null
@@ -118,6 +182,7 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
             feedRequest++; feedJob?.cancel(); accountJobs.forEach(Job::cancel); accountJobs.clear()
             dynamicLikeJobs.values.forEach(Job::cancel); dynamicLikeJobs.clear()
             dynamicPosts.clear(); dynamicLikeStates.clear(); dynamicLikePending.clear(); dynamicLikeVersions.clear(); dynamicLikeRevision=0
+            browseStates.clear()
             following.clear(); expandedPosts.clear(); feedLoaded = false; feedMore = false; feedBusy = false; feedRefreshing=false; feedError = null
             feedCursor = null; feedIndex = 0; feedOffset = 0; feedAnchor=null; relations.clear(); followBusy.clear(); routes.clear()
             repository.invalidateFollowing()
@@ -129,7 +194,7 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
         downloads.account(value?.mid)
     }
     fun open(route: Route) { showAccount = false; if (route is Route.Dynamic) dynamicPosts.putIfAbsent(route.post.id,route.post); routes.add(route) }
-    fun back() { if (routes.isNotEmpty()) routes.removeAt(routes.lastIndex) }
+    fun back() { if (routes.isNotEmpty()) { val index=routes.lastIndex; browseStates.keys.removeAll { it.first>=index }; routes.removeAt(index) } }
     fun requireLogin(): Boolean { if (user != null) return true; showLogin = true; return false }
     fun login(header: String, complete: (Boolean,String?) -> Unit): Job =
         viewModelScope.launch { try { update(http.acceptLogin(header)); error = null; showLogin = false; complete(true,null) } catch (e: CancellationException) { throw e } catch (e: Exception) { complete(false,e.message) } finally { if (accountVersion!=http.generation) update(http.user) } }
@@ -203,6 +268,7 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
             try {
                 val after = repository.follow(mid,desired); http.check(version); relations[mid] = after
                 if (!after.following) {
+                    removePerson(mid)
                     following.removeAll { it.author.mid == mid }
                     val anchor=following.indexOfFirst { it.id==feedAnchor }
                     if (anchor>=0) feedIndex=anchor else { feedIndex=feedIndex.coerceAtMost((following.size-1).coerceAtLeast(0)); feedOffset=0; feedAnchor=following.getOrNull(feedIndex)?.id }

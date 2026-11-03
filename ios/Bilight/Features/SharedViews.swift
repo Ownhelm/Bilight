@@ -5,13 +5,19 @@ actor ImageRepository {
     static let shared = ImageRepository()
     private let cache = NSCache<NSURL, UIImage>()
     private let session: URLSession
-    init() {
+    static func allowed(_ url: URL) -> Bool {
+        guard url.scheme == "https", let host = url.host, url.port == nil || url.port == 443,
+            url.user == nil, url.password == nil
+        else { return false }
+        return MediaLoader.allowed(url) || BiliHTTP.trusted(url) || host == "biliimg.com" || host.hasSuffix(".biliimg.com")
+    }
+    init(session: URLSession? = nil) {
         let config = URLSessionConfiguration.ephemeral
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false
         config.httpMaximumConnectionsPerHost = 4
         config.urlCache = URLCache(memoryCapacity: 24 * 1024 * 1024, diskCapacity: 0)
-        session = URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config)
         cache.totalCostLimit = 48 * 1024 * 1024
     }
     func image(_ url: URL) async throws -> UIImage {
@@ -26,7 +32,7 @@ actor ImageRepository {
             }
         #endif
         if let image = cache.object(forKey: url as NSURL) { return image }
-        guard MediaLoader.allowed(url) || BiliHTTP.trusted(url) else { throw BiliFailure.invalid }
+        guard Self.allowed(url) else { throw BiliFailure.invalid }
         var request = URLRequest(url: url)
         request.setValue("https://www.bilibili.com/", forHTTPHeaderField: "Referer")
         request.setValue(BiliHTTP.userAgent, forHTTPHeaderField: "User-Agent")

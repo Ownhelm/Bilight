@@ -4,6 +4,7 @@ import SwiftUI
     let client: BiliClient
     let downloads: DownloadStore
     let history: WatchHistory
+    let followedPeople: FollowedPeopleSearch
     let following = FollowingModel()
     @Published var user: User?
     @Published var restoring = true
@@ -35,6 +36,13 @@ import SwiftUI
         self.client = client
         history = WatchHistory(client: client)
         downloads = DownloadStore(client: client)
+        #if DEBUG
+            let localPeopleCache = suppliedClient == nil && !DemoFixtures.enabled && !InteractionRegression.enabled
+                && ProcessInfo.processInfo.environment["BILIGHT_ISOLATED_TESTS"] != "1"
+        #else
+            let localPeopleCache = suppliedClient == nil
+        #endif
+        followedPeople = FollowedPeopleSearch(cache: localPeopleCache ? FollowedPeopleCache() : nil)
         following.likeReadVersion = { [weak self] in self?.dynamicLikeRevision ?? 0 }
         following.didRead = { [weak self] posts, version in for post in posts { self?.recordDynamic(post, readVersion: version) } }
     }
@@ -52,6 +60,7 @@ import SwiftUI
     func update(_ value: User?) {
         let changed = user?.mid != value?.mid
         user = value
+        followedPeople.account(value?.mid)
         if changed {
             shareVideo = nil
             following.account(value?.mid)
@@ -148,10 +157,12 @@ import SwiftUI
         }
         guard !followBusy.contains(mid) else { return }
         followBusy.insert(mid)
-        defer { followBusy.remove(mid) }
+        let generation = accountGeneration
+        defer { if accountGeneration == generation { followBusy.remove(mid) } }
         let after = try await client.setFollowing(mid, following: following)
+        guard accountGeneration == generation else { throw CancellationError() }
         relations[mid] = after
-        if !after.following { self.following.removeAuthor(mid) }
+        if !after.following { self.following.removeAuthor(mid); followedPeople.remove(mid) }
     }
     func handle(_ error: Error) {
         if (error as? BiliFailure)?.code == "-101" {

@@ -8,6 +8,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CoreRegressionTest {
+    @Test fun biliimgImagesUseHttpsWithoutBecomingVideoSources() {
+        val cover="https://archive.biliimg.com/bfs/archive/cover.jpg"
+        assertEquals(cover,secureUrl(cover)); assertEquals(cover,secureUrl(cover.replace("https:","http:")))
+        assertEquals(cover,secureUrl(cover.removePrefix("https:")))
+        for (url in listOf("https://evilbiliimg.com/cover.jpg","https://archive.biliimg.com.evil.invalid/cover.jpg","https://user:secret@archive.biliimg.com/cover.jpg","https://archive.biliimg.com:8443/cover.jpg")) assertNull(secureUrl(url))
+        assertNull(mediaUrl(cover)); assertFalse(BiliHttp.trusted(okhttp3.HttpUrl.Builder().scheme("https").host("archive.biliimg.com").build()))
+    }
     @Test fun portraitDimensionsSurviveDetailAndDownloadMetadata() {
         val video=Video.parse(JSONObject("""{"bvid":"BV1NGZtBwELa","aid":42,"title":"竖屏测试","dimension":{"width":1080,"height":1920}}"""))!!
         assertEquals(1080,video.width); assertEquals(1920,video.height)

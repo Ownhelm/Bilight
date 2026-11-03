@@ -75,6 +75,17 @@ class UiAuditTest {
             }
             rule.waitUntil(5000) { !model.restoring }
             rule.setContent { CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density,scale)) { MainApp(model) } }
+            if (arguments.getString("peopleResultsOnly")=="true") {
+                open(Route.People(false)); rule.waitUntil(10000) { model.peopleSearch.complete }
+                val field=rule.onNodeWithTag("people-search-field")
+                field.performTextInput("a"); field.performImeAction()
+                rule.onNodeWithText("找到 2 个用户关注用户").assertIsDisplayed()
+                rule.onNodeWithText("UP主名字补全").assertDoesNotExist()
+                rule.onNodeWithText("小鹿Lawrence").assertIsDisplayed().assertHasClickAction()
+                rule.onNodeWithText("超Carry的柴西").assertIsDisplayed().assertHasClickAction()
+                capture("android-search")
+                return
+            }
             if (arguments.getString("favoriteOnly")=="true") {
                 val route=Route.Watch(fixtures.videos[0].bvid); open(route)
                 rule.waitUntil(10000) { model.playback(route).detail!=null && model.playback(route).playback!=null && !model.playback(route).preparing }

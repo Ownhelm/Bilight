@@ -13,6 +13,7 @@ import { HistoryMenu, HistoryPage } from './History';
 import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollections';
 import { completeFollowingRows, FollowingFeed, useFollowingColumns, useFollowingFeed } from './following';
 import playbackMark from '../branding/playback-mark.svg?no-inline';
+import { BrowsingContext, BrowsingScroll, BrowsingSession, useBrowsingRefresh, useBrowsingResource } from './browsing';
 
 export function App() {
   const location = useLocation();
@@ -23,6 +24,8 @@ export function App() {
   const [loggingOut, setLoggingOut] = useState(false);
   const dynamicLikes = useMemo(() => new DynamicLikes(), [auth?.user?.mid, authGeneration]);
   const followingCache = useMemo(() => new FollowingFeed(undefined, { version: dynamicLikes.readVersion, accept: dynamicLikes.ingestVideos }), [dynamicLikes]);
+  const browsing = useMemo(() => new BrowsingSession(), [auth?.user?.mid, authGeneration]);
+  useEffect(() => browsing.attach(), [browsing]);
   useEffect(() => () => { followingCache.clear(); dynamicLikes.clear(); }, [followingCache, dynamicLikes]);
   const refreshAuth = useCallback(async () => {
     const state = await api<AuthState>('/api/auth/state'); setAuth(state); setAuthError('');
@@ -35,7 +38,6 @@ export function App() {
     window.addEventListener('bilight:session-expired', expired);
     return () => { controller.abort(); window.removeEventListener('bilight:session-expired', expired); };
   }, []);
-  useEffect(() => { if (location.pathname !== '/following') window.scrollTo({ top: 0 }); }, [location.pathname, location.search]);
   useEffect(() => {
     const previous = history.scrollRestoration; history.scrollRestoration = 'manual';
     return () => { history.scrollRestoration = previous; };
@@ -47,7 +49,7 @@ export function App() {
     finally { setLoggingOut(false); }
   }
   const isHome = location.pathname === '/';
-  return <><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
+  return <BrowsingContext.Provider value={browsing}><BrowsingScroll /><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
     <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
     <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
@@ -68,7 +70,7 @@ export function App() {
       <Route path="*" element={<div className="page-container"><Empty title="这个页面还不存在" action={<Link className="button button-primary" to="/">返回首页</Link>}>从搜索开始，找到想看的内容。</Empty></div>} />
     </Routes></main>
     {loginOpen && <Login onClose={() => setLoginOpen(false)} onSuccess={refreshAuth} />}
-  </>;
+  </BrowsingContext.Provider>;
 }
 
 function Home() {
@@ -81,8 +83,8 @@ function Search() {
   const keyword = params.get('keyword') ?? params.get('q') ?? '';
   const type = params.get('type') === 'user' ? 'user' : 'video';
   const page = positivePage(params.get('page'));
-  const [refresh, setRefresh] = useState(0);
-  const { data, error, loading } = useResource<SearchPage>(keyword ? `/api/search?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}` : null, refresh);
+  const [refresh, setRefresh] = useBrowsingRefresh();
+  const { data, error, loading } = useBrowsingResource<SearchPage>(keyword ? `/api/search?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}` : null, refresh);
   useEffect(() => { document.title = keyword ? `${keyword} · 搜索 · Bilight` : '搜索 · Bilight'; }, [keyword]);
   function change(nextType: string, nextPage = 1) { setParams({ keyword, type: nextType, page: String(nextPage) }); }
   return <div className="page-container search-page"><div className="page-heading"><div><p className="section-eyebrow">搜索结果</p><h1>{keyword || '你想看什么？'}</h1></div></div>
@@ -161,10 +163,10 @@ function CreatorRow({ creator }: { creator: CreatorSummary }) {
 
 function Creator() {
   const { mid, kind, collectionId } = useParams(); const [params, setParams] = useSearchParams(); const page = positivePage(params.get('page'));
-  const [refresh, setRefresh] = useState(0);
+  const [refresh, setRefresh] = useBrowsingRefresh();
   const collections = Boolean(collectionId) || params.get('tab') === 'collections';
-  const profile = useResource<CreatorSummary>(`/api/creators/${encodeURIComponent(mid ?? '')}`, refresh);
-  const videos = useResource<Page<VideoSummary>>(!collections ? `/api/creators/${encodeURIComponent(mid ?? '')}/videos?page=${page}` : null, refresh);
+  const profile = useBrowsingResource<CreatorSummary>(`/api/creators/${encodeURIComponent(mid ?? '')}`, refresh);
+  const videos = useBrowsingResource<Page<VideoSummary>>(!collections ? `/api/creators/${encodeURIComponent(mid ?? '')}/videos?page=${page}` : null, refresh);
   useEffect(() => { document.title = `${profile.data?.name ?? 'UP 主'} · Bilight`; }, [profile.data]);
   return <div className="page-container creator-page"><Link className="back-link" to="/following"><ArrowLeft size={16} />返回关注</Link>
     {profile.loading ? <Loading text="正在加载 UP 主信息" /> : profile.error ? <Failure error={profile.error} retry={() => setRefresh(value => value + 1)} /> : profile.data && <section className="creator-profile"><img className="creator-avatar" src={profile.data.avatar} alt="" referrerPolicy="no-referrer" /><div><span className="section-eyebrow">UP 主</span><h1>{profile.data.name}</h1><p>{profile.data.description || '这位 UP 主还没有填写简介。'}</p>{profile.data.fans !== undefined && <span className="creator-fans"><Users size={15} />{countLabel(profile.data.fans)} 粉丝</span>}</div></section>}
