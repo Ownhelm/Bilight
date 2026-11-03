@@ -240,18 +240,26 @@ class BiliRepository(val http: BiliHttp) {
         if (!data.has("total") || data.optJSONArray("list") == null && data.optInt("total") > 0) invalid()
         return Page(data.rows("list").map { if (!Relation.parse(it).following) invalid(); User.parse(it) },page*20 < data.optInt("total"))
     }
-    private fun folder(r: JSONObject): Folder {
-        if (r.optLong("id") <= 0 || !r.has("title") || !r.has("media_count")) invalid()
-        return Folder(r.optLong("id"),r.optLong("mid").takeIf { it>0 } ?: r.obj("upper").optLong("mid"),r.text("title"),r.optInt("media_count"),r.optInt("attr") and 1 == 1,r.optInt("fav_state") == 1,r.optInt("max_count",if (r.optInt("attr") and 2 == 0) 50000 else 1000),secureUrl(r.text("cover")))
+    private fun folder(r: JSONObject, allowIncomplete: Boolean = false): Folder {
+        val incomplete=r.optLong("id") <= 0 || r.opt("title") !is String || r.opt("media_count") !is Number
+        if (incomplete && !allowIncomplete) invalid()
+        return Folder(r.optLong("id"),r.optLong("mid").takeIf { it>0 } ?: r.obj("upper").optLong("mid"),r.text("title"),r.optInt("media_count"),r.optInt("attr") and 1 == 1,r.optInt("fav_state") == 1,r.optInt("max_count",if (r.optInt("attr") and 2 == 0) 50000 else 1000),secureUrl(r.text("cover")),r.optInt("type").takeIf { it!=0 } ?: 11,r.optInt("state"),r.obj("upper").text("name"),if (incomplete) "B站返回的收藏条目信息不完整，请重试。" else null)
     }
     suspend fun folders(collected: Boolean, page: Int = 1): Page<Folder> {
         val uid = account(); val data = http.request("/x/v3/fav/folder/${if (collected) "collected" else "created"}/list",mapOf("up_mid" to "$uid","pn" to "$page","ps" to "20","platform" to "web"))
         if (!data.has("count") || data.optJSONArray("list") == null && data.optInt("count") > 0) invalid()
-        val items = data.rows("list").map(::folder); if (!collected && items.any { it.mid != uid }) invalid()
+        val rows=data.optJSONArray("list")
+        // A damaged collected entry remains visible as an error, without hiding its valid neighbours.
+        val items = (0 until (rows?.length() ?: 0)).map { folder(rows!!.optJSONObject(it) ?: JSONObject(),allowIncomplete=collected) }
+        if (!collected && items.any { it.mid != uid }) invalid()
         return Page(items,data.optBoolean("has_more",page*20 < data.optInt("count")))
     }
     suspend fun folderVideos(folder: Folder, page: Int): Page<Video> {
-        account(); val data = http.request("/x/v3/fav/resource/list",mapOf("media_id" to "${folder.id}","pn" to "$page","ps" to "20","order" to "mtime","type" to "0","platform" to "web"))
+        account()
+        if (folder.unavailable) throw BiliFailure("FOLDER_UNAVAILABLE",folder.readError ?: if (folder.mid<=0) "创建者信息不可用。" else "收藏夹已失效。")
+        if (folder.type==21) return collection(User(folder.mid,folder.creatorName,null),Collection(folder.id,folder.mid,false,folder.title,folder.cover,folder.count),page)
+        if (folder.type!=11) throw BiliFailure("FOLDER_TYPE","此类收藏暂不支持打开。")
+        val data = http.request("/x/v3/fav/resource/list",mapOf("media_id" to "${folder.id}","pn" to "$page","ps" to "20","order" to "mtime","type" to "0","platform" to "web"))
         val info = this.folder(data.obj("info")); if (info.id != folder.id || info.mid != folder.mid || !data.has("has_more")) invalid()
         return Page(data.rows("medias").filter { it.optInt("type") == 2 && it.optInt("attr") == 0 }.mapNotNull { r -> r.put("bvid",r.text("bvid",r.text("bv_id"))); Video.parse(r,User.parse(r.obj("upper"))) },data.optBoolean("has_more"))
     }
@@ -263,7 +271,7 @@ class BiliRepository(val http: BiliHttp) {
     suspend fun videoFolders(detail: Detail): List<Folder> {
         val uid = account(); val data = http.request("/x/v3/fav/folder/created/list-all",mapOf("up_mid" to "$uid","rid" to "${detail.video.aid}","type" to "2"))
         if (!data.has("count") || data.optInt("count") != data.rows("list").size) invalid()
-        return data.rows("list").map(::folder).onEach { if (it.mid != uid) invalid() }.sortedByDescending { it.selected }
+        return data.rows("list").map { folder(it) }.onEach { if (it.mid != uid) invalid() }.sortedByDescending { it.selected }
     }
     suspend fun engagement(bvid: String, deliberateRefresh: Boolean = false): Engagement {
         account(); val data = http.request("/x/web-interface/archive/relation",mapOf("bvid" to bvid))

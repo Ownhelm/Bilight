@@ -277,7 +277,20 @@ internal class Paging<T> {
     var collected by rememberSaveable { mutableStateOf(false) }
     Column(Modifier.safeDrawingPadding()) { SectionTitle("我的收藏",app::back); TabRow(if (collected) 1 else 0) { listOf("我创建的","我收藏的").forEachIndexed { i,label -> Tab(selected=collected==(i==1),onClick={ collected=i==1 },text={ Text(label) }) } }; key(collected) {
         val paging=remember { Paging<Folder>() }; val scope=rememberCoroutineScope(); LaunchedEffect(Unit) { paging.load { p,_ -> app.repository.folders(collected,p) } }
-        LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) { items(paging.items) { folder -> Row(Modifier.fillMaxWidth().clickable { app.open(Route.Favorite(folder)) }) { RemoteImage(folder.cover,folder.title,Modifier.size(96.dp,64.dp).clip(RoundedCornerShape(8.dp))); Column(Modifier.padding(start=12.dp)) { Text(folder.title); Text("${folder.count}个内容${if (folder.private) " · 私密" else ""}",fontSize=12.sp,color=Muted) } } }; if (paging.page>0 && !paging.busy && paging.items.isEmpty() && paging.error==null) item { EmptyNotice("暂无收藏夹") }; item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.folders(collected,p) } } } } }
+        LazyColumn(contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
+            items(paging.items) { folder -> Row(Modifier.fillMaxWidth().clickable(enabled=!folder.unavailable && folder.type in listOf(11,21)) { app.open(Route.Favorite(folder)) }) {
+                RemoteImage(folder.cover,folder.title,Modifier.size(96.dp,64.dp).clip(RoundedCornerShape(8.dp)))
+                Column(Modifier.padding(start=12.dp)) {
+                    Text(if (folder.readError!=null && folder.title.isBlank()) "收藏条目读取失败" else folder.title)
+                    if (folder.readError==null) Text("${folder.count}个内容${if (folder.type==21) " · 合集" else if (folder.private) " · 私密" else ""}",fontSize=12.sp,color=Muted)
+                    val warning=when { folder.readError!=null -> folder.readError; folder.mid<=0 -> "创建者信息不可用"; folder.unavailable -> "收藏夹已失效"; folder.type !in listOf(11,21) -> "此类收藏暂不支持打开"; else -> null }
+                    warning?.let { Text(it,fontSize=12.sp,color=Muted) }
+                    if (folder.readError!=null) TextButton(enabled=!paging.busy,onClick={ scope.launch { paging.load(reset=true) { p,_ -> app.repository.folders(collected,p) } } }) { Text("重新读取收藏目录") }
+                }
+            } }
+            if (paging.page>0 && !paging.busy && paging.items.isEmpty() && paging.error==null) item { EmptyNotice("暂无收藏夹") }
+            item { PageMore(paging.busy,paging.more,paging.error) { scope.launch { paging.load { p,_ -> app.repository.folders(collected,p) } } } }
+        }
     } }
 }
 @Composable private fun FolderScreen(app: AppModel,folder: Folder) { Paged(folder.title,app,folder.id,{ page,_ -> val result=app.repository.folderVideos(folder,page); Page(result.items.chunked(2),result.more) }) { VideoRow(app,it) } }
