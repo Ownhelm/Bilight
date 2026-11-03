@@ -1,6 +1,6 @@
 package app.bilight.android.core
 
-import android.icu.text.Transliterator
+import me.majiajie.tinypinyin.Pinyin
 import androidx.compose.runtime.*
 import kotlinx.coroutines.*
 import org.json.JSONArray
@@ -9,7 +9,7 @@ import java.text.Normalizer
 import java.util.Locale
 
 /** The snapshot is encrypted by its UID-specific SessionVault; incomplete refreshes never replace it. */
-internal class PeopleSearch(private val romanize: (String) -> String = { synchronized(pinyin) { pinyin.transliterate(it) } }) {
+internal class PeopleSearch(private val romanize: (String) -> String = ::pinyin) {
     var keyword by mutableStateOf("")
     var items by mutableStateOf<List<User>?>(null); private set
     var busy by mutableStateOf(false); private set
@@ -81,7 +81,10 @@ internal class PeopleSearch(private val romanize: (String) -> String = { synchro
         }==true }
     }
     companion object {
-        private val pinyin by lazy { Transliterator.getInstance("Han-Latin; Lower") }
+        // Keep Latin name segments together while separating Chinese syllables on Android 8 and later.
+        private fun pinyin(value: String)=buildString {
+            value.forEach { c -> if (Pinyin.isChinese(c)) { append(' '); append(Pinyin.toPinyin(c)); append(' ') } else append(c) }
+        }
         private fun normalize(value: String)=Normalizer.normalize(value.trim(),Normalizer.Form.NFKC).lowercase(Locale.ROOT)
         private fun phonetic(value: String)=Normalizer.normalize(normalize(value),Normalizer.Form.NFD).replace("u\u0308","v").replace(Regex("\\p{M}+"),"")
         private fun subsequence(query: String,value: String): Boolean { var at=0; for (c in value) if (at<query.length && c==query[at]) at++; return at==query.length }

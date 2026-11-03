@@ -10,8 +10,8 @@ android {
     applicationId = "app.bilight.android"
     minSdk = 26
     targetSdk = 36
-    versionCode = 13
-    versionName = "0.1.10"
+    versionCode = 14
+    versionName = "0.1.11"
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
@@ -86,6 +86,7 @@ dependencies {
 
   implementation("com.squareup.okhttp3:okhttp:4.12.0")
   implementation("com.google.zxing:core:3.5.3")
+  implementation("me.majiajie:tinypinyin:2.0.3")
   implementation("io.coil-kt.coil3:coil-compose:3.3.0")
   implementation("io.coil-kt.coil3:coil-network-okhttp:3.3.0")
   implementation("androidx.media3:media3-exoplayer:1.8.0")

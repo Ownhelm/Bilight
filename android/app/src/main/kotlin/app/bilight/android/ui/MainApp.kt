@@ -164,6 +164,10 @@ import androidx.compose.ui.platform.testTag
     val expanded=app.expandedPosts[post.id]==true
     val like=app.dynamicLikeState(post)
     val selected=app.dynamicLikePending[post.id] ?: like.liked
+    // Read snapshot state during composition; cached offscreen buttons can have detached semantics nodes.
+    val pending=app.dynamicLikePending.containsKey(post.id)
+    // Preview the pending delta without replacing the server-confirmed total.
+    val likes=(like.likes+when { selected==like.liked -> 0L; selected -> 1L; else -> -1L }).coerceAtLeast(0)
     var overflowing by remember(post.id) { mutableStateOf(false) }
     var gallery by remember { mutableStateOf<Int?>(null) }
     var menu by remember { mutableStateOf(false) }
@@ -213,9 +217,9 @@ import androidx.compose.ui.platform.testTag
             if (detail) Row(verticalAlignment=Alignment.CenterVertically) { Icon(Icons.Rounded.ChatBubbleOutline,"${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(count(post.comments),Modifier.padding(start=5.dp),color=Muted,fontSize=12.sp) }
             else TextButton(onClick={ app.open(Route.Dynamic(post)) },modifier=Modifier.testTag("dynamic-open-${post.id}")) { Icon(Icons.Rounded.ChatBubbleOutline,"查看动态详情，共${post.comments}条评论",Modifier.size(17.dp),tint=Muted); Text(count(post.comments),Modifier.padding(start=5.dp),color=Muted,fontSize=12.sp) }
             Spacer(Modifier.weight(1f))
-            TextButton(onClick={ app.toggleDynamicLike(post) },enabled=!app.dynamicLikePending.containsKey(post.id),modifier=Modifier.heightIn(min=44.dp).testTag("dynamic-like-${post.id}").semantics(mergeDescendants=true) { contentDescription=(if(selected) "取消动态点赞" else "点赞动态")+"，${like.likes}赞"+(if(app.dynamicLikePending.containsKey(post.id)) "，正在处理" else "") }) {
+            TextButton(onClick={ app.toggleDynamicLike(post) },enabled=!pending,modifier=Modifier.heightIn(min=44.dp).testTag("dynamic-like-${post.id}").semantics(mergeDescendants=true) { contentDescription=(if(selected) "取消动态点赞" else "点赞动态")+"，${likes}赞"+(if(pending) "，正在处理" else "") }) {
                 Icon(if(selected) Icons.Rounded.ThumbUp else Icons.Rounded.ThumbUpOffAlt,null,Modifier.size(17.dp),tint=if(selected) Pink else Muted)
-                Text(count(like.likes),Modifier.padding(start=5.dp),color=if(selected) Pink else Muted,fontSize=12.sp)
+                Text(count(likes),Modifier.padding(start=5.dp),color=if(selected) Pink else Muted,fontSize=12.sp)
             }
         }
     }

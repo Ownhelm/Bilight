@@ -15,6 +15,10 @@ https://github.com/coil-kt/coil
 ZXing: Apache-2.0 and included third-party notices (ZXing-LICENSE.txt)
 https://github.com/zxing/zxing
 
+TinyPinyin: Apache-2.0 (TinyPinyin-LICENSE.txt)
+https://github.com/tyzlmjj/TinyPinyin
+https://github.com/promeG/TinyPinyin
+
 Kotlin and kotlinx.coroutines: Apache-2.0
 https://github.com/JetBrains/kotlin
 https://github.com/Kotlin/kotlinx.coroutines

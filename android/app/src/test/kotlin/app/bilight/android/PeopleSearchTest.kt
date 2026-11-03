@@ -19,6 +19,13 @@ class PeopleSearchTest {
         "女流" -> "nǚ liú"
         else -> name
     }
+    @Test fun defaultRomanizerSupportsChineseMixedLatinAndUmlautWithoutNewAndroidApis() = runBlocking {
+        val search=PeopleSearch(); val store=MemoryStore()
+        search.refresh(42,store) { Page(listOf(User(8,"影视飓风",null),User(9,"超Carry的柴西",null),User(10,"小鹿Lawrence",null),User(11,"女流",null)),false) }
+        listOf("yingshijufeng" to 8L,"ysjf" to 8L,"carry" to 9L,"ccdcx" to 9L,"xll" to 10L,"nvliu" to 11L,"nuliu" to 11L).forEach { (query,id) ->
+            search.keyword=query; assertEquals("query=$query",listOf(id),search.matches().map { it.mid })
+        }
+    }
     @Test fun includesLaterPagesAndIndexesNamesPinyinAndInitials() = runBlocking {
         val search=PeopleSearch(::romanize); val pages=mutableListOf<Int>(); val store=MemoryStore()
         val first=User(8,"影视飓风",null)

@@ -18,6 +18,7 @@ Bilight 原创代码与自制演示素材采用 MIT 许可。依赖分别沿用�
 | [OkHttp / Okio](https://github.com/square/okhttp) | Android 网络与流式读取 | Apache-2.0 |
 | [Coil](https://github.com/coil-kt/coil) | Android 图片加载 | Apache-2.0 |
 | [ZXing](https://github.com/zxing/zxing) | Android 登录二维码 | Apache-2.0，保留其附带声明 |
+| [TinyPinyin](https://github.com/tyzlmjj/TinyPinyin) | Android 8 及以上的本地拼音搜索 | Apache-2.0 |
 | [Kotlin / kotlinx.coroutines](https://github.com/Kotlin/kotlinx.coroutines) | Android 运行时与协程 | Apache-2.0 |
 
 网页弹幕插件 5.3.0 的本地修订版、变更说明与 MIT 许可见 [`src/vendor/README.md`](src/vendor/README.md)。
