@@ -29,10 +29,6 @@ if (existsSync(promotion)) targets.push(
   ['project', '../Promotion/Bilibili/Shared/Assets/logo.svg'],
 );
 if (write) {
-  if (existsSync(promotion)) for (const name of readmeScreenshots) {
-    const target = resolve(root, 'docs/assets', name); mkdirSync(dirname(target), { recursive: true });
-    writeFileSync(target, readFileSync(resolve(promotion, 'Screenshots', name)));
-  }
   for (const [name, path] of targets) {
     const target = resolve(root, path); mkdirSync(dirname(target), { recursive: true }); writeFileSync(target, sources[name]);
   }
@@ -52,7 +48,6 @@ const readme = readFileSync(resolve(root, 'README.md'), 'utf8');
 for (const name of readmeScreenshots) {
   const path = `docs/assets/${name}`, file = resolve(root, path);
   if (!existsSync(file) || !readme.includes(path)) failures.push(`README 界面图缺失：${path}`);
-  else if (existsSync(promotion) && digest(readFileSync(file)) !== digest(readFileSync(resolve(promotion, 'Screenshots', name)))) failures.push(`README 界面图过期，请同步品牌资源：${path}`);
 }
 if (manifest.name !== 'Bilight') failures.push('品牌名称必须统一为 Bilight');
 for (const [path, required] of [

@@ -28,4 +28,4 @@ bash ios/scripts/preview.sh
 
 `scripts/demo-public-content.json` 记录公开资料及校验值，`scripts/demo-fixtures.mjs` 组合虚构账号，`node scripts/prepare-demo.mjs` 更新原生 JSON。素材合成脚本位于仓库外 `Promotion/Tools/readme-assets.py`，生成图片始终写入 Promotion。
 
-仅截取模拟器或演示网页，不能包含真实设备列表、桌面、通知和个人信息。代码 README 直接展示 `docs/assets/` 中的六张精选演示截图，不依赖仓库外路径或额外跳转；完整素材仍在 Promotion 中管理。执行 `npm run brand:sync` 同步精选图片，`npm run check:brand` 检查图片和引用是否齐全。
+仅截取模拟器或演示网页，不能包含真实设备列表、桌面、通知和个人信息。更新 README 时，将同一版本的六张精选演示截图直接保存到 `docs/assets/`，保留现有文件名和展示顺序。宣发素材在 Promotion 中单独管理。执行 `npm run check:brand` 检查图片和引用是否齐全。
