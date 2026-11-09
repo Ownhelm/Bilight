@@ -55,8 +55,8 @@ export function App() {
     <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
     <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" aria-label="关注" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink>
-      <ThemeToggle />
       <HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
+      <ThemeToggle />
       {auth?.authenticated && auth.user ? <AccountMenu key={auth.user.mid} user={auth.user} onLogout={() => void logout()} loggingOut={loggingOut} /> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}
     </nav>
   </header>
