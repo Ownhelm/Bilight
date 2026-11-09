@@ -699,7 +699,9 @@ final class PlayerChromeTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(250))
         XCTAssertTrue(model.isFullscreen)
         XCTAssertTrue(model.player.currentItem === currentItem)
-        let transport = try XCTUnwrap(descendants(container.controller.view).first { $0 is PlaybackControls } as? PlaybackControls)
+        let fullscreenView = try XCTUnwrap(container.controller.view.superview)
+        let transport = try XCTUnwrap(descendants(fullscreenView).first { $0 is PlaybackControls } as? PlaybackControls)
+        XCTAssertTrue(progress.isDescendant(of: transport), "Fullscreen must retain the same scrubber")
         progress.sendActions(for: .touchDown)
         progress.value = 5
         progress.sendActions(for: .valueChanged)
@@ -714,7 +716,7 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertEqual(model.player.timeControlStatus, .playing)
         let fullscreenSettings = settings.convert(settings.bounds, to: window)
         XCTAssertTrue(model.player.preventsDisplaySleepDuringVideoPlayback, "The same fullscreen player must retain video sleep prevention")
-        for control in descendants(container.controller.view).compactMap({ $0 as? UIControl }).filter(visible) where control !== settings {
+        for control in descendants(fullscreenView).compactMap({ $0 as? UIControl }).filter(visible) where control !== settings {
             XCTAssertFalse(control.convert(control.bounds, to: window).intersects(fullscreenSettings), "Fullscreen controls must not overlap settings")
         }
         if ProcessInfo.processInfo.environment["BILIGHT_CHROME_UI_SMOKE"] == "1" {
