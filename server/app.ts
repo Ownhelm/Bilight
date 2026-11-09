@@ -8,6 +8,7 @@ import { resolve } from 'node:path';
 import type { AuthService } from './auth.js';
 import type { BiliGateway } from './gateway.js';
 import { MediaRegistry } from './media.js';
+import { isVideoSearchOrder } from '../shared/types.js';
 import type { SmsSend, User, VideoSummary, Comment, EngagementAction, WatchProgress, VideoDynamic } from '../shared/types.js';
 
 export interface AppOptions { auth: AuthService; gateway: BiliGateway; key: Buffer; media?: MediaRegistry; staticDir?: string; allowedOrigins?: string[] }
@@ -90,11 +91,13 @@ export async function createApp(options: AppOptions) {
     if (!input) throw fail('EMPTY_SEARCH', '输入关键词、BV 号或视频链接。');
     return { path: await gateway.resolve(input) };
   });
-  app.get<{ Querystring: { keyword?: string; type?: string; page?: string } }>('/api/search', async request => {
+  app.get<{ Querystring: { keyword?: string; type?: string; page?: string; order?: string } }>('/api/search', async request => {
     const keyword = text(request.query.keyword, 200).trim();
     if (!keyword) throw fail('EMPTY_SEARCH', '请输入搜索关键词。');
     const type = request.query.type === 'user' ? 'user' : 'video';
-    const result = await gateway.search(keyword, type, Math.min(100, number(request.query.page)));
+    const { order } = request.query;
+    if (order !== undefined && !isVideoSearchOrder(order)) throw fail('INVALID_INPUT', '搜索排序无效。');
+    const result = await gateway.search(keyword, type, Math.min(100, number(request.query.page)), order);
     return { ...result, videos: result.videos.map(videoImages), users: result.users.map(userImage) };
   });
   app.get<{ Querystring: { cursor?: string } }>('/api/following', async request => {

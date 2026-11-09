@@ -8,6 +8,13 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class CoreRegressionTest {
+    @Test fun searchMatchesEveryTermInTheParsedTitleInUpstreamOrder() {
+        val videos = listOf("防抖 <em>Ａ７</em> 实测", "防抖教程", "a7 防抖对比").mapIndexed { i, title ->
+            Video.parse(JSONObject().put("bvid", "BV000000000$i").put("title", title).put("description", "A7 防抖"))!!
+        }
+        assertEquals(listOf(videos[0], videos[2]), videos.matchingSearchTitles("A7　防抖"))
+        assertTrue(videos.matchingSearchTitles("A7 稳定器").isEmpty())
+    }
     @Test fun biliimgImagesUseHttpsWithoutBecomingVideoSources() {
         val cover="https://archive.biliimg.com/bfs/archive/cover.jpg"
         assertEquals(cover,secureUrl(cover)); assertEquals(cover,secureUrl(cover.replace("https:","http:")))

@@ -1,0 +1,109 @@
+.theme-toggle { width: 44px; height: 44px; flex: none; }
+.header-search { min-width: 0; }
+:root:has(.art-fullscreen-web) { overflow: hidden; }
+
+@media (max-width: 400px) {
+  .header-nav { gap: 6px; }
+  .following-link, .history-menu > summary { min-width: 36px; justify-content: center; }
+  .following-link > span, .history-menu > summary > span { display: none; }
+  .site-header { gap: 8px; }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --text: #ececf2;
+  --page: #15161c;
+  --muted: #acadb9;
+  --border: #383a45;
+  --control-border: #737787;
+  --soft: #24262f;
+  --surface: #1e2028;
+  --pink: #f58bab;
+  --pink-soft: #3c2532;
+  --blue: #7cc6e5;
+  --danger: #ff9ba9;
+  --accent-fill: #ac285a;
+  color: var(--text);
+  background: var(--page);
+}
+
+:where([data-theme="dark"]) {
+  .skip-link, .site-header, .account-popover, .history-popover,
+  .login-dialog, .login-surface, .interaction-dialog, .share-video-dialog,
+  .share-sheet-cancel, .button-quiet, .playback-options select, .phone-field select,
+  .parts-panel, .search-box:focus-within, .coin-options > button { background: var(--surface); }
+
+  .search-box, .search-wrap-large .search-box, .video-cover, .empty-symbol, .cover-play,
+  .share-option-icon, .share-sheet-cancel:hover, .parts-list button:hover,
+  .video-placeholder > div, .video-placeholder > span { background: var(--soft); }
+
+  .home-header { background: var(--page); }
+  .session-notice, .parts-list button.active, .coin-options > button.selected,
+  .engagement-button:hover, .like-hold-fill { background: var(--pink-soft); }
+  .search-box:focus-within, .phone-field:focus-within, .code-field:focus-within {
+    border-color: var(--pink);
+    box-shadow: 0 0 0 2px var(--pink-soft);
+  }
+  .search-wrap-large .search-box:focus-within { border-color: var(--pink); }
+  .button-primary, .search-wrap-large .search-submit {
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+  }
+  .button-primary:hover:enabled, a.button-primary:hover,
+  .search-wrap-large .search-submit:hover:enabled { background: #c4386b; }
+
+  .search-box, .search-wrap-large .search-box, .button-quiet, .login-dialog, .qr-frame,
+  .phone-field, .code-field, .login-note, .creator-row, .up-tag, .focus-mark,
+  .account-menu summary img, .favorite-create-trigger, .share-sheet-cancel,
+  .share-sheet-error input { border-color: var(--border); }
+  .phone-field, .code-field, .favorite-create-form input, .share-sheet-error input {
+    background: var(--soft);
+  }
+  .phone-field select { background: transparent; }
+  .phone-field select option { background: var(--surface); }
+  .search-box, .search-wrap-large .search-box, .phone-field, .code-field,
+  .favorite-create-form input, .share-sheet-error input, .coin-options > button {
+    border-color: var(--control-border);
+  }
+  .favorite-create-form input:focus, .share-sheet-error input:focus { border-color: var(--pink); }
+  .account-menu summary img { outline-color: var(--pink-soft); }
+  .toggle-track, .share-option:hover:enabled .share-option-icon { background: #4b4e5d; }
+  .active .toggle-track { background: var(--accent-fill); }
+
+  .login-dialog, .search-box input, .phone-field input, .code-field input, .favorite-create-form input,
+  .button-quiet:hover:enabled, .icon-button:hover,
+  .share-sheet-cancel { color: var(--text); }
+  .following-link, .login-button, .history-menu > summary, .account-popover button,
+  .home-kicker, .home-footnote, .home-footer, .search-box > svg, .search-box input::placeholder,
+  .search-submit, .search-clear, .section-eyebrow, .heading-note, .content-tabs button,
+  .content-tabs > a, .video-owner, .up-tag, .video-meta, .pagination, .button-quiet,
+  .icon-button, .status-block, .empty-symbol, .empty-state h2, .empty-state p, .error-state,
+  .error-state p, .creator-row p, .creator-fans, .creator-arrow, .back-link, .creator-profile p,
+  .list-heading > span, .watch-title > p, .watch-bvid, .playback-options label, .playback-options select,
+  .danmaku-toggle, .watch-creator span, .watch-creator > svg, .video-description summary,
+  .video-description p, .parts-heading span, .parts-note, .parts-list button, .part-number, .part-duration,
+  .comments-trigger > span + span, .comments-note, .comment-name, .comment-body > p, .comment-meta, .comments-empty,
+  .login-intro, .login-tabs button, .qr-overlay strong, .qr-tip, .login-note, .sms-form > label,
+  .phone-field select, .phone-field input::placeholder, .code-field input::placeholder,
+  .favorite-create-form input::placeholder, .verification > p,
+  .triple-summary > span, .triple-refresh, .triple-note, .history-owner, .history-part, .history-meta,
+  .history-day, .collection-card > p, .collection-order, .engagement-button, .interaction-close,
+  .coin-options > button, .coin-like-option, .favorite-folders em, .favorite-create-trigger,
+  .favorite-create-cancel, .share-video-dialog, .share-option, .share-option-icon, .share-sheet-hint,
+  .share-sheet-error input, .comment-reply-toggle, .comment-reply-status,
+  .following-dynamic-actions, .dynamic-detail-author, .dynamic-detail-author a { color: var(--muted); }
+
+  .field-error, .login-error, .playback-error, .triple-error, .history-save-error,
+  .share-sheet-error, .comment-reply-error p, .session-notice, .session-notice .notice-close { color: var(--danger); }
+  .focus-mark, .triple-message, .comment-reply-toggle button, .comment-reply-more,
+  .comment-reply-error button { color: var(--blue); }
+  .account-popover, .history-popover, .login-dialog, .interaction-dialog, .share-video-dialog,
+  .video-search-filter-panel {
+    box-shadow: 0 12px 40px #0006;
+  }
+  .login-dialog::backdrop, .interaction-dialog::backdrop { background: #0008; }
+}
+
+@media (max-width: 640px) {
+  :where([data-theme="dark"]) .share-video-dialog { box-shadow: none; }
+}

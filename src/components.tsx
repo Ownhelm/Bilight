@@ -1,8 +1,35 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, MagnifyingGlass, Play, SpinnerGap, WarningCircle } from '@phosphor-icons/react';
 import type { VideoSummary } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
+
+export function useDismissibleDetails() {
+  const details = useRef<HTMLDetailsElement>(null);
+  const [open, setOpen] = useState(false);
+  const { pathname, search } = useLocation();
+  useEffect(() => { if (details.current) details.current.open = false; }, [pathname, search]);
+  useEffect(() => {
+    const menu = details.current;
+    if (!menu || !open) return;
+    const outside = (event: PointerEvent) => {
+      if (!menu.contains(event.target as Node)) menu.open = false;
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
+      const restoreFocus = menu.contains(document.activeElement);
+      menu.open = false;
+      if (restoreFocus) menu.querySelector('summary')?.focus();
+    };
+    document.addEventListener('pointerdown', outside);
+    document.addEventListener('keydown', escape);
+    return () => {
+      document.removeEventListener('pointerdown', outside);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+  return { details, open, setOpen };
+}
 
 export function useResource<T>(url: string | null, refresh = 0) {
   const [data, setData] = useState<T | null>(null);

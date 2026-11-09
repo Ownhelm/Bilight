@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.QrCode2
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -139,12 +141,13 @@ internal fun qrLoginChallenge(data: JSONObject): Pair<String, String> {
         verticalArrangement = Arrangement.spacedBy(20.dp)) {
         Text("扫码，连接你的关注", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
         Text("使用另一台设备上的哔哩哔哩 App 扫一扫", color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
-        Surface(Modifier.size(256.dp), shape = RoundedCornerShape(24.dp), color = Color.White,
+        val qr = bitmap?.takeUnless { finished }
+        val qrBackground = if (qr != null || !LocalDarkAppearance.current) Color.White else MaterialTheme.colorScheme.surfaceContainer
+        Surface(Modifier.size(256.dp), shape = RoundedCornerShape(24.dp), color = qrBackground,
             shadowElevation = 4.dp, border = androidx.compose.foundation.BorderStroke(1.dp, pink.copy(alpha = 0.15f))) {
             Box(contentAlignment = Alignment.Center) {
-                val qr = bitmap
-                if (qr != null && !finished) Image(qr.asImageBitmap(), "哔哩哔哩登录二维码", Modifier.fillMaxSize().padding(12.dp))
-                else if (finished) Text(status, Modifier.padding(24.dp), textAlign = TextAlign.Center, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (qr != null) Image(qr.asImageBitmap(), "哔哩哔哩登录二维码", Modifier.fillMaxSize().padding(12.dp))
+                else if (finished) Icon(Icons.Rounded.QrCode2, null, Modifier.size(64.dp), tint = Muted)
                 else CircularProgressIndicator(color = pink)
             }
         }

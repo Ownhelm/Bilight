@@ -8,8 +8,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardActions
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -33,7 +31,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,26 +46,49 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.ensureActive
 import androidx.compose.ui.platform.testTag
 
+private val lightPink = Color(0xffd63d6e)
+private val lightColors = lightColorScheme(
+    primary = lightPink, secondary = Color(0xff1599c5), background = Color.White,
+    surface = Color.White, onSurface = Color(0xff292a32),
+    surfaceContainerLow = Color.White, surfaceContainer = Color.White,
+    surfaceContainerHigh = Color.White, surfaceContainerHighest = Color(0xfff5f6f8),
+    secondaryContainer = lightPink.copy(alpha = .1f), onSecondaryContainer = lightPink,
+)
+private val darkPink = Color(0xfff58bab)
+private val darkColors = darkColorScheme(
+    primary = darkPink, onPrimary = Color(0xff3f1528), primaryContainer = Color(0xff50273b),
+    onPrimaryContainer = Color(0xffffdce6), secondary = Color(0xff7cc6e5),
+    background = Color(0xff15161c), surface = Color(0xff15161c),
+    onBackground = Color(0xffececf2), onSurface = Color(0xffececf2), onSurfaceVariant = Color(0xffacadb9),
+    surfaceContainerLow = Color(0xff1e2028), surfaceContainer = Color(0xff23252e),
+    surfaceContainerHigh = Color(0xff292b35), surfaceContainerHighest = Color(0xff2d2f3a),
+    secondaryContainer = Color(0xff3c2532), onSecondaryContainer = darkPink,
+    outline = Color(0xff858898), outlineVariant = Color(0xff383a45),
+)
+
 @Composable fun MainApp(app: AppModel) {
-    MaterialTheme(colorScheme=lightColorScheme(primary=Pink,secondary=Blue,background=Color.White,surface=Color.White,onSurface=Color(0xff292a32),surfaceContainerLow=Color.White,surfaceContainer=Color.White,surfaceContainerHigh=Color.White,surfaceContainerHighest=Soft,secondaryContainer=Pink.copy(alpha=.1f),onSecondaryContainer=Pink)) {
-        Surface(Modifier.fillMaxSize()) {
-            val route = app.routes.lastOrNull()
-            BackHandler(enabled=route != null) { app.back() }
-            when (route) {
-                null -> Root(app)
-                is Route.Creator -> CreatorScreen(app,route.user)
-                is Route.Catalog -> CatalogScreen(app,route)
-                is Route.Dynamic -> DynamicScreen(app,route.post)
-                is Route.History -> HistoryScreen(app)
-                is Route.People -> PeopleScreen(app,route.frequent)
-                is Route.Favorites -> FavoritesScreen(app)
-                is Route.Favorite -> FolderScreen(app,route.folder)
-                is Route.Watch -> VideoScreen(app,route)
-                is Route.Downloads -> DownloadsScreen(app)
+    val dark = app.darkAppearance
+    CompositionLocalProvider(LocalDarkAppearance provides dark) {
+        MaterialTheme(colorScheme = if (dark) darkColors else lightColors) {
+            Surface(Modifier.fillMaxSize()) {
+                val route = app.routes.lastOrNull()
+                BackHandler(enabled=route != null) { app.back() }
+                when (route) {
+                    null -> Root(app)
+                    is Route.Creator -> CreatorScreen(app,route.user)
+                    is Route.Catalog -> CatalogScreen(app,route)
+                    is Route.Dynamic -> DynamicScreen(app,route.post)
+                    is Route.History -> HistoryScreen(app)
+                    is Route.People -> PeopleScreen(app,route.frequent)
+                    is Route.Favorites -> FavoritesScreen(app)
+                    is Route.Favorite -> FolderScreen(app,route.folder)
+                    is Route.Watch -> VideoScreen(app,route)
+                    is Route.Downloads -> DownloadsScreen(app)
+                }
+                if (app.showLogin) LoginDialog(app)
+                if (app.showAccount) AccountDialog(app)
+                app.error?.let { message -> AlertDialog(onDismissRequest={ app.error=null },text={ Text(message) },confirmButton={ TextButton(onClick={ app.error=null }) { Text("知道了") } }) }
             }
-            if (app.showLogin) LoginDialog(app)
-            if (app.showAccount) AccountDialog(app)
-            app.error?.let { message -> AlertDialog(onDismissRequest={ app.error=null },text={ Text(message) },confirmButton={ TextButton(onClick={ app.error=null }) { Text("知道了") } }) }
         }
     }
 }
@@ -76,23 +96,25 @@ import androidx.compose.ui.platform.testTag
     Scaffold(topBar={ Row(Modifier.statusBarsPadding().fillMaxWidth().height(52.dp).padding(horizontal=12.dp),verticalAlignment=Alignment.CenterVertically) {
         IconButton(onClick={ if (app.requireLogin()) app.showAccount=true }) { app.user?.let { Avatar(it,30) } ?: Icon(Icons.Rounded.AccountCircle,"我的账号",tint=Muted) }
         Spacer(Modifier.weight(1f))
+        IconButton(onClick = app::toggleAppearance) {
+            Icon(if (app.darkAppearance) Icons.Rounded.LightMode else Icons.Rounded.DarkMode,
+                if (app.darkAppearance) "切换到浅色模式" else "切换到深色模式", tint = Muted)
+        }
         IconButton(onClick={ app.open(Route.Downloads) }) { Icon(Icons.Rounded.Download,"我的下载",tint=Muted) }
         IconButton(onClick={ if (app.requireLogin()) app.open(Route.History) }) { Icon(Icons.Rounded.History,"我的历史",tint=Muted) }
-    } },bottomBar={ NavigationBar(containerColor=Color.White) {
+    } },bottomBar={ NavigationBar(containerColor=MaterialTheme.colorScheme.surface) {
         NavigationBarItem(selected=app.tab==0,onClick={ app.tab=0 },icon={ Icon(Icons.Rounded.Search,"搜索") },label={ Text("搜索") },colors=NavigationBarItemDefaults.colors(selectedIconColor=Pink,selectedTextColor=Pink,indicatorColor=Color.Transparent))
         NavigationBarItem(selected=app.tab==1,onClick={ app.enterFollowing() },icon={ Icon(painterResource(R.drawable.brand_playback),"关注",Modifier.size(26.dp)) },label={ Text("关注") },colors=NavigationBarItemDefaults.colors(selectedIconColor=Pink,selectedTextColor=Pink,indicatorColor=Color.Transparent))
     } }) { padding ->
         if (app.tab == 0) SearchScreen(app,Modifier.padding(padding),(padding.calculateBottomPadding()-padding.calculateTopPadding())/2) else key(app.sessionRevision) { FollowingScreen(app,Modifier.padding(padding)) }
     }
 }
-@Composable private fun CapsuleSearchField(value: String,onValueChange: (String) -> Unit,placeholder: String,clearLabel: String,onClear: () -> Unit,onSearch: () -> Unit,modifier: Modifier = Modifier,autoCorrectEnabled: Boolean = true) {
-    OutlinedTextField(value=value,onValueChange=onValueChange,modifier=modifier.fillMaxWidth().heightIn(min=52.dp),shape=RoundedCornerShape(100),singleLine=true,placeholder={ Text(placeholder,color=Muted,fontSize=14.sp,maxLines=1,overflow=TextOverflow.Ellipsis) },leadingIcon={ Icon(Icons.Rounded.Search,null,tint=Muted) },trailingIcon={
-        if (value.isNotEmpty()) IconButton(onClick=onClear) { Icon(Icons.Rounded.Close,clearLabel) }
-    },keyboardOptions=KeyboardOptions(imeAction=ImeAction.Search,autoCorrectEnabled=autoCorrectEnabled),keyboardActions=KeyboardActions(onSearch={ onSearch() }),colors=OutlinedTextFieldDefaults.colors(unfocusedBorderColor=Color(0xffe5e6eb),focusedBorderColor=Pink,unfocusedContainerColor=Soft,focusedContainerColor=Color.White))
-}
 @Composable private fun SearchField(app: AppModel,modifier: Modifier = Modifier) {
-    val focus=LocalFocusManager.current
-    CapsuleSearchField(app.keyword,{ app.keyword=it },"搜索视频、UP主或BV号","清空搜索",{ app.keyword=""; app.searched=false },{ focus.clearFocus(); app.search() },modifier)
+    val focus = LocalFocusManager.current
+    CapsuleSearchField(
+        app.keyword, { app.keyword = it }, "搜索视频、UP 主或 BV 号", "清空搜索", { app.keyword = "" },
+        { focus.clearFocus(); app.search() }, modifier.testTag("search-field"), showSubmit = true,
+    )
 }
 @Composable private fun SearchScreen(app: AppModel,modifier: Modifier,centerCorrection: androidx.compose.ui.unit.Dp) {
     val focus = LocalFocusManager.current
@@ -103,18 +125,28 @@ import androidx.compose.ui.platform.testTag
                 Row(verticalAlignment=Alignment.CenterVertically) { Icon(painterResource(R.drawable.brand_playback),null,Modifier.size(40.dp),tint=Pink); Spacer(Modifier.width(10.dp)); Text("Bilight",fontSize=34.sp,fontWeight=FontWeight.Bold) }
                 Text("搜你所想，看你所选",Modifier.padding(top=12.dp),fontSize=15.sp,color=Muted,maxLines=1)
             }
-            SearchField(app,Modifier.align(Alignment.Center).offset(y=centerCorrection).padding(horizontal=28.dp))
+            SearchField(app,Modifier.align(Alignment.Center).offset(y=centerCorrection).padding(horizontal=24.dp))
         }
     } else Column(modifier) {
         val revision=app.searchRevision
         val searchList=key(revision) { rememberLazyListState(app.searchIndex,app.searchOffset) }
         DisposableEffect(searchList) { onDispose { if (app.searchRevision==revision) { app.searchIndex=searchList.firstVisibleItemIndex; app.searchOffset=searchList.firstVisibleItemScrollOffset } } }
-        SearchField(app,Modifier.padding(horizontal=16.dp,vertical=8.dp))
-        TabRow(if (app.searchUsers) 1 else 0) { listOf("视频","UP主").forEachIndexed { i,label -> Tab(selected=app.searchUsers==(i==1),onClick={ app.searchUsers=i==1; app.search() },text={ Text(label) }) } }
+        SearchField(app, Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+        SearchResultsBar(app, Modifier.padding(horizontal = 16.dp))
+        val users = if (app.searchUsers) app.searchItems.filterIsInstance<User>() else emptyList()
+        val videos = if (app.searchUsers) emptyList() else app.searchVideos
         LazyColumn(state=searchList,modifier=Modifier.fillMaxSize(),contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
-            if (app.searchUsers) items(app.searchItems.filterIsInstance<User>(),key={ it.mid }) { UserRow(app,it) }
-            else items(app.searchItems.filterIsInstance<Video>().chunked(2)) { row -> VideoRow(app,row) }
-            if (!app.searchBusy && app.searchItems.isEmpty() && app.searchError==null) item { Text("没有找到相关内容",Modifier.padding(24.dp),color=Muted) }
+            if (app.searchUsers) items(users, key = { it.mid }) { UserRow(app, it) }
+            else items(videos.chunked(2)) { row -> VideoRow(app, row) }
+            if (!app.searchBusy && users.isEmpty() && videos.isEmpty() && app.searchError == null) item {
+                val message = when {
+                    app.searchUsers -> "没有找到相关 UP 主"
+                    !app.searchTitleOnly -> "没有找到相关视频"
+                    app.searchMore -> "已加载的结果里没有标题匹配的视频，可以加载更多或关闭「$TitleFilterLabel」。"
+                    else -> "没有标题匹配的视频，可以关闭「$TitleFilterLabel」或换个关键词。"
+                }
+                EmptyNotice(message)
+            }
             item { PageMore(app.searchBusy,app.searchMore,app.searchError) { app.search(false) } }
         }
     }
@@ -128,6 +160,7 @@ import androidx.compose.ui.platform.testTag
     Row(Modifier.fillMaxWidth(),horizontalArrangement=Arrangement.spacedBy(12.dp)) { videos.forEach { video -> Box(Modifier.weight(1f)) { VideoCard(video) { app.open(Route.Watch(video.bvid)) } } }; if (videos.size==1) Spacer(Modifier.weight(1f)) }
 }
 @Composable private fun FollowingScreen(app: AppModel,modifier: Modifier) {
+    val separator = if (LocalDarkAppearance.current) MaterialTheme.colorScheme.surfaceContainerLow else Soft
     val revision=app.sessionRevision
     val list = rememberLazyListState(app.feedIndex,app.feedOffset)
     var userScrolled by remember { mutableStateOf(false) }
@@ -146,14 +179,14 @@ import androidx.compose.ui.platform.testTag
     DisposableEffect(Unit) { onDispose { if (app.sessionRevision==revision) { app.feedIndex=list.firstVisibleItemIndex; app.feedOffset=list.firstVisibleItemScrollOffset; app.feedAnchor=app.following.getOrNull(list.firstVisibleItemIndex)?.id } } }
     Column(modifier) {
         Text("我的关注",Modifier.padding(horizontal=20.dp,vertical=12.dp),fontSize=25.sp,fontWeight=FontWeight.Bold)
-        Box(Modifier.fillMaxWidth().height(8.dp).background(Soft))
+        Box(Modifier.fillMaxWidth().height(8.dp).background(separator))
         if (app.user == null) { Column(Modifier.fillMaxSize(),Arrangement.Center,Alignment.CenterHorizontally) { Text("登录后查看关注动态",color=Muted); TextButton(onClick={ app.showLogin=true }) { Text("登录B站") } }; return }
         PullToRefreshBox(state=refreshState,isRefreshing=app.feedRefreshing,onRefresh={ userScrolled=false; app.loadFeed(true) },indicator={
             PullToRefreshDefaults.Indicator(state=refreshState,isRefreshing=app.feedRefreshing,
                 modifier=Modifier.align(Alignment.TopCenter).semantics { if (app.feedRefreshing) contentDescription="正在刷新关注动态" })
         }) {
             LazyColumn(state=list,modifier=Modifier.fillMaxSize().padding(top=refreshInset).nestedScroll(connection)) {
-                items(app.following,key={ it.id }) { PostCard(app,it); Box(Modifier.fillMaxWidth().height(8.dp).background(Soft)) }
+                items(app.following,key={ it.id }) { PostCard(app,it); Box(Modifier.fillMaxWidth().height(8.dp).background(separator)) }
                 if (app.feedLoaded && app.following.isEmpty() && !app.feedMore && app.feedError==null) item { Text("暂无关注动态",Modifier.padding(24.dp),color=Muted) }
                 if (!app.feedRefreshing) item { PageMore(app.feedBusy,app.feedMore,app.feedError) { userScrolled=false; app.loadFeed() } }
             }
@@ -173,7 +206,7 @@ import androidx.compose.ui.platform.testTag
     var menu by remember { mutableStateOf(false) }
     val context=LocalContext.current
     fun share() { runCatching { context.startActivity(android.content.Intent.createChooser(android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT,"https://t.bilibili.com/${post.id}"),"分享动态链接")) }.onFailure { app.error="暂无可用于分享的应用。" } }
-    Column(Modifier.fillMaxWidth().background(if (nested) Soft else Color.White).padding(if (nested) 12.dp else 16.dp)) {
+    Column(Modifier.fillMaxWidth().background(if (nested) Soft else MaterialTheme.colorScheme.surface).padding(if (nested) 12.dp else 16.dp)) {
         Row(verticalAlignment=Alignment.CenterVertically) {
             Avatar(post.author,36) { app.open(Route.Creator(post.author)) }
             Column(Modifier.weight(1f).padding(start=10.dp)) { Text(post.author.name,fontSize=14.sp,fontWeight=FontWeight.SemiBold,modifier=Modifier.clickable { app.open(Route.Creator(post.author)) }); Text(java.text.SimpleDateFormat("M月d日 HH:mm",java.util.Locale.CHINA).format(java.util.Date(post.published*1000))+" ${post.action}",fontSize=11.sp,color=Muted) }
@@ -267,7 +300,7 @@ internal class Paging<T> {
     Column(Modifier.safeDrawingPadding()) {
         SectionTitle("我的关注的人",app::back)
         CapsuleSearchField(search.keyword,{ search.keyword=it },"搜索我关注的人","清空关注搜索",{ search.keyword="" },{ focus.clearFocus() },
-            Modifier.padding(horizontal=16.dp,vertical=8.dp).testTag("people-search-field"),autoCorrectEnabled=false)
+            Modifier.padding(horizontal=16.dp,vertical=8.dp).testTag("people-search-field"))
         LazyColumn(contentPadding=PaddingValues(horizontal=16.dp,vertical=8.dp),verticalArrangement=Arrangement.spacedBy(12.dp)) {
             if (search.items==null && search.busy) item { Loading("正在读取关注名单") }
             if (search.error!=null) item {
@@ -300,7 +333,7 @@ private class CreatorBrowseState(user: User) {
         SectionTitle(info.name,app::back)
         Row(Modifier.padding(20.dp),verticalAlignment=Alignment.CenterVertically) { Avatar(info,56); Column(Modifier.weight(1f).padding(horizontal=12.dp)) { Text(info.name,fontSize=20.sp,fontWeight=FontWeight.Bold); Text(info.sign,fontSize=12.sp,color=Muted,maxLines=3,overflow=TextOverflow.Ellipsis) }; FollowButton(app,info.mid) }
         ErrorNotice(error)
-        TabRow(mode) { listOf("投稿","合集和列表").forEachIndexed { i,label -> Tab(selected=mode==i,onClick={ mode=i },text={ Text(label) }) } }
+        TabRow(mode) { listOf("投稿","合集和列表").forEachIndexed { i,label -> SectionTab(label, mode==i) { mode=i } } }
         if (mode==0) {
             val paging=state.videos; val scope=rememberCoroutineScope()
             LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load { p,_ -> app.repository.creatorVideos(info,p) } }
@@ -319,7 +352,7 @@ private class FavoritesBrowseState {
 @Composable private fun FavoritesScreen(app: AppModel) {
     val state=remember(app.sessionRevision) { app.browseState("favorites") { FavoritesBrowseState() } }
     var collected by state.collected
-    Column(Modifier.safeDrawingPadding()) { SectionTitle("我的收藏",app::back); TabRow(if (collected) 1 else 0) { listOf("我创建的","我收藏的").forEachIndexed { i,label -> Tab(selected=collected==(i==1),onClick={ collected=i==1 },text={ Text(label) }) } }; key(collected) {
+    Column(Modifier.safeDrawingPadding()) { SectionTitle("我的收藏",app::back); TabRow(if (collected) 1 else 0) { listOf("我创建的","我收藏的").forEachIndexed { i,label -> SectionTab(label, collected==(i==1)) { collected=i==1 } } }; key(collected) {
         val paging=if (collected) state.collectedFolders else state.created; val scope=rememberCoroutineScope(); LaunchedEffect(paging) { if (paging.page==0 && paging.error==null) paging.load { p,_ -> app.repository.folders(collected,p) } }
         LazyColumn(state=paging.listState,contentPadding=PaddingValues(16.dp),verticalArrangement=Arrangement.spacedBy(18.dp)) {
             items(paging.items) { folder -> Row(Modifier.fillMaxWidth().clickable(enabled=!folder.unavailable && folder.type in listOf(11,21)) { app.open(Route.Favorite(folder)) }) {
@@ -417,7 +450,7 @@ private class FavoritesBrowseState {
     var error by remember { mutableStateOf<String?>(null) }
     var retry by remember { mutableStateOf(0) }
     val version = app.http.generation
-    val blue = Color(0xff4d83a1)
+    val blue = if (LocalDarkAppearance.current) MaterialTheme.colorScheme.secondary else Color(0xff4d83a1)
     LaunchedEffect(expanded,requestedPage,retry) {
         if (!expanded || loadedPage >= requestedPage) { busy=false; return@LaunchedEffect }
         busy=true; error=null
@@ -448,7 +481,7 @@ private class FavoritesBrowseState {
                 if (!busy && error==null && more) TextButton(onClick={ requestedPage=loadedPage+1 },modifier=Modifier.testTag("comment-replies-more-${comment.id}"),contentPadding=PaddingValues(0.dp)) { Text("加载更多",fontSize=12.sp,color=blue) }
             }
         }
-        HorizontalDivider(Modifier.padding(top=14.dp),thickness=0.5.dp,color=Color(0xfff1f2f3))
+        HorizontalDivider(Modifier.padding(top=14.dp),thickness=0.5.dp,color=if (LocalDarkAppearance.current) MaterialTheme.colorScheme.outlineVariant else Color(0xfff1f2f3))
     }
 }
 

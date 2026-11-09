@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { ArrowClockwise, ArrowLeft, ArrowRight, ClockCounterClockwise } from '@phosphor-icons/react';
 import type { AuthState, HistoryItem, Page } from '../shared/types';
-import { duration, Empty, Failure, Loading, useResource } from './components';
+import { duration, Empty, Failure, Loading, useDismissibleDetails, useResource } from './components';
 import { historyDay, historyHref } from './historyRecords';
 
 function HistoryRows({ items, compact = false }: { items: HistoryItem[]; compact?: boolean }) {
@@ -19,20 +19,12 @@ function HistoryRows({ items, compact = false }: { items: HistoryItem[]; compact
 }
 
 export function HistoryMenu({ auth, onLogin }: { auth: AuthState | null; onLogin: () => void }) {
-  const details = useRef<HTMLDetailsElement>(null); const location = useLocation();
-  const [open, setOpen] = useState(false), [refresh, setRefresh] = useState(0);
+  const { details, open, setOpen } = useDismissibleDetails();
+  const [refresh, setRefresh] = useState(0);
   const { data, error, loading } = useResource<Page<HistoryItem>>(open && auth?.authenticated ? `/api/history?limit=6` : null, refresh);
   const update = useCallback(() => setRefresh(value => value + 1), []);
   useHistoryUpdates(open && !!auth?.authenticated, update);
-  useEffect(() => { if (details.current) details.current.open = false; }, [location.pathname, location.search]);
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => { if (!details.current?.contains(event.target as Node) && details.current) details.current.open = false; };
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape' && details.current) details.current.open = false; };
-    document.addEventListener('pointerdown', close); document.addEventListener('keydown', escape);
-    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', escape); };
-  }, [open]);
-  return <details className="history-menu" ref={details} onToggle={event => setOpen(event.currentTarget.open)}><summary aria-label="我的历史"><ClockCounterClockwise size={21} /><span><span className="history-my">我的</span>历史</span></summary>
+  return <details className="history-menu" name="header-popover" ref={details} onToggle={event => setOpen(event.currentTarget.open)}><summary aria-label="我的历史"><ClockCounterClockwise size={21} /><span><span className="history-my">我的</span>历史</span></summary>
     {open && <div className="history-popover"><div className="history-popover-heading"><h2>我的历史</h2><Link to="/history">查看全部<ArrowRight size={13} /></Link></div>
 
       {!auth ? <Loading text="正在连接账号" /> : !auth.authenticated ? <div className="history-login"><p>登录后查看当前账号的播放历史。</p><button className="button button-primary" onClick={() => { if (details.current) details.current.open = false; onLogin(); }}>登录哔哩哔哩</button></div> : loading ? <Loading text="正在读取播放历史" /> : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} /> : data?.items.length ? <HistoryRows items={data.items} compact /> : <p className="history-empty">{data?.hasMore ? '最近记录中没有普通视频，可进入全部历史继续查看。' : '暂无观看记录。'}</p>}

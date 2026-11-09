@@ -176,6 +176,8 @@ test('API exposes only local image/stream identifiers and validates part ownersh
   assert.equal(result.statusCode, 200);
   assert.match(result.json().videos[0].cover, /^\/api\/media\//);
   assert.ok(!result.body.includes('hdslb.com'));
+  assert.equal((await app.inject({ url: '/api/search?keyword=test&order=pubdate', headers: host })).statusCode, 200);
+  assert.equal((await app.inject({ url: '/api/search?keyword=test&order=unknown', headers: host })).statusCode, 400);
   const playback = await app.inject({ url: `/api/videos/${bvid}/playback?cid=42`, headers: host });
   assert.equal(playback.statusCode, 200);
   assert.match(playback.json().manifestUrl, /manifest.mpd$/);

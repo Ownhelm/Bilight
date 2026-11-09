@@ -6,20 +6,29 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.SystemBarStyle
 import androidx.activity.viewModels
+import androidx.compose.runtime.LaunchedEffect
 import app.bilight.android.core.AppModel
 import app.bilight.android.ui.MainApp
 
 class MainActivity : ComponentActivity() {
   private val app: AppModel by viewModels()
+  private var darkBars: Boolean? = null
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
 
-    // The app uses white pages even when the system is dark; keep system icons readable.
-    val bars=SystemBarStyle.light(android.graphics.Color.TRANSPARENT,android.graphics.Color.TRANSPARENT)
-    enableEdgeToEdge(statusBarStyle=bars,navigationBarStyle=bars)
+    updateSystemBars(app.darkAppearance)
     setContent {
+      val dark = app.darkAppearance
+      LaunchedEffect(dark) { updateSystemBars(dark) }
       MainApp(app)
     }
+  }
+  private fun updateSystemBars(dark: Boolean) {
+    if (darkBars == dark) return
+    darkBars = dark
+    val transparent = android.graphics.Color.TRANSPARENT
+    val bars = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent)
+    enableEdgeToEdge(statusBarStyle = bars, navigationBarStyle = bars)
   }
   override fun onStart() { super.onStart(); app.retryHistory() }
 }

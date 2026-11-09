@@ -7,6 +7,10 @@ export type CollectionKind = 'season' | 'series';
 export interface CreatorCollection { id: number; mid: number; kind: CollectionKind; title: string; description: string; cover: string; count: number; updatedAt: number }
 export interface CollectionPage extends Page<VideoSummary> { collection: CreatorCollection }
 export interface Page<T> { items: T[]; hasMore: boolean; nextPage?: number; nextCursor?: string }
+export type VideoSearchOrder = 'totalrank' | 'pubdate' | 'click';
+export function isVideoSearchOrder(value: unknown): value is VideoSearchOrder {
+  return value === 'totalrank' || value === 'pubdate' || value === 'click';
+}
 export interface SearchPage { videos: VideoSummary[]; users: CreatorSummary[]; page: number; hasMore: boolean }
 export interface VideoPart { cid: number; page: number; title: string; duration: number }
 export interface VideoInteraction { coinLimit: 1 | 2; likes: number; coins: number; favorites: number }

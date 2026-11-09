@@ -146,7 +146,9 @@ struct FavoriteContentsView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Color.biliMuted)
-                TextField("搜索这个收藏夹", text: $text).font(.system(size: 14)).submitLabel(.search)
+                TextField("搜索这个收藏夹", text: $text,
+                          prompt: Text("搜索这个收藏夹").foregroundStyle(Color.biliPlaceholder))
+                    .font(.system(size: 14)).submitLabel(.search)
                     .autocorrectionDisabled().textInputAutocapitalization(.never).onSubmit(search)
                 if !text.isEmpty {
                     Button {
@@ -268,7 +270,9 @@ struct NewFavoriteFolderView: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("收藏夹名称", text: $title).onChange(of: title) { _, value in title = String(value.prefix(20))
+                    TextField("收藏夹名称", text: $title,
+                              prompt: Text("收藏夹名称").foregroundStyle(Color.biliPlaceholder))
+                        .onChange(of: title) { _, value in title = String(value.prefix(20))
                     }
                     HStack {
                         Spacer()

@@ -2,9 +2,9 @@
 
 Android 客户端使用 Kotlin、Jetpack Compose 和 Media3，直接连接 B 站，不依赖 Mac 后端或 Docker，已提供可安装的签名 APK。支持搜索、关注动态、UP 主投稿与合集、收藏、云端历史、视频播放和离线下载；详细验收记录见 `../docs/android-parity.md`。
 
-## 预览版安装
+## 安装 APK
 
-GitHub Release 提供 Android 8.0 及以上可安装的签名 APK。下载后打开文件，按系统提示允许该来源安装即可，不需要开发者选项或 USB 调试。预览 APK 使用项目开发签名，Release 构建关闭调试；从同一发布来源获取的后续版本可覆盖更新。自行构建时使用自己的签名，通常无法直接覆盖 GitHub 安装包。
+GitHub Release 提供 Android 8.0 及以上可安装的签名 APK。下载后打开文件，按系统提示允许该来源安装即可，不需要开发者选项或 USB 调试。发布的 APK 使用项目签名，Release 构建关闭调试；从同一发布来源获取的后续版本可覆盖更新。自行构建时使用自己的签名，通常无法直接覆盖 GitHub 安装包。
 
 ## 构建与安装
 

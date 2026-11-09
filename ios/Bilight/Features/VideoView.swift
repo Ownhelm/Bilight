@@ -77,14 +77,6 @@ struct NativePlayer: UIViewControllerRepresentable {
                 settings.widthAnchor.constraint(equalToConstant: 38),
                 settings.heightAnchor.constraint(equalToConstant: 38),
             ])
-            controls.translatesAutoresizingMaskIntoConstraints = false
-            overlay.addSubview(controls)
-            NSLayoutConstraint.activate([
-                controls.leadingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.leadingAnchor, constant: 8),
-                controls.trailingAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.trailingAnchor, constant: -64),
-                controls.bottomAnchor.constraint(equalTo: overlay.safeAreaLayoutGuide.bottomAnchor, constant: -10),
-                controls.heightAnchor.constraint(equalToConstant: 44),
-            ])
         }
         let container = PlayerContainer(controller: controller, model: model)
         container.installPlaybackControls(controls)
@@ -199,7 +191,7 @@ struct VideoView: View {
                     FailureBlock(error: error) { refresh += 1 }
                     if app.user == nil {
                         Button("登录 B 站后重试") { app.showLogin = true }.buttonStyle(.borderedProminent).tint(
-                            Color.biliPink
+                            Color.biliProminent
                         ).frame(maxWidth: .infinity)
                     }
                 } else if let detail,
@@ -433,7 +425,7 @@ struct CommentThreadView: View {
     @State private var error: String?
     @State private var retry = 0
     @State private var requestToken = UUID()
-    private let blue = Color(red: 77 / 255, green: 131 / 255, blue: 161 / 255)
+    private let blue = Color.biliReply
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             CommentContentRow(comment: comment)

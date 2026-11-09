@@ -121,11 +121,11 @@ struct FollowingView: View {
                         Text("我的关注").font(.system(size: 26, weight: .bold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
-                            .background(.white).padding(.bottom, 8)
+                            .background(Color.biliBackground).padding(.bottom, 8)
                             .id("following-top")
                         ForEach(model.posts) { post in
                             DynamicCard(post: post)
-                                .padding(16).background(.white).padding(.bottom, 8)
+                                .padding(16).background(Color.biliBackground).padding(.bottom, 8)
                         }
                         if let error = model.error {
                             FailureBlock(error: error) { Task { await model.retry(client: app.client, mid: user.mid) } }
@@ -176,7 +176,7 @@ struct FollowingView: View {
             } else {
                 VStack {
                     EmptyBlock(symbol: "person.2", title: "登录后查看关注动态")
-                    Button("登录哔哩哔哩") { app.showLogin = true }.buttonStyle(.borderedProminent).tint(Color.biliPink)
+                    Button("登录哔哩哔哩") { app.showLogin = true }.buttonStyle(.borderedProminent).tint(Color.biliProminent)
                     Spacer()
                 }.padding(.top, 35)
             }

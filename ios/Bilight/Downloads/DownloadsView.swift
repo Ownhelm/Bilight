@@ -54,7 +54,7 @@ struct DownloadOptionsView: View {
                     } catch is CancellationError { return } catch { self.error = error.localizedDescription }
                     busy = false
                 }
-        }.tint(Color.biliPink)
+        }.tint(Color.biliPink).modifier(DarkPanelBackground())
     }
     private func beginDownload() {
         guard !enqueueing, !busy, !options.isEmpty else { return }

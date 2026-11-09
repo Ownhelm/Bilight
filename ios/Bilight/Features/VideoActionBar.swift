@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct VideoActionBar: View {
+    @Environment(\.colorScheme) private var colorScheme
     @EnvironmentObject private var app: AppModel
     @ObservedObject var model: PlayerModel
     var bvid: String
@@ -119,8 +120,9 @@ struct VideoActionBar: View {
         }.accessibilityLabel(cached ? "已缓存，查看缓存" : "下载当前分 P")
     }
     private func actionIcon(_ icon: BiliActionIcon.Kind, count: Int?, title: String, selected: Bool) -> some View {
-        VStack(spacing: iconGap) {
-            BiliActionIcon(kind: icon, size: iconSize).foregroundStyle(selected ? Color.biliPink : Color(white: 0.46))
+        let inactive = colorScheme == .dark ? Color.biliMuted : Color(white: 0.46)
+        return VStack(spacing: iconGap) {
+            BiliActionIcon(kind: icon, size: iconSize).foregroundStyle(selected ? Color.biliPink : inactive)
                 .scaleEffect(charging ? 1.08 : 1)
                 .overlay {
                     if charging {
@@ -221,8 +223,9 @@ struct VideoShareSheet: View {
     var onSystemShare: () -> Void = {}
     @ScaledMetric(relativeTo: .caption) private var labelSize: CGFloat = 11
     @ScaledMetric(relativeTo: .body) private var cancelSize: CGFloat = 14
-    private let ink = Color(red: 97 / 255, green: 102 / 255, blue: 109 / 255)
-    private let muted = Color(red: 148 / 255, green: 153 / 255, blue: 160 / 255)
+    @Environment(\.colorScheme) private var colorScheme
+    private var ink: Color { colorScheme == .dark ? .biliMuted : Color(red: 97 / 255, green: 102 / 255, blue: 109 / 255) }
+    private var muted: Color { colorScheme == .dark ? .biliMuted : Color(red: 148 / 255, green: 153 / 255, blue: 160 / 255) }
     private var url: URL { videoShareURL(bvid: bvid, page: page) }
     var body: some View {
         GeometryReader { geometry in
@@ -235,7 +238,7 @@ struct VideoShareSheet: View {
                     ScrollView {
                         content
                     }.frame(height: height)
-                        .padding(.bottom, geometry.safeAreaInsets.bottom).background(.white)
+                        .padding(.bottom, geometry.safeAreaInsets.bottom).background(Color.biliPanel)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 12, topTrailingRadius: 12))
                         .accessibilityElement(children: .contain).accessibilityIdentifier("video-share-sheet")
                         .accessibilityAddTraits(.isModal)
@@ -249,17 +252,17 @@ struct VideoShareSheet: View {
                 Button { UIPasteboard.general.url = url; onClose(); onCopied() } label: { option("复制链接", icon: "link") }
                 Button(action: onSystemShare) { option("系统分享", icon: "square.and.arrow.up") }
             }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
-            Rectangle().fill(Color(white: 0.965)).frame(height: 6)
+            Rectangle().fill(colorScheme == .dark ? Color.biliBackground : Color(white: 0.965)).frame(height: 6)
             Button(action: onClose) {
-                Text("取消").font(.system(size: cancelSize)).foregroundStyle(Color(white: 0.1))
+                Text("取消").font(.system(size: cancelSize)).foregroundStyle(colorScheme == .dark ? Color.primary : Color(white: 0.1))
                     .frame(maxWidth: .infinity).frame(minHeight: 50).contentShape(Rectangle())
             }
-        }.buttonStyle(.plain).foregroundStyle(ink).background(.white)
+        }.buttonStyle(.plain).foregroundStyle(ink).background(Color.biliPanel)
     }
     private func option(_ title: String, icon: String) -> some View {
         VStack(spacing: 8) {
             Image(systemName: icon).font(.system(size: 22, weight: .regular)).frame(width: 44, height: 44)
-                .background(Color(white: 0.96), in: Circle()).accessibilityHidden(true)
+                .background(colorScheme == .dark ? Color.primary.opacity(0.10) : Color(white: 0.96), in: Circle()).accessibilityHidden(true)
             Text(title).font(.system(size: labelSize)).foregroundStyle(muted).multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }.frame(maxWidth: .infinity, minHeight: 72, alignment: .top).contentShape(Rectangle())
@@ -322,7 +325,7 @@ private struct CoinActionSheet: View {
                     } catch { self.error = error.localizedDescription }
                     busy = false
                 }
-        }.tint(Color.biliPink).presentationDetents([.medium])
+        }.tint(Color.biliPink).presentationDetents([.medium]).modifier(DarkPanelBackground())
     }
 }
 
@@ -370,7 +373,7 @@ private struct FavoriteActionSheet: View {
                     }
                 }.task { await load() }
                 .alert("新建收藏夹", isPresented: $creating) {
-                    TextField("1–20 个字", text: $title)
+                    TextField("1–20 个字", text: $title, prompt: Text("1–20 个字").foregroundStyle(Color.biliPlaceholder))
                     Button("取消", role: .cancel) {}
                     Button("创建") {
                         Task {
@@ -387,7 +390,7 @@ private struct FavoriteActionSheet: View {
                         }
                     }
                 }
-        }.tint(Color.biliPink).presentationDetents([.medium, .large])
+        }.tint(Color.biliPink).presentationDetents([.medium, .large]).modifier(DarkPanelBackground())
     }
     private func load() async {
         busy = true; error = nil

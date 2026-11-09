@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var app: AppModel
+    @Binding var darkAppearance: Bool
     @State private var tab = 0
     @State private var pendingAccountURL: URL?
     var body: some View {
@@ -26,10 +27,10 @@ struct RootView: View {
                     HStack(spacing: 0) {
                         tabButton("搜索", symbol: "magnifyingglass", value: 0)
                         tabButton("关注", symbol: "play.rectangle", value: 1)
-                    }.padding(.top, 12).padding(.bottom, 4).background(.white).overlay(alignment: .top) {
-                        Rectangle().fill(Color.black.opacity(0.06)).frame(height: 0.5)
+                    }.padding(.top, 12).padding(.bottom, 4).background(Color.biliBackground).overlay(alignment: .top) {
+                        Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 0.5)
                     }
-                }.background(.white)
+                }.background(Color.biliBackground)
                     .navigationTitle("").navigationBarTitleDisplayMode(.inline)
                     .toolbar {
                         ToolbarItem(placement: .topBarLeading) {
@@ -45,6 +46,14 @@ struct RootView: View {
                                     Circle()
                                 ).overlay(Circle().stroke(Color.biliPink.opacity(0.25), lineWidth: 1))
                             }.accessibilityLabel(app.user == nil ? "登录 B 站" : "我的账号")
+                        }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            Button {
+                                darkAppearance.toggle()
+                            } label: {
+                                Image(systemName: darkAppearance ? "sun.max" : "moon")
+                                    .foregroundStyle(Color.biliMuted)
+                            }.accessibilityLabel(darkAppearance ? "切换到浅色模式" : "切换到深色模式")
                         }
                         ToolbarItem(placement: .topBarTrailing) {
                             Button {
@@ -64,7 +73,7 @@ struct RootView: View {
                     .navigationDestination(for: Route.self) { route in
                         RouteDestination(route: route)
                     }
-            }.tint(Color.biliPink).preferredColorScheme(.light).environment(\.locale, Locale(identifier: "zh_CN"))
+            }.tint(Color.biliPink).environment(\.locale, Locale(identifier: "zh_CN"))
                 .sheet(isPresented: $app.showLogin) { LoginView().environmentObject(app) }
                 .sheet(isPresented: $app.showAccount) { AccountView().id(app.accountGeneration).environmentObject(app) }
                 .onChange(of: app.restoring) { _, restoring in

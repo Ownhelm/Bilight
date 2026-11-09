@@ -47,9 +47,10 @@ internal fun videoShareIntent(title: String, url: String): Intent = Intent(Inten
     val url = remember(bvid, page) { videoShareUrl(bvid, page) }
     var error by remember(url) { mutableStateOf<String?>(null) }
     var manualCopy by remember(url) { mutableStateOf(false) }
-    val ink = Color(0xff61666d)
+    val dark = LocalDarkAppearance.current
+    val ink = if (dark) Muted else Color(0xff61666d)
     ModalBottomSheet(onDismissRequest = close, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp), containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp), containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 0.dp, scrimColor = Color.Black.copy(alpha = .32f), dragHandle = null) {
         Column(Modifier.fillMaxWidth().testTag("video-share-sheet").verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 20.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -66,21 +67,22 @@ internal fun videoShareIntent(title: String, url: String): Intent = Intent(Inten
             }
             error?.let { Text(it, Modifier.padding(horizontal = 20.dp).padding(bottom = 14.dp), fontSize = 12.sp, color = Pink) }
             if (manualCopy) SelectionContainer { Text(url, Modifier.padding(horizontal = 20.dp).padding(bottom = 14.dp), fontSize = 12.sp, color = ink) }
-            HorizontalDivider(thickness = 6.dp, color = Color(0xfff6f7f8))
+            HorizontalDivider(thickness = 6.dp, color = if (dark) Soft else Color(0xfff6f7f8))
             TextButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), shape = RoundedCornerShape(0.dp)) {
-                Text("取消", fontSize = 14.sp, color = Color(0xff18191c))
+                Text("取消", fontSize = 14.sp, color = if (dark) MaterialTheme.colorScheme.onSurface else Color(0xff18191c))
             }
         }
     }
 }
 
 @Composable private fun ShareOption(label: String, icon: ImageVector, modifier: Modifier, rotation: Float = 0f, action: () -> Unit) {
+    val dark = LocalDarkAppearance.current
     Column(modifier.heightIn(min = 72.dp).clickable(role = Role.Button, onClick = action)
         .semantics(mergeDescendants = true) { contentDescription = label }, horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(44.dp).background(Color(0xfff5f5f5), CircleShape), contentAlignment = Alignment.Center) {
-            Icon(icon, contentDescription = null, tint = Color(0xff61666d), modifier = Modifier.size(22.dp).rotate(rotation))
+        Box(Modifier.size(44.dp).background(if (dark) Soft else Color(0xfff5f5f5), CircleShape), contentAlignment = Alignment.Center) {
+            Icon(icon, contentDescription = null, tint = if (dark) Muted else Color(0xff61666d), modifier = Modifier.size(22.dp).rotate(rotation))
         }
         Spacer(Modifier.height(8.dp))
-        Text(label, fontSize = 11.sp, color = Color(0xff9499a0), textAlign = TextAlign.Center)
+        Text(label, fontSize = 11.sp, color = if (dark) Muted else Color(0xff9499a0), textAlign = TextAlign.Center)
     }
 }

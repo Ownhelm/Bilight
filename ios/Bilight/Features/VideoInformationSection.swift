@@ -46,7 +46,7 @@ struct VideoInformationSection: View {
                 }
             }.padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 10)
             VideoActionBar(model: model, bvid: detail.video.bvid, cid: part.cid, statistics: detail.statistics, onDownload: onDownload, title: detail.video.title, page: part.page)
-            Rectangle().fill(Color.black.opacity(0.06)).frame(height: 0.5).padding(.horizontal, 16).padding(.top, 12)
+            Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 0.5).padding(.horizontal, 16).padding(.top, 12)
         }
     }
 }

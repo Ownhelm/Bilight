@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -24,6 +25,7 @@ import kotlinx.coroutines.delay
     val currentMode by rememberUpdatedState(mode)
     var active by remember { mutableStateOf(true) }
     val cookieManager = remember { CookieManager.getInstance() }
+    val loginBackground = MaterialTheme.colorScheme.surface.toArgb()
     fun close() { loginJob?.cancel(); web?.stopLoading(); app.showLogin = false }
     fun collect() {
         if (busy || !active || currentMode != 0) return
@@ -36,7 +38,7 @@ import kotlinx.coroutines.delay
         Surface(Modifier.fillMaxSize()) {
             Column(Modifier.safeDrawingPadding().imePadding()) {
                 SectionTitle("登录B站",::close)
-                TabRow(selectedTabIndex=mode) { listOf("手机验证","扫码登录").forEachIndexed { i,label -> Tab(selected=mode==i,onClick={ loginJob?.cancel(); busy=false; error=null; mode=i },text={ Text(label) }) } }
+                TabRow(selectedTabIndex=mode) { listOf("手机验证","扫码登录").forEachIndexed { i,label -> SectionTab(label, mode==i) { loginJob?.cancel(); busy=false; error=null; mode=i } } }
                 if (busy) Loading("正在验证账号")
                 ErrorNotice(error)
                 if (mode == 1) {
@@ -50,6 +52,7 @@ import kotlinx.coroutines.delay
                     AndroidView(factory={ context ->
                         WebView(context).apply {
                             web = this
+                            setBackgroundColor(loginBackground)
                             settings.javaScriptEnabled = true
                             settings.domStorageEnabled = true
                             // This fixed-layout official form cannot follow system text zoom; pinch zoom remains available.

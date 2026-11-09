@@ -75,6 +75,23 @@ class UiAuditTest {
             }
             rule.waitUntil(5000) { !model.restoring }
             rule.setContent { CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density,scale)) { MainApp(model) } }
+            if (arguments.getString("searchFilterOnly") == "true") {
+                val wasEnabled = model.searchTitleOnly
+                try {
+                    rule.runOnIdle { model.keyword = "去了一趟"; model.search() }
+                    rule.waitUntil(5000) { !model.searchBusy }
+                    if (!wasEnabled) {
+                        rule.onNodeWithTag("video-search-filter").performClick()
+                        click("仅标题匹配")
+                    }
+                    rule.onNodeWithTag("video-search-filter").performClick()
+                    rule.onNodeWithText("只保留标题包含所有搜索词的视频", useUnmergedTree = true).assertIsDisplayed()
+                    capture("search-filter-open")
+                } finally {
+                    rule.runOnIdle { if (model.searchTitleOnly != wasEnabled) model.toggleSearchTitleOnly() }
+                }
+                return
+            }
             if (arguments.getString("peopleResultsOnly")=="true") {
                 open(Route.People(false)); rule.waitUntil(10000) { model.peopleSearch.complete }
                 val field=rule.onNodeWithTag("people-search-field")
@@ -100,7 +117,7 @@ class UiAuditTest {
             capture("01-home")
             rule.onNode(hasSetTextAction()).performClick(); capture("01a-home-keyboard"); androidx.test.espresso.Espresso.closeSoftKeyboard()
             rule.runOnIdle { model.keyword="旅行"; model.search() }; rule.waitUntil(5000) { !model.searchBusy }; capture("02-search-videos")
-            click("UP主"); rule.waitUntil(5000) { !model.searchBusy }; capture("03-search-users")
+            click("UP 主"); rule.waitUntil(5000) { !model.searchBusy }; capture("03-search-users")
             if (!stress) {
                 fixtures.empty=true; rule.runOnIdle { model.search() }; rule.waitUntil(5000) { !model.searchBusy }; capture("04-search-empty")
                 fixtures.empty=false; fixtures.blocked.add("/x/web-interface/wbi/search/type"); rule.runOnIdle { model.search() }; rule.waitUntil(5000) { !model.searchBusy }; capture("05-search-error")

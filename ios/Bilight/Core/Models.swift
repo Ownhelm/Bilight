@@ -175,10 +175,30 @@ struct Page<Item> {
     var hasMore: Bool
     var cursor: String? = nil
 }
+enum VideoSearchOrder: String, CaseIterable {
+    case relevance = "totalrank"
+    case latest = "pubdate"
+    case mostPlayed = "click"
+
+    var label: String {
+        switch self {
+        case .relevance: "综合"
+        case .latest: "最新"
+        case .mostPlayed: "播放多"
+        }
+    }
+}
 struct SearchResult {
     var videos: [Video]
     var users: [User]
     var hasMore: Bool
+
+    func videosMatchingTitle(_ keyword: String) -> [Video] {
+        let terms = keyword.split(whereSeparator: \.isWhitespace).map(String.init)
+        return videos.filter { video in
+            terms.allSatisfy { video.title.range(of: $0, options: [.caseInsensitive, .widthInsensitive]) != nil }
+        }
+    }
 }
 struct Relation: Codable {
     var following: Bool

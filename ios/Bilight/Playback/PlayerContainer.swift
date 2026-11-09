@@ -338,6 +338,17 @@ import AVKit
             fullscreenButton.widthAnchor.constraint(equalToConstant: 44),
             fullscreenButton.heightAnchor.constraint(equalToConstant: 44),
         ])
+        if let controls = playbackControls {
+            controls.removeFromSuperview()
+            controls.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(controls)
+            NSLayoutConstraint.activate([
+                controls.leadingAnchor.constraint(equalTo: container.safeAreaLayoutGuide.leadingAnchor, constant: 8),
+                controls.trailingAnchor.constraint(equalTo: fullscreenButton.leadingAnchor, constant: -10),
+                controls.bottomAnchor.constraint(equalTo: fullscreenButton.bottomAnchor),
+                controls.heightAnchor.constraint(equalTo: fullscreenButton.heightAnchor),
+            ])
+        }
     }
     @objc func fullscreenSurfaceTapped() {
         guard fullscreen != nil || playbackControls != nil, !exitingFullscreen else { return }

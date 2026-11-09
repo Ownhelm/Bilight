@@ -1,5 +1,5 @@
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { CoinInfo, CollectionKind, CollectionPage, Comment, CommentReplyPage, CreatorCollection, CreatorSummary, Danmaku, EngagementAction, FavoriteFolder, HistoryItem, Page, Quality, SearchPage, Subtitle, TripleResult, User, VideoDynamic, VideoDetail, VideoEngagement, VideoPart, VideoSummary } from '../shared/types.js';
+import type { CoinInfo, CollectionKind, CollectionPage, Comment, CommentReplyPage, CreatorCollection, CreatorSummary, Danmaku, EngagementAction, FavoriteFolder, HistoryItem, Page, Quality, SearchPage, Subtitle, TripleResult, User, VideoDynamic, VideoDetail, VideoEngagement, VideoPart, VideoSearchOrder, VideoSummary } from '../shared/types.js';
 import { BiliError, type BiliHttp } from './transport.js';
 
 type RecordValue = Record<string, any>;
@@ -323,11 +323,11 @@ export class BiliGateway {
     return { state, complete: complete(state) };
   }
 
-  async search(keyword: string, type: 'video' | 'user', page = 1): Promise<SearchPage> {
+  async search(keyword: string, type: 'video' | 'user', page = 1, order: VideoSearchOrder = 'totalrank'): Promise<SearchPage> {
     const term = clean(keyword, 200), pn = integer(page, '页码');
     if (!term) throw new BiliError('INVALID_INPUT', '请输入搜索内容', 400);
     if (type !== 'video' && type !== 'user') throw new BiliError('INVALID_INPUT', '搜索类型无效', 400);
-    const data = await this.transport.request<RecordValue>(`${API}/x/web-interface/wbi/search/type`, { wbi: true, query: { keyword: term, search_type: type === 'video' ? 'video' : 'bili_user', page: pn, page_size: 30, order: type === 'video' ? 'totalrank' : '0' } });
+    const data = await this.transport.request<RecordValue>(`${API}/x/web-interface/wbi/search/type`, { wbi: true, query: { keyword: term, search_type: type === 'video' ? 'video' : 'bili_user', page: pn, page_size: 30, order: type === 'video' ? order : '0' } });
     const results = array(data.result), pages = number(data.numPages), total = number(data.numResults);
     const videos = type === 'video' ? results.map(item => videoSummary(item)).filter((item): item is VideoSummary => Boolean(item)) : [];
     const users = type === 'user' ? results.filter(item => number(item.mid) > 0).map(item => ({ ...user({ mid: item.mid, name: item.uname, face: item.upic }), description: clean(item.usign, 3000), fans: number(item.fans) })) : [];

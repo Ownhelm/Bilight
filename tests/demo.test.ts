@@ -17,6 +17,16 @@ test('publication preview isolates a fictional account and public creator snapsh
     assert.ok(creator.items.length > 0 && creator.items.every((item: { owner: { mid: number } }) => item.owner.mid === 946974));
     const groups = (await app.inject('/api/creators/37029661/collections')).json();
     assert.ok(groups.items.length > 0 && groups.items.every((item: { mid: number }) => item.mid === 37029661));
+    const example = encodeURIComponent('去了一趟');
+    const path = (await app.inject(`/api/resolve?input=${example}`)).json().path;
+    assert.equal(new URL(path, 'http://localhost').searchParams.get('keyword'), '去了一趟');
+    const latest = (await app.inject(`/api/search?keyword=${example}&order=pubdate`)).json();
+    const mostPlayed = (await app.inject(`/api/search?keyword=${example}&order=click`)).json();
+    const dates = latest.videos.map((video: { publishedAt: number }) => video.publishedAt);
+    const views = mostPlayed.videos.map((video: { views: number }) => video.views);
+    assert.deepEqual(dates, [...dates].sort((a, b) => b - a));
+    assert.deepEqual(views, [...views].sort((a, b) => b - a));
+    assert.equal(latest.hasMore, true);
     assert.equal((await app.inject({ method: 'POST', url: '/api/auth/logout' })).statusCode, 403);
     assert.equal((await app.inject('/api/media/unknown')).statusCode, 404);
     assert.match((await app.inject('/api/auth/state')).headers['content-security-policy']!, /connect-src 'self'/);

@@ -2,6 +2,7 @@ package app.bilight.android.ui
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.size
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -12,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
@@ -23,6 +25,7 @@ enum class BiliActionKind { LIKE, COIN, FAVORITE, DOWNLOAD }
 /** Original silhouettes shared with the iOS implementation; visible ink fits the same 22dp bounds. */
 @Composable fun BiliActionIcon(kind: BiliActionKind, label: String, selected: Boolean = false) {
     val color = if (selected) Pink else Muted
+    val glyphColor = if (LocalDarkAppearance.current) MaterialTheme.colorScheme.surface else Color.White
     Canvas(Modifier.size(22.dp).semantics { contentDescription = label }) {
         val path = Path()
         when (kind) {
@@ -36,7 +39,7 @@ enum class BiliActionKind { LIKE, COIN, FAVORITE, DOWNLOAD }
             BiliActionKind.COIN -> {
                 drawCircle(color)
                 val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
-                    this.color = android.graphics.Color.WHITE; textSize = size.height*15f/22; textAlign = android.graphics.Paint.Align.CENTER
+                    this.color = glyphColor.toArgb(); textSize = size.height*15f/22; textAlign = android.graphics.Paint.Align.CENTER
                     typeface = android.graphics.Typeface.create("sans-serif",android.graphics.Typeface.NORMAL)
                 }
                 drawContext.canvas.nativeCanvas.drawText("币",size.width/2,(size.height-paint.fontMetrics.ascent-paint.fontMetrics.descent)/2,paint)
@@ -58,7 +61,7 @@ enum class BiliActionKind { LIKE, COIN, FAVORITE, DOWNLOAD }
         withTransform({ scale(size.width/bounds.width,size.height/bounds.height,Offset.Zero); translate(-bounds.left,-bounds.top) }) { drawPath(path,color) }
         if (kind==BiliActionKind.DOWNLOAD) {
             val arrow=Path().apply { moveTo(size.width*.46f,size.height*.32f); lineTo(size.width*.54f,size.height*.32f); lineTo(size.width*.54f,size.height*.61f); lineTo(size.width*.65f,size.height*.5f); lineTo(size.width*.72f,size.height*.58f); lineTo(size.width*.5f,size.height*.8f); lineTo(size.width*.28f,size.height*.58f); lineTo(size.width*.35f,size.height*.5f); lineTo(size.width*.46f,size.height*.61f); close() }
-            drawPath(arrow,Color.White)
+            drawPath(arrow,glyphColor)
         }
     }
 }

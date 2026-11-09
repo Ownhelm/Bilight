@@ -96,6 +96,13 @@ final class DemoProtocol: URLProtocol {
                 data["result"] = list(obj(fixtures["/x/relation/followings"])["list"]).map { raw in
                     ["mid": raw["mid"] ?? 0, "uname": raw["name"] ?? "", "upic": raw["face"] ?? "", "usign": raw["sign"] ?? "", "fans": raw["fans"] ?? 0]
                 }
+            } else if url.path.hasSuffix("/search/type"), let order = VideoSearchOrder(rawValue: parameter("order")), order != .relevance {
+                let videos = list(data["result"])
+                if order == .latest {
+                    data["result"] = videos.sorted { num($0["pubdate"]) > num($1["pubdate"]) }
+                } else {
+                    data["result"] = videos.sorted { int(obj($0["stat"])["view"]) > int(obj($1["stat"])["view"]) }
+                }
             }
             let body = try JSONSerialization.data(withJSONObject: ["code": 0, "data": data])
             let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!

@@ -60,7 +60,13 @@ import app.bilight.android.playback.PlaybackModel
     Column(Modifier.fillMaxSize().safeDrawingPadding()) {
         SectionTitle("我的下载", app::back)
         ErrorNotice(store.error,store::retry); ErrorNotice(exportError)
-        if (app.user == null) { TextButton(onClick = { app.showLogin = true }) { Text("登录B站") }; return }
+        if (app.user == null) {
+            Column(Modifier.fillMaxSize(), Arrangement.Center, Alignment.CenterHorizontally) {
+                Text("登录后查看下载", color = Muted)
+                TextButton(onClick = { app.showLogin = true }) { Text("登录B站") }
+            }
+            return
+        }
         if (!store.ready) { if (store.error==null) Loading(); return }
         if (store.items.isEmpty()) Text("暂无下载", Modifier.padding(24.dp), color = Muted)
         LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(18.dp)) {

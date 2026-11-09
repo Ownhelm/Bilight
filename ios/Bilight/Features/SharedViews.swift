@@ -107,8 +107,17 @@ struct EmptyBlock: View {
         }.frame(maxWidth: .infinity).padding(.horizontal, 30).padding(.vertical, 55)
     }
 }
+struct DarkPanelBackground: ViewModifier {
+    @Environment(\.colorScheme) private var colorScheme
+    @ViewBuilder func body(content: Content) -> some View {
+        if colorScheme == .dark { content.presentationBackground(Color.biliPanel) }
+        else { content }
+    }
+}
+
 struct FollowButton: View {
     @EnvironmentObject private var app: AppModel
+    @Environment(\.colorScheme) private var colorScheme
     var mid: Int
     var compact = false
     @State private var error: String?
@@ -124,7 +133,7 @@ struct FollowButton: View {
                             .font(.system(size: compact ? 13 : 14, weight: .medium))
                     }
                 }.frame(width: compact ? 30 : 32, height: 26)
-                    .foregroundStyle(following ? Color.biliPink : Color.biliMuted.opacity(0.65))
+                    .foregroundStyle(following ? Color.biliPink : Color.biliMuted.opacity(colorScheme == .dark ? 1 : 0.65))
                     .overlay {
                         RoundedRectangle(cornerRadius: 6).stroke(
                             following ? Color.biliPink.opacity(0.25) : Color.biliMuted.opacity(0.22), lineWidth: 0.7)
@@ -261,7 +270,7 @@ struct ContentTabs: View {
                 }.buttonStyle(.plain).accessibilityAddTraits(selection == index ? .isSelected : [])
             }
             Spacer(minLength: 0)
-        }.overlay(alignment: .bottom) { Rectangle().fill(Color.black.opacity(0.06)).frame(height: 0.5) }
+        }.overlay(alignment: .bottom) { Rectangle().fill(Color.primary.opacity(0.06)).frame(height: 0.5) }
             .accessibilityElement(children: .contain)
     }
 }

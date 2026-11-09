@@ -48,6 +48,8 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 | 功能 | iPhone 客户端 | 安卓客户端 | 电脑客户端 |
 | :--- | :--- | :--- | :--- |
 | 搜索视频、UP 主、BV 号或链接 | ✓ | ✓ | ✓ |
+| 视频排序与仅标题匹配 | ✓ | ✓ | ✓ |
+| 浅色／深色外观 | ✓ | ✓ | ✓ |
 | 关注内容 | 视频、文字、图文、转发等动态，单列浏览 | 视频、文字、图文、转发等动态，单列浏览 | 关注视频，多列网格整行加载 |
 | UP 主投稿、合集和列表 | ✓ | ✓ | ✓ |
 | 关注／取消关注 UP 主 | ✓ | ✓ | — |
@@ -64,7 +66,11 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 ## 日常使用
 
-**搜索与关注。** 首页输入关键词、BV 号或视频链接即可开始。手机关注页展示视频、文字、图文和转发，电脑端展示关注视频；向下浏览继续加载，手机下拉刷新，电脑点击“刷新最新”。点击关注入口回到顶部并刷新，手机会展开顶部加载指示；从视频返回时保留列表和浏览位置。
+**搜索。** 首页输入关键词、BV 号或视频链接即可开始。视频结果页可按「综合」「最新」「播放多」排序。开启「仅标题匹配」后，只保留标题包含所有搜索词的视频。排序和匹配设置会在当前客户端记住。
+
+**关注。** 手机关注页展示视频、文字、图文和转发，电脑端展示关注视频；向下浏览继续加载，手机下拉刷新，电脑点击“刷新最新”。点击关注入口回到顶部并刷新，手机会展开顶部加载指示；从视频返回时保留列表和浏览位置。
+
+**外观。** 顶部可切换浅色或深色外观，选择会在当前客户端记住。
 
 **播放偏好。** 手机端记住字幕开关与语言、常用倍速，以及弹幕开关和样式，换视频或重启后继续沿用。缺少所选字幕语言时临时回退，不覆盖原偏好；长按临时 2 倍速不改变常用倍速。安卓在前台播放与短暂缓冲时保持亮屏，暂停、播放结束或退出播放页后恢复正常息屏。
 
@@ -76,7 +82,7 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 目前支持普通 UP 主视频，不包含直播和番剧。画质和内容访问仍受账号会员权限、地区及平台限制；网页端若被浏览器拦截自动播放，点击播放即可。
 
-本次更新见 [v0.1.11 更新说明](docs/release-v0.1.11.md)。
+本次更新见 [v0.1.12 更新说明](docs/release-v0.1.12.md)。
 
 ## 快速开始
 
@@ -109,11 +115,11 @@ docker compose up -d --build
 
 手机端使用 App 内官方登录页，**安装后可以独立使用，不需要电脑或 Docker 保持运行。**
 
-可从[发行版](https://github.com/Ownhelm/Bilight/releases)下载完整源码包，iPhone 未签名 IPA 为 [v0.1.11](https://github.com/Ownhelm/Bilight/releases/download/v0.1.11/Bilight-v0.1.11-iOS-unsigned.ipa)。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
+可从[发行版](https://github.com/Ownhelm/Bilight/releases)下载完整源码包和 [iPhone 未签名 IPA](https://github.com/Ownhelm/Bilight/releases/download/v0.1.12/Bilight-v0.1.12-iOS-unsigned.ipa)。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
 
-### Android：安装 APK（预览版）
+### Android：安装 APK
 
-支持 Android 8.0 及以上。下载 [Android 预览版 APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.11/Bilight-v0.1.11-android-preview.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
+支持 Android 8.0 及以上。下载 [Android APK](https://github.com/Ownhelm/Bilight/releases/download/v0.1.12/Bilight-v0.1.12-android.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
 
 APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
 

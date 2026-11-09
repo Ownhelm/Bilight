@@ -67,6 +67,75 @@ final class DynamicInteractionTests: XCTestCase {
         XCTAssertTrue(field.waitForExistence(timeout: 10)); field.tap(); field.typeText("浏览回归\n")
         try checkBrowseReturn(app)
     }
+    func testSearchFiltersAppearOnlyInVideoResultsAndSurviveRelaunch() throws {
+        continueAfterFailure = false
+        let app = XCUIApplication()
+        app.launchArguments = ["--demo"]
+        app.launchEnvironment["BILIGHT_ISOLATED_TESTS"] = "1"
+        app.launch()
+        defer { app.terminate() }
+
+        let field = app.textFields["search-field"]
+        let filter = app.buttons["video-search-filter"]
+        let world = app.buttons["去了一趟世界尽头。"]
+        let london = app.buttons["去了一趟伦敦。"]
+        let unrelated = app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "人性、欲望与奇观")).firstMatch
+        func submitSearch(captureHome: Bool = false) {
+            XCTAssertTrue(field.waitForExistence(timeout: 10))
+            XCTAssertFalse(filter.exists)
+            field.tap(); field.typeText("去了一趟")
+            if captureHome {
+                app.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.3)).tap()
+                capture("search-filter-home")
+            }
+            app.buttons["submit-search"].tap()
+            XCTAssertTrue(filter.waitForExistence(timeout: 5))
+            XCTAssertEqual(field.value as? String, "去了一趟")
+        }
+        func choose(_ label: String) {
+            filter.tap()
+            let row = app.buttons[label]
+            XCTAssertTrue(row.waitForExistence(timeout: 5))
+            row.tap()
+        }
+        func capture(_ name: String) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = name; attachment.lifetime = .keepAlways; add(attachment)
+        }
+
+        submitSearch(captureHome: true)
+        choose("综合")
+        if filter.value as? String != "综合" { choose("仅标题匹配") }
+        XCTAssertTrue(unrelated.waitForExistence(timeout: 5))
+        choose("仅标题匹配")
+        XCTAssertEqual(filter.value as? String, "综合，仅标题匹配")
+        XCTAssertTrue(world.waitForExistence(timeout: 5))
+        XCTAssertFalse(unrelated.exists)
+        XCTAssertTrue(london.isHittable)
+        XCTAssertEqual(world.frame.minY, london.frame.minY, accuracy: 2)
+        XCTAssertLessThan(world.frame.maxX, london.frame.minX)
+        capture("search-filter-results")
+        filter.tap()
+        XCTAssertTrue(app.buttons["播放多"].waitForExistence(timeout: 5))
+        capture("search-filter-open")
+        app.buttons["最新"].tap()
+        XCTAssertEqual(filter.value as? String, "最新，仅标题匹配")
+        app.buttons["UP 主"].tap()
+        XCTAssertFalse(filter.exists)
+        app.buttons["视频"].tap()
+        XCTAssertEqual(filter.value as? String, "最新，仅标题匹配")
+
+        app.terminate(); app.launch()
+        submitSearch()
+        XCTAssertEqual(filter.value as? String, "最新，仅标题匹配")
+        XCTAssertTrue(london.waitForExistence(timeout: 5))
+        XCTAssertTrue(world.isHittable)
+        XCTAssertFalse(unrelated.exists)
+        XCTAssertLessThan(world.frame.minX, london.frame.minX)
+        choose("仅标题匹配")
+        choose("综合")
+        XCTAssertEqual(filter.value as? String, "综合")
+    }
     func testCreatorReturnsToTheSamePageAndPositionAfterVideo() throws {
         continueAfterFailure = false
         let app = XCUIApplication(); app.launchArguments = ["--demo", "--browse-return-regression"]

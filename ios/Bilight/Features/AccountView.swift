@@ -183,7 +183,8 @@ private struct FollowedPeopleDirectoryView: View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Image(systemName: "magnifyingglass").foregroundStyle(Color.biliMuted)
-                TextField("搜索名字、拼音或首字母", text: $keyword)
+                TextField("搜索名字、拼音或首字母", text: $keyword,
+                          prompt: Text("搜索名字、拼音或首字母").foregroundStyle(Color.biliPlaceholder))
                     .textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search)
                     .focused($searchFocused).onSubmit { searchFocused = false }
                     .accessibilityIdentifier("people-search-field")

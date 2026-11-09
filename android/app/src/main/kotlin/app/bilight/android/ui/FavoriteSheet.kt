@@ -26,7 +26,7 @@ import app.bilight.android.core.Folder
     ModalBottomSheet(
         onDismissRequest=close,
         sheetState=rememberModalBottomSheetState(skipPartiallyExpanded=true),
-        containerColor=MaterialTheme.colorScheme.surface,
+        containerColor=MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(Modifier.fillMaxWidth().weight(1f,fill=false)) {
             Text("收藏到（${selected.size}）",Modifier.padding(horizontal=20.dp,vertical=8.dp),

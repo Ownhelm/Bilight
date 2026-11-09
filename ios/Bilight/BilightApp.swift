@@ -4,6 +4,7 @@ import SwiftUI
 @main struct BilightApp: App {
     @UIApplicationDelegateAdaptor(PlaybackOrientationDelegate.self) private var appDelegate
     @StateObject private var app = AppModel()
+    @AppStorage("bilight.darkAppearance") private var darkAppearance = false
     @State private var started = false
     @Environment(\.scenePhase) private var scene
     var body: some Scene {
@@ -11,11 +12,13 @@ import SwiftUI
             Group {
                 #if DEBUG
                     if InteractionRegression.player { PlaybackLifecycleRegressionView() }
-                    else if InteractionRegression.enabled { InteractionRegressionView() } else { RootView() }
+                    else if InteractionRegression.enabled { InteractionRegressionView() }
+                    else { RootView(darkAppearance: $darkAppearance) }
                 #else
-                    RootView()
+                    RootView(darkAppearance: $darkAppearance)
                 #endif
             }.modifier(VideoSharePresentation(isActive: !app.showAccount))
+                .preferredColorScheme(darkAppearance ? .dark : .light)
                 .environmentObject(app).onChange(of: scene) { old, phase in
                 let stage: NativeStage = phase == .active ? .playbackActivated : (phase == .background ? .playbackBackgrounded : (old == .background ? .playbackForegrounding : .playbackResigned))
                 if let player = PlaybackOrientationDelegate.active {

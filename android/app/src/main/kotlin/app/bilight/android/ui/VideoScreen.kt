@@ -147,16 +147,16 @@ import kotlin.math.min
         onDispose { listener.disable(); lifecycle.removeObserver(observer) }
     }
     val controller=remember(activity) { WindowCompat.getInsetsController(activity.window,activity.window.decorView) }
-    DisposableEffect(controller,active,presentedFullscreen,landscape) {
+    DisposableEffect(controller,active,presentedFullscreen,landscape,app.darkAppearance) {
         if (active) {
-            controller.isAppearanceLightStatusBars=!presentedFullscreen
-            controller.isAppearanceLightNavigationBars=!presentedFullscreen
+            controller.isAppearanceLightStatusBars=!presentedFullscreen && !app.darkAppearance
+            controller.isAppearanceLightNavigationBars=!presentedFullscreen && !app.darkAppearance
             if (presentedFullscreen) { controller.systemBarsBehavior=WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE; controller.hide(WindowInsetsCompat.Type.systemBars()) }
             else controller.show(WindowInsetsCompat.Type.systemBars())
         }
         onDispose { }
     }
-    DisposableEffect(controller) { onDispose { if (!activity.isChangingConfigurations) { controller.isAppearanceLightStatusBars=true; controller.isAppearanceLightNavigationBars=true; controller.show(WindowInsetsCompat.Type.systemBars()) } } }
+    DisposableEffect(controller) { onDispose { if (!activity.isChangingConfigurations) { controller.isAppearanceLightStatusBars=!app.darkAppearance; controller.isAppearanceLightNavigationBars=!app.darkAppearance; controller.show(WindowInsetsCompat.Type.systemBars()) } } }
     Column(Modifier.fillMaxSize().then(if (presentedFullscreen) Modifier else Modifier.safeDrawingPadding())) {
         BoxWithConstraints(Modifier.fillMaxSize()) {
             val ratio=model.aspectRatio
@@ -233,7 +233,7 @@ import kotlin.math.min
                 Text(detail.video.title,Modifier.padding(top=14.dp),fontSize=17.sp,lineHeight=25.sp,fontWeight=FontWeight.SemiBold)
                 Text("${count(detail.video.views)}播放",Modifier.padding(top=6.dp),fontSize=11.sp,color=Muted)
                 VideoActions(model,cached,onCoin={ if (app.requireLogin()) coinDialog=true },onFavorite={ if (app.requireLogin()) favoriteDialog=true },onDownload={ if (cached) app.open(Route.Downloads) else if (app.requireLogin()) downloadDialog=true })
-                HorizontalDivider(Modifier.padding(top=12.dp),thickness=.5.dp,color=Color(0xffe9e9ee))
+                HorizontalDivider(Modifier.padding(top=12.dp),thickness=.5.dp,color=if (LocalDarkAppearance.current) MaterialTheme.colorScheme.outlineVariant else Color(0xffe9e9ee))
             } }
             item { if (model.networkAvailable) { ErrorNotice(model.metadataError,model::refreshOnlineContent); ErrorNotice(model.supportError,model::readEngagement) }; ErrorNotice(app.historyError) }
             if (detail.parts.size>1) item { Column(Modifier.padding(16.dp)) { Text("分P",fontWeight=FontWeight.Medium); FlowRow(horizontalArrangement=Arrangement.spacedBy(6.dp)) { detail.parts.forEach { p -> FilterChip(selected=model.part?.cid==p.cid,onClick={ model.selectPart(p) },label={ Text("P${p.page} ${p.title}",maxLines=2,overflow=TextOverflow.Ellipsis) }) } } } }

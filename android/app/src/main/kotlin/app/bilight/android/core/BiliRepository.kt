@@ -32,9 +32,9 @@ class BiliRepository(val http: BiliHttp) {
     private val uncertain = ConcurrentHashMap<String,Long>()
     fun invalidateFollowing() { relationEpoch++; relationCache.clear(); relationVersion = http.generation }
     private suspend fun account(): Long = http.ensureAccount()
-    suspend fun search(keyword: String, users: Boolean, page: Int): Page<Any> {
+    suspend fun search(keyword: String, users: Boolean, page: Int, order: VideoSearchOrder = VideoSearchOrder.RELEVANCE): Page<Any> {
         http.ensureDevice()
-        val data = http.request("/x/web-interface/wbi/search/type", mapOf("keyword" to keyword,"search_type" to if (users) "bili_user" else "video","page" to "$page","page_size" to "30","order" to if (users) "0" else "totalrank"),wbi=true)
+        val data = http.request("/x/web-interface/wbi/search/type", mapOf("keyword" to keyword,"search_type" to if (users) "bili_user" else "video","page" to "$page","page_size" to "30","order" to if (users) "0" else order.parameter),wbi=true)
         if (data.optJSONArray("result") == null) invalid()
         val rows = data.rows("result")
         val items: List<Any> = if (users) rows.map(User::parse).filter { it.mid > 0 } else rows.mapNotNull { Video.parse(it) }.distinctBy { it.bvid }

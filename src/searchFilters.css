@@ -1,0 +1,63 @@
+.search-results-bar {
+  display: flex;
+  align-items: stretch;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 30px;
+  border-bottom: 1px solid var(--border);
+}
+.search-results-bar .content-tabs { margin: 0; border-bottom: 0; }
+.search-results-bar .content-tabs button { min-height: 44px; padding: 0 3px; white-space: nowrap; }
+.video-search-filter { position: relative; display: flex; align-items: center; }
+.video-search-filter-trigger {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 44px;
+  padding: 0 4px 0 10px;
+  color: var(--muted);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.video-search-filter-trigger.active { color: var(--pink); }
+.video-search-filter-panel {
+  position: absolute;
+  z-index: 4;
+  top: calc(100% + 5px);
+  right: 0;
+  width: 204px;
+  padding: 5px;
+  color: var(--text);
+  background: var(--surface, #fff);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px #20243518;
+}
+.video-search-filter-panel button {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  text-align: left;
+}
+.video-search-filter-panel button:hover { background: var(--soft); }
+.video-search-filter-panel .search-title-filter-option { display: block; padding-block: 8px; }
+.search-title-filter-label { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.search-title-filter-description { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.4; }
+.video-search-filter-divider { height: 1px; margin: 2px 8px; background: var(--border); }
+.search-order-check { color: var(--muted); }
+.search-title-check { color: var(--pink); }
+.video-search-filter button:focus-visible { outline: 2px solid var(--muted); outline-offset: -2px; }
+.search-wrap .search-box:focus-within, .search-wrap.search-wrap-large .search-box:focus-within {
+  background: var(--soft);
+  border-color: var(--border);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--muted) 17%, transparent);
+}
+@media (max-width: 640px) {
+  .search-results-bar { margin-bottom: 24px; }
+  .search-results-bar .content-tabs { gap: 20px; }
+}

@@ -26,10 +26,17 @@ import coil3.network.httpHeaders
 import coil3.request.ImageRequest
 import app.bilight.android.core.*
 
-val Pink = Color(0xffd63d6e)
-val Blue = Color(0xff1599c5)
-val Muted = Color(0xff6f7481)
-val Soft = Color(0xfff5f6f8)
+internal val LocalDarkAppearance = compositionLocalOf { false }
+val Pink: Color @Composable get() = MaterialTheme.colorScheme.primary
+val Blue: Color @Composable get() = MaterialTheme.colorScheme.secondary
+val Muted: Color @Composable get() = if (LocalDarkAppearance.current) MaterialTheme.colorScheme.onSurfaceVariant else Color(0xff6f7481)
+val Soft: Color @Composable get() = if (LocalDarkAppearance.current) MaterialTheme.colorScheme.surfaceContainerHighest else Color(0xfff5f6f8)
+
+@Composable internal fun SectionTab(title: String, selected: Boolean, onClick: () -> Unit) {
+    Tab(selected, onClick, text = { Text(title) },
+        unselectedContentColor = if (LocalDarkAppearance.current) Muted else LocalContentColor.current)
+}
+
 enum class ImageLoadState { LOADING, READY, FAILED }
 @Composable fun RemoteImage(url: String?, description: String?, modifier: Modifier, crop: ContentScale = ContentScale.Crop, onLoadState: (ImageLoadState) -> Unit = {}, backgroundColor: Color = Soft) {
     val context = LocalContext.current

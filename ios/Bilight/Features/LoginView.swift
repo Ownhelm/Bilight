@@ -69,7 +69,8 @@ struct OfficialLoginWebView: UIViewRepresentable {
         #endif
         view.navigationDelegate = context.coordinator
         view.isOpaque = false
-        view.backgroundColor = .white
+        view.backgroundColor = .systemBackground
+        view.underPageBackgroundColor = .systemBackground
         context.coordinator.store = config.websiteDataStore.httpCookieStore
         config.websiteDataStore.httpCookieStore.add(context.coordinator)
         view.load(
@@ -142,7 +143,7 @@ struct DirectQRLogin: View {
                 Text("使用另一台设备上的哔哩哔哩 App 扫一扫")
                     .font(.subheadline).foregroundStyle(Color.biliMuted).multilineTextAlignment(.center)
                 ZStack {
-                    RoundedRectangle(cornerRadius: 24).fill(.white)
+                    RoundedRectangle(cornerRadius: 24).fill(image != nil && !finished ? Color.white : Color.biliPanel)
                         .shadow(color: Color.biliPink.opacity(0.10), radius: 24, y: 8)
                     if let image, !finished {
                         Image(uiImage: image).interpolation(.none).resizable().scaledToFit().padding(20)
@@ -157,7 +158,7 @@ struct DirectQRLogin: View {
                 if let error { Text(error).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center) }
                 if finished {
                     Button("重新获取二维码") { generation += 1 }
-                        .buttonStyle(.borderedProminent).tint(Color.biliPink).frame(minHeight: 44)
+                        .buttonStyle(.borderedProminent).tint(Color.biliProminent).frame(minHeight: 44)
                 }
                 Text("同一台手机登录，可切换上方「手机验证」。")
                     .font(.caption).foregroundStyle(Color.biliMuted).multilineTextAlignment(.center)

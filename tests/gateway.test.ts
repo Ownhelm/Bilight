@@ -304,6 +304,16 @@ test('creator search maps users and rejects blank or invalid page input', async 
   await assert.rejects(gateway.search('x', 'video', -1), { code: 'INVALID_INPUT' });
 });
 
+test('video sorting changes only the upstream order and leaves UP searches independent', async () => {
+  const { gateway, calls } = fixture(() => ({ result: [], numPages: 3 }));
+  for (const order of ['pubdate', 'click'] as const) {
+    assert.equal((await gateway.search('物理', 'video', 2, order)).hasMore, true);
+  }
+  await gateway.search('物理', 'user', 2, 'pubdate');
+  assert.deepEqual(calls.map(({ options }) => [options.query?.search_type, options.query?.page, options.query?.order]),
+    [['video', 2, 'pubdate'], ['video', 2, 'click'], ['bili_user', 2, '0']]);
+});
+
 test('following filters injected recommendations, reposts and owner mismatches then sorts and deduplicates', async () => {
   const wrongOwner = post(BV3, 7, 90); (wrongOwner.modules.module_dynamic.major.archive as Record<string, unknown>).owner = { mid: 999 };
   const { gateway, calls } = fixture(({ url }) => {

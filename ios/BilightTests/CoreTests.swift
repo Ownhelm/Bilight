@@ -1201,6 +1201,39 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(
             Set(paths), ["/x/frontend/finger/spi", "/x/web-interface/nav", "/x/web-interface/wbi/search/type"])
     }
+    func testVideoSearchFiltersParsedTitlesWithoutChangingUpstreamOrderOrPagination() async throws {
+        var searches: [[String: String]] = []
+        let (client, _, _) = fixture { request in
+            let url = try XCTUnwrap(request.url)
+            switch url.path {
+            case "/x/frontend/finger/spi":
+                return ["code": 0, "data": ["b_3": "test-official-device-0001"]]
+            case "/x/web-interface/nav":
+                let key = String(repeating: "a", count: 32)
+                return ["code": -101, "data": ["wbi_img": ["img_url": "https://i0.hdslb.com/\(key).png", "sub_url": "https://i0.hdslb.com/\(key).png"]]]
+            default:
+                XCTAssertEqual(url.path, "/x/web-interface/wbi/search/type")
+                let query = Dictionary(uniqueKeysWithValues: (URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+                searches.append(query)
+                let result: [JSON] = query["search_type"] == "bili_user" ? [["mid": 7, "uname": "Teacher"]] : [
+                    ["bvid": "BV0000000001", "title": "防抖 <em>Ａ７</em> 实测"],
+                    ["bvid": "BV0000000002", "title": "防抖教程", "description": "适用于 A7"],
+                    ["bvid": "BV0000000003", "title": "a7 防抖对比"],
+                ]
+                return ["code": 0, "data": ["result": result, "numPages": 3]]
+            }
+        }
+        let filtered = try await client.search("a7　防抖", users: false, page: 1, order: .latest)
+        XCTAssertEqual(filtered.videosMatchingTitle("a7　防抖").map(\.title), ["防抖 Ａ７ 实测", "a7 防抖对比"])
+        let secondPage = try await client.search("不匹配", users: false, page: 2, order: .mostPlayed)
+        XCTAssertTrue(secondPage.videosMatchingTitle("不匹配").isEmpty)
+        XCTAssertTrue(secondPage.hasMore, "Filtering an upstream page must not hide the next page")
+        let users = try await client.search("Teacher", users: true, page: 1, order: .latest)
+        XCTAssertEqual(users.users.map(\.name), ["Teacher"])
+        XCTAssertEqual(searches.compactMap { $0["order"] }, ["pubdate", "click", "0"])
+        XCTAssertEqual(searches.compactMap { $0["page"] }, ["1", "2", "1"])
+        XCTAssertEqual(searches.compactMap { $0["keyword"] }, ["a7　防抖", "不匹配", "Teacher"])
+    }
     func testFollowWritesOnceAndConfirmsRealStateWithoutTouchingDeviceKeychain() async throws {
         var following = false
         var writes = 0

@@ -21,7 +21,23 @@ export async function createDemo({ assetsDir = resolve(process.env.BILIGHT_DEMO_
   app.get('/api/auth/state', async () => ({ authenticated: true, user: account }));
   app.get('/api/following', async () => page(videos));
   app.get('/api/history', async request => page(history.slice(0, Number(request.query.limit) || 20)));
-  app.get('/api/search', async request => ({ videos, users: people, hasMore: false, page: 1, keyword: request.query.keyword ?? '', type: request.query.type ?? 'video' }));
+  app.get('/api/resolve', async (request, reply) => {
+    const keyword = typeof request.query.input === 'string' ? request.query.input.trim() : '';
+    if (!keyword || keyword.length > 200) return reply.code(400).send({ error: { code: 'DEMO_KEYWORD', message: '请输入离线预览的搜索关键词。' } });
+    return { path: `/search?${new URLSearchParams({ keyword, type: 'video', page: '1' })}` };
+  });
+  app.get('/api/search', async request => {
+    const keyword = typeof request.query.keyword === 'string' ? request.query.keyword.trim().toLowerCase() : '';
+    const requestedPage = Number(request.query.page);
+    const page = Number.isSafeInteger(requestedPage) && requestedPage > 0 ? requestedPage : 1;
+    const example = keyword === '去了一趟' || keyword === '旅行';
+    if (request.query.type === 'user') return { videos: [], users: people.filter(person => example || person.name.toLowerCase().includes(keyword)), page, hasMore: false };
+    const results = videos.filter(video => example || `${video.title} ${video.owner.name}`.toLowerCase().includes(keyword));
+    if (request.query.order === 'pubdate') results.sort((a, b) => b.publishedAt - a.publishedAt);
+    if (request.query.order === 'click') results.sort((a, b) => b.views - a.views);
+    const size = 6;
+    return { videos: results.slice((page - 1) * size, page * size), users: [], page, hasMore: page * size < results.length };
+  });
   app.get('/api/creators/:mid', async (request, reply) => people.find(x => x.mid === Number(request.params.mid)) ?? reply.code(404).send({ error: { code: 'DEMO_ONLY', message: '此 UP 主未纳入离线预览。' } }));
   app.get('/api/creators/:mid/videos', async request => page(videos.filter(video => video.owner.mid === Number(request.params.mid))));
   app.get('/api/creators/:mid/collections', async request => page(collections.filter(group => group.mid === Number(request.params.mid))));

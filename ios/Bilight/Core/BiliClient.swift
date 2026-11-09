@@ -192,13 +192,13 @@ actor BiliClient {
         uncertainSupport[bvid] = version
         throw BiliFailure(code: "TRIPLE_UNCONFIRMED", message: "三连已提交，请刷新状态确认结果。")
     }
-    func search(_ keyword: String, users: Bool, page: Int) async throws -> SearchResult {
+    func search(_ keyword: String, users: Bool, page: Int, order: VideoSearchOrder = .relevance) async throws -> SearchResult {
         try await http.ensureDevice()
         let data = try await http.request(
             "/x/web-interface/wbi/search/type",
             query: [
                 "keyword": keyword, "search_type": users ? "bili_user" : "video", "page": "\(page)", "page_size": "30",
-                "order": users ? "0" : "totalrank",
+                "order": users ? "0" : order.rawValue,
             ], wbi: true)
         guard data["result"] is [Any] else { throw BiliFailure.invalid }
         let values = list(data["result"])

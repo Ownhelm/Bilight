@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @MainActor final class AppModel: ObservableObject {
     let client: BiliClient
@@ -184,8 +185,24 @@ enum Route: Hashable {
     case offline(UUID)
 }
 extension Color {
-    static let biliPink = Color(red: 0.84, green: 0.24, blue: 0.43)
-    static let biliBlue = Color(red: 0.08, green: 0.60, blue: 0.77)
-    static let biliSoft = Color(red: 0.97, green: 0.975, blue: 0.985)
-    static let biliMuted = Color(red: 0.48, green: 0.51, blue: 0.57)
+    static let biliBackground = Color(uiColor: .systemBackground)
+    static let biliPink = biliAdaptive(UIColor(red: 0.84, green: 0.24, blue: 0.43, alpha: 1),
+                                      UIColor(red: 0.96, green: 0.55, blue: 0.67, alpha: 1))
+    static let biliBlue = biliAdaptive(UIColor(red: 0.08, green: 0.60, blue: 0.77, alpha: 1),
+                                      UIColor(red: 0.49, green: 0.78, blue: 0.90, alpha: 1))
+    static let biliSoft = biliAdaptive(UIColor(red: 0.97, green: 0.975, blue: 0.985, alpha: 1),
+                                      .secondarySystemBackground)
+    static let biliMuted = biliAdaptive(UIColor(red: 0.48, green: 0.51, blue: 0.57, alpha: 1),
+                                       UIColor(red: 0.67, green: 0.68, blue: 0.73, alpha: 1))
+    static let biliPlaceholder = biliAdaptive(.placeholderText,
+                                             UIColor(red: 0.63, green: 0.65, blue: 0.70, alpha: 1))
+    static let biliPanel = biliAdaptive(.white, UIColor(red: 0.12, green: 0.13, blue: 0.16, alpha: 1))
+    static let biliProminent = biliAdaptive(UIColor(red: 0.84, green: 0.24, blue: 0.43, alpha: 1),
+                                           UIColor(red: 0.64, green: 0.16, blue: 0.34, alpha: 1))
+    static let biliReply = biliAdaptive(UIColor(red: 77 / 255, green: 131 / 255, blue: 161 / 255, alpha: 1),
+                                       UIColor(red: 0.49, green: 0.78, blue: 0.90, alpha: 1))
+
+    private static func biliAdaptive(_ light: UIColor, _ dark: UIColor) -> Color {
+        Color(uiColor: UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light })
+    }
 }

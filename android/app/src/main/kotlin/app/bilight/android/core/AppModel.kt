@@ -1,6 +1,7 @@
 package app.bilight.android.core
 
 import android.app.Application
+import android.content.Context
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -25,6 +26,12 @@ sealed interface Route {
 /** Session-owned reads outlive composables, but never outlive the account that started them. */
 class AppModel @JvmOverloads constructor(application: Application, val http: BiliHttp = (application as app.bilight.android.BilightApplication).http, private val peopleStoreFactory: (Long) -> SecureStore = { SessionVault(application,"people-$it") }, private val playbackFactory: ((AppModel,Route.Watch) -> PlaybackModel)? = null): AndroidViewModel(application) {
     private val services = application as app.bilight.android.BilightApplication
+    private val appearance = application.getSharedPreferences("appearance", Context.MODE_PRIVATE)
+    var darkAppearance by mutableStateOf(appearance.getBoolean("dark", false)); private set
+    fun toggleAppearance() {
+        darkAppearance = !darkAppearance
+        appearance.edit().putBoolean("dark", darkAppearance).apply()
+    }
     val repository = if (http===services.http) services.repository else BiliRepository(http)
     val downloads = if (http===services.http) services.downloads else app.bilight.android.downloads.DownloadStore(application,repository)
     private var currentPlayback: PlaybackModel? = null
@@ -138,7 +145,20 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     fun report(detail: Detail,part: Part,progress: Long,version: Long) { if (user != null && version == http.generation) reporter.submit(HistoryReport(detail,part,progress,version)) }
     var keyword by mutableStateOf("")
     var searchUsers by mutableStateOf(false)
+        private set
+    private var submittedSearch by mutableStateOf("")
+    private val searchPreferences = application.getSharedPreferences("video-search-preferences", Context.MODE_PRIVATE)
+    var videoSearchOrder by mutableStateOf(searchPreferences.getString("order", null).let { saved ->
+        VideoSearchOrder.entries.firstOrNull { it.parameter == saved } ?: VideoSearchOrder.RELEVANCE
+    })
+        private set
+    var searchTitleOnly by mutableStateOf(searchPreferences.getBoolean("titleOnly", false))
+        private set
     val searchItems = mutableStateListOf<Any>()
+    val searchVideos by derivedStateOf {
+        val videos = searchItems.filterIsInstance<Video>()
+        if (searchTitleOnly) videos.matchingSearchTitles(submittedSearch) else videos
+    }
     var searchBusy by mutableStateOf(false)
     var searched by mutableStateOf(false)
     var searchMore by mutableStateOf(false)
@@ -148,18 +168,69 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     var searchIndex = 0
     var searchOffset = 0
     private var searchJob: Job? = null
+    private var searchRequest = 0L
     fun search(reset: Boolean = true) {
-        val query = keyword.trim(); if (query.isEmpty()) return
-        bvidFrom(query)?.let { open(Route.Watch(it)); return }
+        if (reset) {
+            val query = keyword.trim()
+            if (query.isEmpty()) return
+            bvidFrom(query)?.let { open(Route.Watch(it)); return }
+            submittedSearch = query
+        }
+        loadSearch(reset)
+    }
+    fun chooseSearchType(users: Boolean) {
+        if (searchUsers == users) return
+        searchUsers = users
+        loadSearch(reset = true)
+    }
+    fun chooseVideoSearchOrder(order: VideoSearchOrder) {
+        if (videoSearchOrder == order) return
+        videoSearchOrder = order
+        searchPreferences.edit().putString("order", order.parameter).apply()
+        if (!searchUsers) loadSearch(reset = true)
+    }
+    fun toggleSearchTitleOnly() {
+        searchTitleOnly = !searchTitleOnly
+        searchPreferences.edit().putBoolean("titleOnly", searchTitleOnly).apply()
+        if (searchPage > 1 || (searchPage == 1 && searchBusy)) loadSearch(reset = true)
+        else resetSearchScroll()
+    }
+    private fun resetSearchScroll() {
+        searchIndex = 0
+        searchOffset = 0
+        searchRevision++
+    }
+    private fun loadSearch(reset: Boolean) {
+        val query = submittedSearch
+        if (query.isEmpty()) return
         if (!reset && searchBusy) return
-        if (reset) { searchJob?.cancel(); searchPage = 0; searchIndex=0; searchOffset=0; searchRevision++; searchItems.clear() }
-        val next = searchPage+1; val users = searchUsers; val version = http.generation
-        searchBusy = true; searchError = null; searched = true
+        val request = ++searchRequest
+        if (reset) {
+            searchJob?.cancel()
+            searchPage = 0
+            searchMore = false
+            resetSearchScroll()
+            searchItems.clear()
+        }
+        val next = searchPage + 1
+        val users = searchUsers
+        val order = videoSearchOrder
+        val version = http.generation
+        searchBusy = true
+        searchError = null
+        searched = true
         searchJob = viewModelScope.launch {
-            try { val page = repository.search(query,users,next); http.check(version); searchItems.addAll(page.items); searchPage=next; searchMore=page.more }
+            try {
+                val page = repository.search(query, users, next, order)
+                http.check(version)
+                if (request != searchRequest) return@launch
+                searchItems.addAll(page.items)
+                searchPage = next
+                searchMore = page.more
+            }
             catch (e: CancellationException) { throw e }
-            catch (e: Exception) { searchError=e.message }
-            finally { searchBusy=false }
+            catch (e: Exception) { if (request == searchRequest) searchError = e.message ?: "搜索失败，请重试。" }
+            finally { if (request == searchRequest) searchBusy = false }
         }
     }
     init {
@@ -186,7 +257,9 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
             following.clear(); expandedPosts.clear(); feedLoaded = false; feedMore = false; feedBusy = false; feedRefreshing=false; feedError = null
             feedCursor = null; feedIndex = 0; feedOffset = 0; feedAnchor=null; relations.clear(); followBusy.clear(); routes.clear()
             repository.invalidateFollowing()
+            searchRequest++
             searchJob?.cancel(); searchItems.clear(); searched=false; searchBusy=false; searchIndex=0; searchOffset=0
+            submittedSearch=""; keyword=""; searchUsers=false; searchPage=0; searchMore=false; searchError=null
         }
         user = value
         accountVersion=http.generation

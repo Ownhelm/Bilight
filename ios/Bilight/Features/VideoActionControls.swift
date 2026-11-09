@@ -3,20 +3,22 @@ import SwiftUI
 // Original paths following the solid thumb / 币 / rounded star silhouettes in the supplied B站 reference.
 struct BiliActionIcon: View {
     enum Kind { case like, coin, favorite, download }
+    @Environment(\.colorScheme) private var colorScheme
     var kind: Kind
     var size: CGFloat = 22
+    private var glyphColor: Color { colorScheme == .dark ? .black : .white }
     var body: some View {
         Group {
             switch kind {
             case .like:
                 ThumbShape().fill()
             case .coin:
-                Circle().fill().overlay { Text("币").font(.system(size: size * 15 / 22, weight: .regular)).foregroundStyle(.white) }
+                Circle().fill().overlay { Text("币").font(.system(size: size * 15 / 22, weight: .regular)).foregroundStyle(glyphColor) }
             case .favorite:
                 RoundedStar().fill()
             case .download:
                 DownloadShape().fill().overlay {
-                    Image(systemName: "arrow.down").font(.system(size: size * 12 / 22, weight: .bold)).foregroundStyle(.white).offset(y: size / 22)
+                    Image(systemName: "arrow.down").font(.system(size: size * 12 / 22, weight: .bold)).foregroundStyle(glyphColor).offset(y: size / 22)
                 }
             }
         }.frame(width: size, height: size).accessibilityHidden(true)

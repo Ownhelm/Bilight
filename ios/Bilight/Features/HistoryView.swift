@@ -10,7 +10,7 @@ struct HistoryView: View {
             LazyVStack(alignment: .leading, spacing: 20) {
                 if app.user == nil {
                     EmptyBlock(symbol: "clock", title: "登录后查看历史")
-                    Button("登录 B 站") { app.showLogin = true }.buttonStyle(.borderedProminent).tint(Color.biliPink)
+                    Button("登录 B 站") { app.showLogin = true }.buttonStyle(.borderedProminent).tint(Color.biliProminent)
                 } else if history.busy && history.items.isEmpty {
                     LoadingBlock(label: "正在读取历史")
                 } else if let error = history.error, history.items.isEmpty {

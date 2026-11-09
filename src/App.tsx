@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, NavLink, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, Check, SignOut, UserCircle, Users } from '@phosphor-icons/react';
+import { ArrowClockwise, ArrowDown, ArrowLeft, ArrowRight, Bell, CaretDown, Check, Moon, SignOut, Sun, UserCircle, Users } from '@phosphor-icons/react';
 import type { AuthState, CreatorSummary, Page, SearchPage, VideoDetail, VideoSummary } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
-import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, SearchBox, useResource, VideoGrid } from './components';
+import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, SearchBox, useDismissibleDetails, useResource, VideoGrid } from './components';
 import { Login } from './Login';
 import { preloadPlayer, VideoPlayer } from './Player';
 import { TripleActions } from './TripleActions';
@@ -14,6 +14,8 @@ import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollection
 import { completeFollowingRows, FollowingFeed, useFollowingColumns, useFollowingFeed } from './following';
 import playbackMark from '../branding/playback-mark.svg?no-inline';
 import { BrowsingContext, BrowsingScroll, BrowsingSession, useBrowsingRefresh, useBrowsingResource } from './browsing';
+import { SearchFilters, titleFilterLabel } from './SearchFilters';
+import { matchingSearchTitles, readSearchPreferences, saveSearchPreferences, type SearchPreferences } from './searchPreferences';
 
 export function App() {
   const location = useLocation();
@@ -52,8 +54,10 @@ export function App() {
   return <BrowsingContext.Provider value={browsing}><BrowsingScroll /><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
     <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
-    <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink><HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
-      {auth?.authenticated && auth.user ? <details className="account-menu"><summary aria-label={`账号：${auth.user.name}`}><img src={auth.user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary><div className="account-popover"><p>{auth.user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span><button onClick={() => void logout()} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button></div></details> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}
+    <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" aria-label="关注" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink>
+      <ThemeToggle />
+      <HistoryMenu key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} auth={auth} onLogin={() => setLoginOpen(true)} />
+      {auth?.authenticated && auth.user ? <AccountMenu key={auth.user.mid} user={auth.user} onLogout={() => void logout()} loggingOut={loggingOut} /> : <button className="login-button" disabled={!auth} onClick={() => setLoginOpen(true)}><UserCircle size={21} /><span>登录</span></button>}
     </nav>
   </header>
     {(auth?.needsLogin || authError) && <div className="session-notice" role="status"><span>{authError || auth?.message || '登录已失效，请重新登录。'}</span><button onClick={() => authError ? void refreshAuth().catch(error => setAuthError(errorMessage(error))) : setLoginOpen(true)}>{authError ? '重试连接' : '重新登录'}</button><button className="notice-close" aria-label="关闭提示" onClick={() => { setAuthError(''); setAuth(state => state ? { ...state, needsLogin: false } : state); }}>×</button></div>}
@@ -73,6 +77,35 @@ export function App() {
   </BrowsingContext.Provider>;
 }
 
+const themePreferenceKey = 'bilight:theme';
+
+function AccountMenu({ user, onLogout, loggingOut }: { user: NonNullable<AuthState['user']>; onLogout: () => void; loggingOut: boolean }) {
+  const { details, setOpen } = useDismissibleDetails();
+  return <details className="account-menu" name="header-popover" ref={details} onToggle={event => setOpen(event.currentTarget.open)}>
+    <summary aria-label={`账号：${user.name}`}><img src={user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary>
+    <div className="account-popover"><p>{user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span>
+      <button onClick={onLogout} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button>
+    </div>
+  </details>;
+}
+
+function ThemeToggle() {
+  const [dark, setDark] = useState(() => {
+    try { return sessionStorage.getItem(themePreferenceKey) === 'dark'; }
+    catch { return false; }
+  });
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', dark ? '#15161c' : '#ffffff');
+  }, [dark]);
+  const label = dark ? '切换到浅色模式' : '切换到深色模式';
+  return <button type="button" className="icon-button theme-toggle" aria-label={label} title={label} onClick={() => {
+    setDark(!dark);
+    try { sessionStorage.setItem(themePreferenceKey, dark ? 'light' : 'dark'); }
+    catch { /* The current page can still change appearance. */ }
+  }}>{dark ? <Sun size={21} aria-hidden="true" /> : <Moon size={21} aria-hidden="true" />}</button>;
+}
+
 function Home() {
   useEffect(() => { document.title = 'Bilight · 只看想看的'; }, []);
   return <div className="home-page"><section className="home-search" aria-labelledby="home-title"><span className="home-kicker">你的哔哩哔哩，清爽一点。</span><h1 id="home-title">只看<span>想看的。</span></h1><SearchBox large /><p className="home-footnote">没有推荐，从你想看的内容开始。</p></section><footer className="home-footer"><span className="focus-mark" aria-hidden="true"><Check size={12} weight="bold" /></span>搜索与关注，由你选择。</footer></div>;
@@ -83,13 +116,32 @@ function Search() {
   const keyword = params.get('keyword') ?? params.get('q') ?? '';
   const type = params.get('type') === 'user' ? 'user' : 'video';
   const page = positivePage(params.get('page'));
+  const [filters, setFilters] = useState(readSearchPreferences);
   const [refresh, setRefresh] = useBrowsingRefresh();
-  const { data, error, loading } = useBrowsingResource<SearchPage>(keyword ? `/api/search?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}` : null, refresh);
+  const order = type === 'video' && filters.order !== 'totalrank' ? `&order=${filters.order}` : '';
+  const { data, error, loading } = useBrowsingResource<SearchPage>(keyword ? `/api/search?keyword=${encodeURIComponent(keyword)}&type=${type}&page=${page}${order}` : null, refresh);
+  const videos = data ? filters.titleOnly ? matchingSearchTitles(data.videos, keyword) : data.videos : [];
   useEffect(() => { document.title = keyword ? `${keyword} · 搜索 · Bilight` : '搜索 · Bilight'; }, [keyword]);
   function change(nextType: string, nextPage = 1) { setParams({ keyword, type: nextType, page: String(nextPage) }); }
+  function changeFilters(next: SearchPreferences) {
+    if (next.order === filters.order && next.titleOnly === filters.titleOnly) return;
+    setFilters(next);
+    saveSearchPreferences(next);
+    if (page !== 1) change(type);
+  }
   return <div className="page-container search-page"><div className="page-heading"><div><p className="section-eyebrow">搜索结果</p><h1>{keyword || '你想看什么？'}</h1></div></div>
-    <div className="content-tabs" role="tablist" aria-label="搜索类型"><button role="tab" aria-selected={type === 'video'} className={type === 'video' ? 'active' : ''} onClick={() => change('video')}>视频</button><button role="tab" aria-selected={type === 'user'} className={type === 'user' ? 'active' : ''} onClick={() => change('user')}>UP 主</button></div>
-    {!keyword ? <Empty title="输入关键词，开始搜索">也可以直接粘贴 B 站视频链接或 BV 号。</Empty> : loading ? <Loading text="正在搜索" /> : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} /> : data && (type === 'video' ? data.videos.length ? <VideoGrid videos={data.videos} /> : <Empty title="没有找到相关视频">换个关键词再试试。</Empty> : data.users.length ? <div className="creator-results">{data.users.map(user => <CreatorRow key={user.mid} creator={user} />)}</div> : <Empty title="没有找到相关 UP 主">换个关键词再试试。</Empty>)}
+    <div className="search-results-bar">
+      <div className="content-tabs" role="tablist" aria-label="搜索类型"><button role="tab" aria-selected={type === 'video'} className={type === 'video' ? 'active' : ''} onClick={() => change('video')}>视频</button><button role="tab" aria-selected={type === 'user'} className={type === 'user' ? 'active' : ''} onClick={() => change('user')}>UP 主</button></div>
+      {keyword && type === 'video' && <SearchFilters value={filters} onChange={changeFilters} />}
+    </div>
+    {!keyword ? <Empty title="输入关键词，开始搜索">也可以直接粘贴 B 站视频链接或 BV 号。</Empty>
+      : loading ? <Loading text="正在搜索" />
+      : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} />
+      : data && (type === 'video' ? videos.length ? <VideoGrid videos={videos} />
+        : filters.titleOnly ? <Empty title="本页没有标题匹配的视频">{data.hasMore ? `可以翻到下一页，或关闭「${titleFilterLabel}」。` : `可以关闭「${titleFilterLabel}」，或换个关键词。`}</Empty>
+        : <Empty title="没有找到相关视频">换个关键词再试试。</Empty>
+        : data.users.length ? <div className="creator-results">{data.users.map(user => <CreatorRow key={user.mid} creator={user} />)}</div>
+        : <Empty title="没有找到相关 UP 主">换个关键词再试试。</Empty>)}
     {data && <Pagination page={page} hasMore={data.hasMore} onChange={next => change(type, next)} />}
   </div>;
 }
