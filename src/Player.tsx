@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type Artplayer from 'artplayer';
 import type { Result as DanmakuPlugin, Danmu } from 'artplayer-plugin-danmuku';
 import type { MediaPlayerClass } from 'dashjs';
@@ -6,22 +7,34 @@ import { ChatCircleDots, SpinnerGap } from '@phosphor-icons/react';
 import type { Danmaku, Playback, Subtitle, WatchProgress } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { Failure, Loading, useResource } from './components';
-import { defaultSubtitle, installProgressShortcuts, installTemporarySpeed, playbackPosition, qualitySetting, switchPlaybackSource, type PlaybackPosition } from './playback';
+import { defaultSubtitle, installProgressShortcuts, installTemporarySpeed, playbackPosition, switchPlaybackSource, type PlaybackPosition } from './playback';
 import { observeWatchProgress } from './watchHistory';
 import { playbackPreferences } from './playbackPreferences';
+import { PlayerSettings, defaultDanmakuStyle, playbackSpeeds } from './PlayerSettings';
+import { WatchLaterButton } from './WatchLater';
+
+const noSubtitles: Subtitle[] = [];
 
 // Called when entering the video route, so module download/parse overlaps detail and source requests.
 export function preloadPlayer() { return Promise.all([import('artplayer'), import('dashjs')]); }
 
-export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { bvid: string; cid: number; poster: string; startTime?: number; accountMid?: number }) {
+export function VideoPlayer({ bvid, aid, cid, poster, startTime = 0, accountMid, onLogin }: { bvid: string; aid: number; cid: number; poster: string; startTime?: number; accountMid?: number; onLogin: () => void }) {
   const [quality, setQuality] = useState<number | undefined>();
   const [selectedPlayback, setSelectedPlayback] = useState<Playback | null>(null);
   const [qualityBusy, setQualityBusy] = useState(false);
+  const [qualityError, setQualityError] = useState('');
   const [refresh, setRefresh] = useState(0);
   const [subtitleRefresh, setSubtitleRefresh] = useState(0);
   const [speed, setSpeed] = useState(1);
+  const changeSpeed = (rate: number) => {
+    if (resumePosition.current) resumePosition.current.rate = rate;
+    setSpeed(rate);
+  };
   const [subtitle, setSubtitle] = useState<string | null>(null);
   const [danmaku, setDanmaku] = useState(() => playbackPreferences.danmaku);
+  const [danmakuStyle, setDanmakuStyle] = useState(defaultDanmakuStyle);
+  const wantedDanmakuStyle = useRef(danmakuStyle); wantedDanmakuStyle.current = danmakuStyle;
+  const danmakuComments = useRef<Danmu[]>([]);
   const wantedDanmaku = useRef(danmaku); wantedDanmaku.current = danmaku;
   const danmakuPluginReady = useRef(false);
   const changeDanmaku = (enabled: boolean) => {
@@ -47,7 +60,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
   const captions = useResource<Subtitle[]>(`/api/videos/${bvid}/subtitles?cid=${cid}`, subtitleRefresh + refresh);
   const { error, loading } = initial;
   const data = selectedPlayback ?? initial.data;
-  const subtitles = captions.data ?? data?.subtitles ?? [];
+  const subtitles = captions.data ?? data?.subtitles ?? noSubtitles;
   const subtitleId = subtitle ?? defaultSubtitle(subtitles);
   const wantedSubtitle = useRef(subtitleId); wantedSubtitle.current = subtitleId;
   selectQuality.current = async nextQuality => {
@@ -58,7 +71,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     if (!qualityRequest.current && nextQuality === data.quality) return label();
     qualityRequest.current?.abort();
     const controller = new AbortController(); qualityRequest.current = controller;
-    setQuality(nextQuality); setQualityBusy(true); setPlayerError('');
+    setQuality(nextQuality); setQualityBusy(true); setPlayerError(''); setQualityError('');
     try {
       const next = await api<Playback>(`/api/videos/${bvid}/playback?cid=${cid}&quality=${nextQuality}`, { signal: AbortSignal.any([controller.signal, AbortSignal.timeout(30_000)]) });
       if (controller.signal.aborted || playerRef.current !== player || !switchPlayback.current) return label();
@@ -72,7 +85,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
       return next.qualities.find(item => item.id === next.quality)?.label ?? '';
     } catch (error) {
       if (!controller.signal.aborted) {
-        setPlayerError(`清晰度切换失败：${errorMessage(error)}`);
+        setQualityError(`清晰度切换失败：${errorMessage(error)}`);
         setQuality(data.quality);
         setReady(player.video.readyState >= 3);
         if (player.video.readyState >= 3) resumePosition.current = null;
@@ -88,7 +101,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     setSelectedPlayback(null); setQuality(undefined);
     if (!source || !mount.current) return;
     let cancelled = false; let player: Artplayer | undefined; let dash: MediaPlayerClass | undefined; let removeProgressShortcuts: (() => void) | undefined; let removeTemporarySpeed: (() => void) | undefined;
-    setPlayerError(''); setReady(false);
+    setPlayerError(''); setQualityError(''); setReady(false);
     async function create() {
       try {
         const [{ default: Artplayer }, dashModule] = await preloadPlayer();
@@ -99,8 +112,8 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
         Artplayer.LOG_VERSION = false;
         player = new Artplayer({ container: mount.current, url, poster, type: source!.manifestUrl ? 'mpd' : 'mp4',
           theme: '#e95283', lang: 'zh-cn', autoplay: false, autoPlayback: false, autoMini: false, loop: false,
-          fullscreen: true, fullscreenWeb: true, hotkey: true, pip: true, playbackRate: true, setting: true,
-          settings: [qualitySetting(source!, id => selectQuality.current(id))],
+          fullscreen: true, fullscreenWeb: true, hotkey: true, pip: true, setting: false,
+          controls: [{ name: 'bilightSettings', position: 'right', index: 30, html: '' }],
           screenshot: false, moreVideoAttr: { playsInline: true, preload: 'metadata' },
           customType: { mpd(video, source) {
             if (!dashjs) return;
@@ -113,6 +126,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
           }, mp4(video, source) { dash?.reset(); dash = undefined; video.src = source; } },
         });
         playerRef.current = player;
+        player.template.$player.classList.add('bilight-player');
         removeProgressShortcuts = installProgressShortcuts(player, document, () => Boolean(qualityRequest.current && resumePosition.current));
         removeTemporarySpeed = installTemporarySpeed(player, player.template.$player);
         switchPlayback.current = async (next, signal, position) => {
@@ -137,7 +151,6 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
           });
         });
         player.on('error', () => { if (!cancelled) setPlayerError('播放遇到问题，请重新加载视频。'); });
-        player.on('video:ratechange', () => { if (!cancelled && player) setSpeed(player.playbackRate); });
         player.on('artplayerPluginDanmuku:hide', () => { if (!cancelled && danmakuPluginReady.current && wantedDanmaku.current) changeDanmaku(false); });
         player.on('artplayerPluginDanmuku:show', () => { if (!cancelled && danmakuPluginReady.current && !wantedDanmaku.current) changeDanmaku(true); });
         setCreated(true);
@@ -147,6 +160,7 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     return () => {
       cancelled = true;
       danmakuPluginReady.current = false;
+      danmakuComments.current = [];
       removeProgressShortcuts?.();
       removeTemporarySpeed?.();
       qualityRequest.current?.abort(); qualityRequest.current = null; switchPlayback.current = null;
@@ -181,12 +195,6 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
       document.removeEventListener('visibilitychange', hide); window.removeEventListener('pagehide', leave);
     };
   }, [created, bvid, cid, accountMid]);
-  useEffect(() => {
-    if (!created || !data) return;
-    const setting = qualitySetting(data, id => selectQuality.current(id));
-    if (qualityBusy) setting.tooltip = '正在切换…';
-    playerRef.current?.setting.update(setting);
-  }, [data, created, qualityBusy]);
   useEffect(() => { if (ready && playerRef.current) playerRef.current.playbackRate = speed; }, [speed, ready]);
   useEffect(() => {
     const player = playerRef.current;
@@ -208,8 +216,10 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     const controller = new AbortController(); setDanmakuBusy(true);
     Promise.all([api<Danmaku[]>(`/api/videos/${bvid}/danmaku?cid=${cid}`, { signal: controller.signal }), import('./vendor/artplayer-plugin-danmuku.mjs')]).then(async ([items, { default: plugin }]) => {
       if (controller.signal.aborted || playerRef.current !== player) return;
-      const comments: Danmu[] = items.map(item => ({ text: item.text, time: item.time, color: item.color, mode: item.mode === 4 ? 2 : item.mode === 5 ? 1 : 0, style: { fontSize: `${Math.min(36, Math.max(14, item.fontSize))}px` } }));
-      await player.plugins.add(plugin({ danmuku: comments, visible: wantedDanmaku.current, emitter: false, heatmap: false, opacity: 0.8, fontSize: 22, antiOverlap: true }));
+      const comments: Danmu[] = items.map(item => ({ text: item.text, time: item.time, color: item.color, mode: item.mode === 4 ? 2 : item.mode === 5 ? 1 : 0, style: { fontSize: `calc(${Math.min(36, Math.max(14, item.fontSize))}px * var(--bilight-danmaku-scale, 1))` } }));
+      danmakuComments.current = comments;
+      const style = wantedDanmakuStyle.current;
+      await player.plugins.add(plugin({ danmuku: comments, visible: wantedDanmaku.current, emitter: false, heatmap: false, opacity: style.opacity, margin: [0, `${100 - style.area * 100}%`], antiOverlap: true }));
       const installed = player.plugins.artplayerPluginDanmuku as DanmakuPlugin | undefined;
       if (playerRef.current !== player) return;
       if (wantedDanmaku.current) installed?.show(); else installed?.hide();
@@ -217,15 +227,34 @@ export function VideoPlayer({ bvid, cid, poster, startTime = 0, accountMid }: { 
     }).catch(error => { if (!controller.signal.aborted && playerRef.current === player && !isAbort(error)) setPlayerError(`弹幕加载失败：${errorMessage(error)}`); }).finally(() => { if (!controller.signal.aborted) setDanmakuBusy(false); });
     return () => controller.abort();
   }, [danmaku, created, bvid, cid]);
+  useEffect(() => {
+    const player = playerRef.current;
+    if (!created || !player) return;
+    player.template.$danmuku.style.setProperty('--bilight-danmaku-scale', String(danmakuStyle.fontSize / defaultDanmakuStyle.fontSize));
+    const plugin = player.plugins.artplayerPluginDanmuku as DanmakuPlugin | undefined;
+    plugin?.config({ danmuku: danmakuComments.current, opacity: danmakuStyle.opacity, margin: [0, `${100 - danmakuStyle.area * 100}%`] });
+  }, [created, danmakuStyle]);
+  const player = created ? playerRef.current : null;
+  const settingsTarget = player?.controls.bilightSettings;
+  function loginFromPlayer() {
+    if (player?.fullscreenWeb) player.fullscreenWeb = false;
+    if (document.fullscreenElement) void document.exitFullscreen().then(onLogin, onLogin);
+    else onLogin();
+  }
   return <section className="player-section" aria-label="视频播放器" aria-keyshortcuts="ArrowLeft ArrowRight" aria-busy={!ready && !error && !playerError}>
     <div className="player-shell">{loading ? <Loading text="正在准备视频" /> : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} /> : <div className="art-player" ref={mount} />}</div>
+    {player && createPortal(<WatchLaterButton aid={aid} inPlayer onLogin={loginFromPlayer} />, player.template.$player)}
+    {player && settingsTarget && createPortal(<PlayerSettings player={player} data={data} pendingQuality={qualityBusy ? quality : undefined} qualityError={qualityError} selectQuality={id => { void selectQuality.current(id); }}
+      speed={speed} setSpeed={changeSpeed} subtitles={subtitles} subtitleId={subtitleId} setSubtitle={setSubtitle} subtitleError={captions.error ? errorMessage(captions.error) : undefined} retrySubtitle={() => setSubtitleRefresh(value => value + 1)}
+      danmaku={danmaku} setDanmaku={changeDanmaku} danmakuStyle={danmakuStyle} setDanmakuStyle={setDanmakuStyle} />, settingsTarget)}
     {historyError && <p className="history-save-error" role="status">{historyError}<button className="text-button" onClick={() => retryHistory.current?.()}>重试同步</button></p>}
     {captions.error && <p className="history-save-error" role="status">字幕加载失败：{errorMessage(captions.error)}<button className="text-button" onClick={() => setSubtitleRefresh(value => value + 1)}>重试字幕</button></p>}
     <div className="playback-toolbar"><div className="playback-options">
       <label><span>清晰度</span><select aria-label="清晰度" value={quality ?? data?.quality ?? ''} disabled={!data || !created || loading} onChange={event => { void selectQuality.current(Number(event.target.value)); }}>{data?.qualities.map(item => <option value={item.id} key={item.id}>{item.label}</option>)}</select></label>
-      <label><span>倍速</span><select aria-label="播放速度" value={speed} onChange={event => setSpeed(Number(event.target.value))}>{[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map(value => <option key={value} value={value}>{value === 1 ? '正常' : `${value}×`}</option>)}</select></label>
+      <label><span>倍速</span><select aria-label="播放速度" value={speed} onChange={event => changeSpeed(Number(event.target.value))}>{playbackSpeeds.map(value => <option key={value} value={value}>{value === 1 ? '正常' : `${value}×`}</option>)}</select></label>
       {Boolean(subtitles.length) && <label><span>字幕</span><select aria-label="字幕" value={subtitleId} onChange={event => setSubtitle(event.target.value)}><option value="">关闭</option>{subtitles.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}</select></label>}
     </div><button className={`danmaku-toggle${danmaku ? ' active' : ''}`} aria-pressed={danmaku} onClick={() => changeDanmaku(!danmaku)} disabled={!created}>{danmakuBusy ? <SpinnerGap className="spin" size={18} /> : <ChatCircleDots size={18} />}<span>弹幕{danmaku ? '开' : '关'}</span><span className="toggle-track" aria-hidden="true"><span /></span></button></div>
+    {qualityError && <p className="playback-error" role="alert">{qualityError}</p>}
     {playerError && <div className="playback-error" role="alert"><span>{playerError}</span><button className="text-button" onClick={() => setRefresh(value => value + 1)}>重新加载</button></div>}
   </section>;
 }

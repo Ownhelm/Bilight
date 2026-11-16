@@ -264,6 +264,43 @@ test('account avatars accept the real CDN image/jpg MIME alias through the local
   assert.equal(response.headers['x-content-type-options'], 'nosniff');
 });
 
+test('dynamic comment emotes use only registered CDN images and preserve Unicode and fallback text', async t => {
+  const id = '9223372036854775900', oid = '9223372036854775901';
+  const emote = 'https://i0.hdslb.com/bfs/emote/doge.png';
+  const message = '🙂 [doge] [未验证] [普通文本]';
+  const transport = {
+    jar: {}, ensureDeviceCookies: async () => {},
+    request: async (url: string) => {
+      if (url.endsWith('/web-dynamic/v1/detail')) return { item: { id_str: id, basic: { comment_id_str: oid, comment_type: 17 } } };
+      assert.match(url, /\/reply\/wbi\/main$/);
+      return { cursor: { is_end: true }, replies: [{ rpid_str: '1', content: { message, emote: {
+        '[doge]': { url: emote }, '[未验证]': { url: 'https://other.example/doge.png' },
+        '[多余]': { url: 'https://i0.hdslb.com/bfs/emote/unused.png' },
+      } }, replies: [{ rpid_str: '2', content: { message: '[doge]', emote: { '[doge]': { url: emote } } } }] }] };
+    },
+  } as unknown as BiliHttp;
+  const remote = new BiliGateway(transport);
+  const image = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/L5sAAAAASUVORK5CYII=', 'base64');
+  const media = new MediaRegistry(remote, (async (url, init) => {
+    assert.equal(String(url), emote);
+    assert.equal(new Headers(init?.headers).get('Cookie'), null);
+    return new Response(image, { headers: { 'Content-Type': 'image/png', 'Content-Length': String(image.length) } });
+  }) as typeof fetch);
+  const app = await createApp({ auth, gateway: remote, media, key: randomBytes(32), staticDir: '/nonexistent' });
+  t.after(() => app.close());
+  const response = await app.inject({ url: `/api/dynamics/${id}/comments`, headers: host });
+  assert.equal(response.statusCode, 200);
+  const [row] = response.json().items;
+  assert.equal(row.text, message);
+  assert.deepEqual(Object.keys(row.emotes), ['[doge]']);
+  const path = row.emotes['[doge]'];
+  assert.match(path, /^\/api\/media\/[\da-f-]+$/);
+  assert.deepEqual(row.replies[0].emotes, { '[doge]': path });
+  const proxied = await app.inject({ url: path, headers: host });
+  assert.equal(proxied.headers['content-type'], 'image/png');
+  assert.deepEqual(proxied.rawPayload, image);
+});
+
 test('media proxy preserves Range and partial response without forwarding cookies', async () => {
   let seen: RequestInit | undefined;
   const media = new MediaRegistry(gateway, (async (_url, init) => { seen = init; return new Response('data', { status: 206, headers: { 'Content-Range': 'bytes 0-3/100', 'Content-Type': 'video/mp4', 'Accept-Ranges': 'bytes' } }); }) as typeof fetch);
@@ -314,4 +351,36 @@ test('dynamic like routes require session, origin and a boolean target, and prox
   assert.equal((await app.inject({method:'POST',url:`/api/dynamics/${id}/like`,headers,payload:{liked:1}})).statusCode,400);
   assert.equal(writes,0);
   const result=await app.inject({method:'POST',url:`/api/dynamics/${id}/like`,headers,payload:{liked:true}});assert.equal(result.statusCode,200);assert.equal(result.json().liked,true);assert.equal(writes,1);
+});
+
+test('video comment writes require the active account and signed local origin, with proxied mention avatars', async t => {
+  const viewer = { mid: 7, name: 'Viewer', avatar: '' };
+  const invite = { mid: 8, name: 'Reader', avatar: 'https://i0.hdslb.com/avatar.jpg' };
+  const comment = { id: '12', user: viewer, text: '@Reader 你好', createdAt: 1, likes: 0, liked: false, replies: [] };
+  let authenticated = true, writes = 0;
+  const remote = { ...gateway,
+    postVideoComment: async (key: string) => { assert.equal(key, bvid); writes++; return comment; },
+    setVideoCommentLike: async (key: string, id: string, liked: boolean, mid: number) => {
+      assert.deepEqual([key, id, liked, mid], [bvid, '12', true, viewer.mid]); writes++; return { liked, likes: 1 };
+    },
+    commentMentionUsers: async (query: string) => { assert.equal(query, 'Reader'); return [invite]; },
+  } as unknown as BiliGateway;
+  const app = await createApp({
+    auth: { ...auth, state: async () => authenticated ? { authenticated, user: viewer } : { authenticated } } as AuthService,
+    gateway: remote, key: randomBytes(32), staticDir: '/nonexistent',
+  });
+  t.after(() => app.close());
+  const initial = await app.inject({ url: '/api/auth/state', headers: host });
+  const headers = { ...host, cookie: String(initial.headers['set-cookie']).split(';')[0], origin: 'http://127.0.0.1:3880', 'x-bilight-request': '1' };
+  const endpoint = `/api/videos/${bvid}/comments`, payload = { text: comment.text, accountMid: 7 };
+  const mention = await app.inject({ url: `${endpoint}/mention-users?q=Reader`, headers });
+  assert.equal(mention.statusCode, 200);
+  assert.match(mention.json().items[0].avatar, /^\/api\/media\//);
+  assert.equal((await app.inject({ method: 'POST', url: endpoint, headers: { ...headers, origin: 'https://invalid.example' }, payload })).statusCode, 403);
+  assert.equal((await app.inject({ method: 'POST', url: endpoint, headers, payload: { ...payload, accountMid: 8 } })).statusCode, 409);
+  assert.equal((await app.inject({ method: 'POST', url: endpoint, headers, payload })).json().id, '12');
+  assert.deepEqual((await app.inject({ method: 'POST', url: `${endpoint}/12/like`, headers, payload: { accountMid: 7, liked: true } })).json(), { liked: true, likes: 1 });
+  authenticated = false;
+  assert.equal((await app.inject({ method: 'POST', url: endpoint, headers, payload })).statusCode, 401);
+  assert.equal(writes, 2);
 });

@@ -179,8 +179,8 @@ test('coin policy follows the actual copyright limit and forwards the simultaneo
   assert.equal(calls.find(call => call.options.method === 'POST')?.options.form?.select_like, 1);
   await assert.rejects(gateway.interact(BV1, { type: 'coin', coins: 1, selectLike: 'yes' } as never), { code: 'INVALID_INPUT' });
   for (const copyright of [1, 2, 3]) {
-    const video = fixture(() => ({ aid: 42, copyright, stat: { like: 10, coin: 20, favorite: 30 } }));
-    assert.deepEqual((await video.gateway.video(BV1)).interaction, { coinLimit: copyright === 2 ? 1 : 2, likes: 10, coins: 20, favorites: 30 });
+    const video = fixture(() => ({ aid: 42, copyright, stat: { like: 10, coin: 20, favorite: 30, share: 40 } }));
+    assert.deepEqual((await video.gateway.video(BV1)).interaction, { coinLimit: copyright === 2 ? 1 : 2, likes: 10, coins: 20, favorites: 30, shares: 40 });
   }
 });
 
@@ -446,7 +446,7 @@ test('replacing the session jar cannot reuse or overwrite a newer follow-list bu
   transport.jar = new CookieJar();
   try { assert.deepEqual((await gateway.following()).items.map(item => item.bvid), [BV2]); }
   finally { release.resolve(); }
-  await old;
+  await assert.rejects(old, { code: 'LOGIN_REQUIRED' });
   assert.deepEqual((await gateway.following()).items.map(item => item.bvid), [BV2]);
   assert.equal(builds, 2, 'the older completion must not replace the new session cache');
 });
@@ -728,6 +728,142 @@ test('reply pages reject wrong roots, wrong videos and malformed or fake empty p
   assert.equal(invalid.calls.length, 0);
 });
 
+const commentRow = (overrides: Record<string, unknown> = {}) => ({
+  rpid_str: '12', oid_str: '42', type: 1, root_str: '11', parent_str: '11',
+  member: { mid: 7, uname: 'Viewer' }, content: { message: '回复' }, ctime: 3, like: 2, action: 0, ...overrides,
+});
+
+test('comment posting uses the actual video, parent and selected Bilibili mention, and maps the returned row', async () => {
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/wbi/view')) return { aid: 42 };
+    if (url.endsWith('/reply/detail')) {
+      assert.deepEqual(options.query, { type: 1, oid: 42, root: '12' });
+      return { root: commentRow() };
+    }
+    assert.match(url, /\/reply\/add$/);
+    assert.equal(options.method, 'POST');
+    assert.equal(options.wbi, true);
+    assert.equal(options.sessionJar, transport.jar);
+    assert.deepEqual(options.form, {
+      oid: 42, type: 1, plat: 1, message: '@Reader 你好', root: '11', parent: '12',
+      csrf: 'fixture-csrf', gaia_source: 'main_web', at_name_to_mid: '{"Reader":8}',
+    });
+    return { reply: commentRow({
+      rpid_str: '13', parent_str: '12', content: { message: '@Reader 你好', members: [{ mid: 8, uname: 'Reader' }] },
+    }) };
+  });
+  await loginFixture(transport);
+  const response = await gateway.postVideoComment(BV1, { text: '@Reader 你好', root: '11', parent: '12', mentions: [{ mid: 8, name: 'Reader' }], accountMid: 7 });
+  assert.equal(response.id, '13');
+  assert.equal(response.liked, false);
+  assert.deepEqual(response.mentions, [{ mid: 8, name: 'Reader' }]);
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+  await assert.rejects(gateway.postVideoComment(BV1, { text: '@ReaderOther', mentions: [{ mid: 8, name: 'Reader' }], accountMid: 7 }), { code: 'INVALID_MENTION' });
+  await assert.rejects(gateway.postVideoComment(BV1, { text: '错楼', root: '10', parent: '12', accountMid: 7 }), { code: 'INVALID_COMMENT' });
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+});
+
+test('comment likes reread exact upstream count, reject wrong videos and skip duplicate writes', async () => {
+  let liked = false, wrongVideo = false;
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/wbi/view')) return { aid: 42 };
+    if (url.endsWith('/reply/detail')) return { root: commentRow({ oid_str: wrongVideo ? '99' : '42', action: liked ? 1 : 0, like: liked ? 4 : 2 }) };
+    assert.match(url, /\/reply\/action$/);
+    assert.deepEqual(options.form, { oid: 42, type: 1, rpid: '12', action: liked ? 0 : 1, csrf: 'fixture-csrf' });
+    liked = !liked;
+    return null;
+  });
+  await loginFixture(transport);
+  for (const target of [true, true, false]) assert.deepEqual(await gateway.setVideoCommentLike(BV1, '12', target, 7), { liked: target, likes: target ? 4 : 2 });
+  wrongVideo = true;
+  await assert.rejects(gateway.setVideoCommentLike(BV1, '12', true, 7), { code: 'COMMENT_UNAVAILABLE' });
+  await assert.rejects(gateway.setVideoCommentLike(BV1, '12', true, 8), { code: 'ACCOUNT_CHANGED' });
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 2);
+});
+
+test('comment like confirmation waits when the viewer flag arrives before the total', async () => {
+  let wrote = false, polls = 0;
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/wbi/view')) return { aid: 42 };
+    if (url.endsWith('/reply/detail')) {
+      if (wrote) polls++;
+      return { root: commentRow({ action: wrote ? 1 : 0, like: polls < 2 ? 12 : 14 }) };
+    }
+    assert.equal(options.form?.action, 1);
+    wrote = true;
+    return null;
+  });
+  await loginFixture(transport);
+  assert.deepEqual(await gateway.setVideoCommentLike(BV1, '12', true, 7), { liked: true, likes: 14 });
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+});
+
+test('dynamic comments use the upstream thread type and opaque target for reading, replies and likes', async () => {
+  const dynamicId = '9223372036854775900', oid = '9223372036854775901';
+  let threadType = 17, observedType = 17, liked = false;
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/web-dynamic/v1/detail')) {
+      assert.equal(options.query?.id, dynamicId);
+      return { item: { ...post(BV1, 7, 0), id_str: dynamicId, basic: { comment_id_str: oid, comment_type: threadType } } };
+    }
+    if (url.endsWith('/reply/wbi/main')) {
+      assert.equal(options.query?.oid, oid);
+      assert.equal(options.query?.type, 17);
+      return { cursor: { is_end: true }, replies: [commentRow({ oid_str: oid, type: 17, rpid_str: '11' })] };
+    }
+    if (url.endsWith('/reply/reply')) {
+      assert.deepEqual(options.query, { oid, type: 17, root: '11', pn: 1, ps: 20 });
+      return { root: commentRow({ oid_str: oid, type: 17, rpid_str: '11' }), page: { num: 1, size: 20, count: 1 }, replies: [commentRow({ oid_str: oid, type: 17 })] };
+    }
+    if (url.endsWith('/reply/detail')) {
+      assert.deepEqual(options.query, { oid, type: 17, root: '12' });
+      return { root: commentRow({ oid_str: oid, type: observedType, action: liked ? 1 : 0, like: liked ? 3 : 2 }) };
+    }
+    assert.equal(options.sessionJar, transport.jar);
+    assert.equal(options.form?.oid, oid);
+    assert.equal(options.form?.type, 17);
+    if (url.endsWith('/reply/add')) {
+      assert.equal(options.form?.root, '11');
+      assert.equal(options.form?.parent, '12');
+      return { reply: commentRow({ oid_str: oid, type: 17, rpid_str: '13', parent_str: '12' }) };
+    }
+    assert.match(url, /\/reply\/action$/);
+    assert.equal(options.form?.rpid, '12');
+    liked = true;
+  });
+  await loginFixture(transport);
+  assert.equal((await gateway.dynamicComments(dynamicId)).items[0].id, '11');
+  assert.equal((await gateway.dynamicCommentReplies(dynamicId, '11')).items[0].id, '12');
+  const input = { root: '11', parent: '12', text: '回复动态', accountMid: 7 };
+  assert.equal((await gateway.postDynamicComment(dynamicId, input)).id, '13');
+  assert.deepEqual(await gateway.setDynamicCommentLike(dynamicId, '12', true, 7), { liked: true, likes: 3 });
+  observedType = 1;
+  await assert.rejects(gateway.postDynamicComment(dynamicId, input), { code: 'COMMENT_UNAVAILABLE' });
+  threadType = 1;
+  await assert.rejects(gateway.dynamicComments(dynamicId), { code: 'COMMENT_UNAVAILABLE' });
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 2);
+});
+
+test('comment @ lookup preserves official accounts and distinguishes failure from empty results', async () => {
+  const { gateway, calls } = fixture(() => ({ groups: [{ items: [{ mid: 8, name: 'Reader', face: '//i0.hdslb.com/avatar.jpg' }, { mid: 8, name: 'Reader' }, { mid: 0, name: 'Invalid' }] }] }));
+  assert.deepEqual(await gateway.commentMentionUsers('Read'), [{ mid: 8, name: 'Reader', avatar: 'https://i0.hdslb.com/avatar.jpg' }]);
+  assert.deepEqual(calls[0].options.query, { keyword: 'Read' });
+  assert.match(calls[0].url, /\/reply\/at$/);
+  await assert.rejects(fixture(() => ({ groups: [{}] })).gateway.commentMentionUsers('Read'), { code: 'MENTIONS_UNAVAILABLE' });
+});
+
+test('lost reply acknowledgement is reported as uncertain without retrying the public post', async () => {
+  const { gateway, transport, calls } = fixture(({ url, options }) => {
+    if (url.endsWith('/wbi/view')) return { aid: 42 };
+    assert.equal(options.form?.root, undefined);
+    assert.equal(options.form?.parent, undefined);
+    throw new BiliError('UPSTREAM_UNAVAILABLE', 'Lost reply');
+  });
+  await loginFixture(transport);
+  await assert.rejects(gateway.postVideoComment(BV1, { text: '草稿', accountMid: 7 }), { code: 'COMMENT_UNCONFIRMED' });
+  assert.equal(calls.filter(call => call.options.method === 'POST').length, 1);
+});
+
 const dynamicID = '1057955152016703512';
 function dynamicItem(liked: boolean, likes = 12) {
   const item = post(BV1, 7, 1700000000, { id_str: dynamicID });
@@ -770,4 +906,79 @@ test('an uncertain dynamic like performs bounded reads and never retries the wri
   const f = fixture(({ options }) => { if (options.json) throw new BiliError('NETWORK_ERROR', 'Disconnected'); return { item: dynamicItem(false) }; });
   await loginFixture(f.transport); await assert.rejects(f.gateway.setDynamicLike(dynamicID, true), { code: 'NETWORK_ERROR' });
   assert.equal(f.calls.filter(c => c.options.json).length, 1); assert.equal(f.calls.filter(c => !c.options.json).length, 4);
+});
+
+test('an acknowledged dynamic like waits for late viewer state and a lagging count without writing twice', async () => {
+  let wrote = false, verification = 0;
+  const f = fixture(({ options }) => {
+    if (options.json) { wrote = true; return null; }
+    if (!wrote || ++verification < 3) return { item: dynamicItem(false, 12) };
+    return { item: dynamicItem(true, verification < 4 ? 12 : 13) };
+  });
+  await loginFixture(f.transport);
+  const confirmed = await f.gateway.setDynamicLike(dynamicID, true);
+  assert.equal(confirmed.liked, true);
+  assert.equal(confirmed.likes, 13);
+  assert.equal(f.calls.filter(call => call.options.json).length, 1);
+});
+
+test('following refresh reconciles a stale feed with detail and accepts a real external unlike', async () => {
+  let detailLiked = false, detailLikes = 12, feed = dynamicItem(false, 12);
+  const f = fixture(({ url, options }) => {
+    if (url.endsWith('/nav')) return { isLogin: true, mid: 7 };
+    if (url.endsWith('/followings')) return { list: [{ mid: 7 }], total: 1 };
+    if (url.endsWith('/feed/all')) return { items: [feed], has_more: false };
+    if (options.json) { detailLiked = true; detailLikes = 13; return null; }
+    return { item: dynamicItem(detailLiked, detailLikes) };
+  });
+  await loginFixture(f.transport);
+  assert.equal((await f.gateway.setDynamicLike(dynamicID, true)).likes, 13);
+  const stale = (await f.gateway.following()).items[0];
+  assert.deepEqual([stale.dynamicLiked, stale.dynamicLikes], [true, 13]);
+  feed = dynamicItem(true, 12);
+  const staleCount = (await f.gateway.following()).items[0];
+  assert.deepEqual([staleCount.dynamicLiked, staleCount.dynamicLikes], [true, 13]);
+  (feed.modules as Record<string, unknown>).module_stat = { like: { count: 12 } };
+  const missingStatus = (await f.gateway.following()).items[0];
+  assert.deepEqual([missingStatus.dynamicLiked, missingStatus.dynamicLikes], [true, 13]);
+  detailLiked = false; detailLikes = 14;
+  const external = (await f.gateway.following()).items[0];
+  assert.deepEqual([external.dynamicLiked, external.dynamicLikes], [false, 14]);
+  assert.equal(f.calls.filter(call => call.options.json).length, 1);
+});
+
+test('following requested during a write returns the confirmed result to a fresh reader', async () => {
+  const sent = deferred<void>(), settle = deferred<void>(), feedRead = deferred<void>();
+  let liked = false;
+  const f = fixture(async ({ url, options }) => {
+    if (url.endsWith('/nav')) return { isLogin: true, mid: 7 };
+    if (url.endsWith('/followings')) return { list: [{ mid: 7 }], total: 1 };
+    if (url.endsWith('/feed/all')) { feedRead.resolve(); return { items: [dynamicItem(false)], has_more: false }; }
+    if (options.json) { sent.resolve(); await settle.promise; liked = true; return null; }
+    return { item: dynamicItem(liked, liked ? 13 : 12) };
+  });
+  await loginFixture(f.transport);
+  const write = f.gateway.setDynamicLike(dynamicID, true);
+  await sent.promise;
+  const refresh = f.gateway.following();
+  await feedRead.promise;
+  await new Promise(resolve => setImmediate(resolve));
+  settle.resolve();
+  const [{ items }, confirmed] = await Promise.all([refresh, write]);
+  assert.deepEqual([items[0].dynamicLiked, items[0].dynamicLikes], [confirmed.liked, confirmed.likes]);
+  assert.equal(confirmed.likes, 13);
+});
+
+test('following does not interpret missing viewer status as an unlike', async () => {
+  const item = dynamicItem(true, 13);
+  (item.modules as Record<string, unknown>).module_stat = { like: { count: 13 } };
+  const f = fixture(({ url }) => {
+    if (url.endsWith('/nav')) return { isLogin: true, mid: 7 };
+    if (url.endsWith('/followings')) return { list: [{ mid: 7 }], total: 1 };
+    return { items: [item], has_more: false };
+  });
+  const { items: [video] } = await f.gateway.following();
+  assert.equal(video.dynamicId, dynamicID);
+  assert.equal(video.dynamicLiked, undefined);
+  assert.equal(video.dynamicLikes, undefined);
 });

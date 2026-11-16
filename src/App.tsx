@@ -7,7 +7,7 @@ import { countLabel, dateLabel, duration, Empty, Failure, Loading, Pagination, S
 import { Login } from './Login';
 import { preloadPlayer, VideoPlayer } from './Player';
 import { TripleActions } from './TripleActions';
-import { Comments } from './Comments';
+import { CommentLikes, Comments } from './Comments';
 import { DynamicActions, DynamicDetail, DynamicLikes } from './dynamics';
 import { HistoryMenu, HistoryPage } from './History';
 import { CreatorCollections, CreatorCollectionVideos } from './CreatorCollections';
@@ -16,6 +16,8 @@ import playbackMark from '../branding/playback-mark.svg?no-inline';
 import { BrowsingContext, BrowsingScroll, BrowsingSession, useBrowsingRefresh, useBrowsingResource } from './browsing';
 import { SearchFilters, titleFilterLabel } from './SearchFilters';
 import { matchingSearchTitles, readSearchPreferences, saveSearchPreferences, type SearchPreferences } from './searchPreferences';
+import { WatchLaterButton, WatchLaterGlyph, WatchLaterPage, WatchLaterProvider } from './WatchLater';
+import { WatchLaterStore } from './watchLaterStore';
 
 export function App() {
   const location = useLocation();
@@ -27,8 +29,13 @@ export function App() {
   const dynamicLikes = useMemo(() => new DynamicLikes(), [auth?.user?.mid, authGeneration]);
   const followingCache = useMemo(() => new FollowingFeed(undefined, { version: dynamicLikes.readVersion, accept: dynamicLikes.ingestVideos }), [dynamicLikes]);
   const browsing = useMemo(() => new BrowsingSession(), [auth?.user?.mid, authGeneration]);
+  const accountMid = auth?.authenticated ? auth.user?.mid : undefined;
+  const commentLikes = useMemo(() => new CommentLikes(accountMid), [accountMid, authGeneration]);
+  const watchLater = useMemo(() => new WatchLaterStore(accountMid), [accountMid, authGeneration]);
+  const openLogin = useCallback(() => setLoginOpen(true), []);
   useEffect(() => browsing.attach(), [browsing]);
   useEffect(() => () => { followingCache.clear(); dynamicLikes.clear(); }, [followingCache, dynamicLikes]);
+  useEffect(() => () => commentLikes.clear(), [commentLikes]);
   const refreshAuth = useCallback(async () => {
     const state = await api<AuthState>('/api/auth/state'); setAuth(state); setAuthError('');
     if (state.authenticated) { setLoginOpen(false); setAuthGeneration(value => value + 1); }
@@ -51,7 +58,8 @@ export function App() {
     finally { setLoggingOut(false); }
   }
   const isHome = location.pathname === '/';
-  return <BrowsingContext.Provider value={browsing}><BrowsingScroll /><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
+  const watchLaterActive = ['/search', '/following', '/watch-later'].includes(location.pathname) || /^\/(?:video|creator)\//.test(location.pathname);
+  return <BrowsingContext.Provider value={browsing}><WatchLaterProvider store={watchLater} onLogin={openLogin} active={watchLaterActive}><BrowsingScroll /><a className="skip-link" href="#main-content">跳到主要内容</a><header className={`site-header${isHome ? ' home-header' : ''}`}>
     <Link className="brand" to="/" aria-label="Bilight 首页"><img src={playbackMark} aria-hidden="true" alt="" width="31" height="31" /><span>Bilight</span></Link>
     {!isHome && <div className="header-search"><SearchBox initial={location.pathname === '/search' ? new URLSearchParams(location.search).get('keyword') ?? '' : ''} /></div>}
     <nav className="header-nav" aria-label="主导航"><NavLink className="following-link" to="/following" aria-label="关注" onClick={event => { if (event.button === 0 && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) { window.scrollTo({ top: 0 }); if (auth?.authenticated) void followingCache.enter(); } }}><Bell size={21} /><span>关注</span></NavLink>
@@ -66,15 +74,16 @@ export function App() {
       <Route path="/search" element={<Search />} />
       <Route path="/following" element={<Following key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} cache={followingCache} likes={dynamicLikes} auth={auth} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/history" element={<HistoryPage key={`${auth?.user?.mid ?? 'anonymous'}:${authGeneration}:${location.search}`} auth={auth} onLogin={() => setLoginOpen(true)} />} />
+      <Route path="/watch-later" element={<WatchLaterPage key={`${accountMid}:${authGeneration}`} auth={auth} onLogin={openLogin} />} />
       <Route path="/creator/:mid" element={<Creator />} />
       <Route path="/creator/:mid/collections/:kind/:collectionId" element={<Creator />} />
-      <Route path="/dynamic/:id" element={<DynamicDetail key={`${location.pathname}:${authGeneration}`} store={dynamicLikes} auth={auth} onLogin={() => setLoginOpen(true)} />} />
-      <Route path="/video/:bvid" element={<Video key={location.pathname} auth={auth} authGeneration={authGeneration} onLogin={() => setLoginOpen(true)} />} />
+      <Route path="/dynamic/:id" element={<DynamicDetail key={`${location.pathname}:${authGeneration}`} store={dynamicLikes} commentLikes={commentLikes} auth={auth} onLogin={() => setLoginOpen(true)} />} />
+      <Route path="/video/:bvid" element={<Video key={location.pathname} auth={auth} authGeneration={authGeneration} commentLikes={commentLikes} onLogin={() => setLoginOpen(true)} />} />
       <Route path="/open/*" element={<OpenLink />} />
       <Route path="*" element={<div className="page-container"><Empty title="这个页面还不存在" action={<Link className="button button-primary" to="/">返回首页</Link>}>从搜索开始，找到想看的内容。</Empty></div>} />
     </Routes></main>
     {loginOpen && <Login onClose={() => setLoginOpen(false)} onSuccess={refreshAuth} />}
-  </BrowsingContext.Provider>;
+  </WatchLaterProvider></BrowsingContext.Provider>;
 }
 
 const themePreferenceKey = 'bilight:theme';
@@ -84,6 +93,7 @@ function AccountMenu({ user, onLogout, loggingOut }: { user: NonNullable<AuthSta
   return <details className="account-menu" name="header-popover" ref={details} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary aria-label={`账号：${user.name}`}><img src={user.avatar} alt="" referrerPolicy="no-referrer" /><CaretDown size={12} /></summary>
     <div className="account-popover"><p>{user.name}</p><span className="account-connected"><Check size={13} />账号已连接</span>
+      <Link className="account-watch-later" to="/watch-later" onClick={() => { if (details.current) details.current.open = false; }}><WatchLaterGlyph />稍后再看</Link>
       <button onClick={onLogout} disabled={loggingOut}><SignOut size={16} />{loggingOut ? '正在退出' : '退出登录'}</button>
     </div>
   </details>;
@@ -137,7 +147,7 @@ function Search() {
     {!keyword ? <Empty title="输入关键词，开始搜索">也可以直接粘贴 B 站视频链接或 BV 号。</Empty>
       : loading ? <Loading text="正在搜索" />
       : error ? <Failure error={error} retry={() => setRefresh(value => value + 1)} />
-      : data && (type === 'video' ? videos.length ? <VideoGrid videos={videos} />
+      : data && (type === 'video' ? videos.length ? <VideoGrid videos={videos} renderCoverAction={video => <WatchLaterButton aid={video.aid} />} />
         : filters.titleOnly ? <Empty title="本页没有标题匹配的视频">{data.hasMore ? `可以翻到下一页，或关闭「${titleFilterLabel}」。` : `可以关闭「${titleFilterLabel}」，或换个关键词。`}</Empty>
         : <Empty title="没有找到相关视频">换个关键词再试试。</Empty>
         : data.users.length ? <div className="creator-results">{data.users.map(user => <CreatorRow key={user.mid} creator={user} />)}</div>
@@ -152,6 +162,7 @@ function Following({ auth, onLogin, cache, likes }: { auth: AuthState | null; on
   const scrollIntent = useRef(false), nearEnd = useRef(false);
   const columns = useFollowingColumns();
   const videos = completeFollowingRows(feed.items, columns, Boolean(feed.cursor));
+  const empty = feed.initialized && !feed.error && !feed.items.length && !feed.cursor;
   const sentinel = useRef<HTMLDivElement>(null);
   const fillTarget = useRef({ count: 0, attempts: 0 });
   const requestMore = useCallback(() => {
@@ -195,15 +206,19 @@ function Following({ auth, onLogin, cache, likes }: { auth: AuthState | null; on
     window.addEventListener('wheel', intent, { passive: true }); window.addEventListener('touchmove', intent, { passive: true }); window.addEventListener('keydown', intent);
     return () => { window.removeEventListener('wheel', intent); window.removeEventListener('touchmove', intent); window.removeEventListener('keydown', intent); };
   }, []);
-  return <div className="page-container following-page"><div className="page-heading"><div><p className="section-eyebrow">来自你的选择</p><h1>我的关注</h1></div>{auth?.authenticated && <button className="button button-quiet following-refresh" onClick={() => { fillTarget.current = { count: columns, attempts: 1 }; feed.refresh(); }} disabled={feed.loading}><ArrowClockwise className={feed.loading ? 'spin' : ''} size={16} />刷新最新</button>}</div>
-    {auth?.authenticated && <p className="following-description">只看已关注 UP 主的视频，按发布时间更新。向下滚动继续加载。</p>}
+  return <div className="page-container following-page"><div className="page-heading"><div><p className="section-eyebrow">来自你的选择</p><h1>我的关注</h1></div>{auth?.authenticated && <button className="button button-quiet following-refresh" onClick={() => { fillTarget.current = { count: columns, attempts: 1 }; feed.refresh(); }} disabled={feed.loading} aria-busy={feed.loading}><ArrowClockwise className={feed.loading ? 'spin' : ''} size={16} />{empty && feed.loading ? '正在刷新' : '刷新最新'}</button>}</div>
+    {auth?.authenticated && feed.items.length > 0 && <p className="following-description">只看已关注 UP 主的视频，按发布时间更新。{feed.cursor && '向下滚动继续加载。'}</p>}
     {!auth ? <Loading text="正在连接账号" /> : !auth.authenticated ? <Empty title="看看关注的 UP 主更新了什么" action={<button className="button button-primary" onClick={onLogin}>登录哔哩哔哩</button>}>登录后，只显示你已关注 UP 主的视频。</Empty> : <>
-      {!feed.initialized && <div className="following-skeleton" role="status" aria-label="正在获取关注更新"><p>正在获取关注更新</p><div className="video-grid" aria-hidden="true">{Array.from({ length: columns * 2 }, (_, index) => <div className="video-placeholder" key={index}><div /><span /><span /></div>)}</div></div>}
-      {videos.length > 0 && <VideoGrid videos={videos} columns={columns} titleLink={video => video.dynamicId ? `/dynamic/${video.dynamicId}` : `/video/${video.bvid}`} renderFooter={video => video.dynamicId ? <DynamicActions id={video.dynamicId} initial={{ liked: video.dynamicLiked ?? false, likes: video.dynamicLikes ?? 0 }} comments={video.dynamicComments ?? 0} store={likes} auth={auth} onLogin={onLogin} /> : null} />}
+      {!feed.initialized && <Loading text="正在获取关注更新" />}
+      {videos.length > 0 && <VideoGrid videos={videos} columns={columns} titleLink={video => video.dynamicId ? `/dynamic/${video.dynamicId}` : `/video/${video.bvid}`} renderCoverAction={video => <WatchLaterButton aid={video.aid} />} renderFooter={video => {
+        if (!video.dynamicId) return null;
+        const initial = video.dynamicLiked === undefined || video.dynamicLikes === undefined ? undefined : { liked: video.dynamicLiked, likes: video.dynamicLikes };
+        return <DynamicActions id={video.dynamicId} initial={initial} comments={video.dynamicComments ?? 0} store={likes} auth={auth} onLogin={onLogin} />;
+      }} />}
       {feed.error && <Failure error={feed.error} retry={feed.retry} />}
-      {feed.initialized && !feed.error && !feed.items.length && !feed.cursor && <Empty title="暂时没有新的视频">你的关注更新会显示在这里。</Empty>}
+      {empty && <Empty title="暂时没有新的视频" icon={<Bell size={28} weight="light" />}>你的关注更新会显示在这里。</Empty>}
       <div className="following-loader" ref={sentinel}>
-        {feed.initialized && (feed.loading ? <Loading text="正在加载关注更新，已有视频可继续浏览" /> : feed.error ? null : feed.cursor ? <button className="button button-quiet" onClick={requestMore}>加载更多关注视频<ArrowDown size={16} /></button> : feed.items.length > 0 ? <p>已看完当前可获取的关注视频。</p> : null)}
+        {feed.initialized && (feed.loading ? !empty && <Loading text={videos.length ? "正在加载关注更新，已有视频可继续浏览" : "正在加载关注更新"} /> : feed.error ? null : feed.cursor ? <button className="button button-quiet" onClick={requestMore}>加载更多关注视频<ArrowDown size={16} /></button> : feed.items.length > 0 ? <p>已看完当前可获取的关注视频。</p> : null)}
       </div>
     </>}
   </div>;
@@ -223,27 +238,55 @@ function Creator() {
   return <div className="page-container creator-page"><Link className="back-link" to="/following"><ArrowLeft size={16} />返回关注</Link>
     {profile.loading ? <Loading text="正在加载 UP 主信息" /> : profile.error ? <Failure error={profile.error} retry={() => setRefresh(value => value + 1)} /> : profile.data && <section className="creator-profile"><img className="creator-avatar" src={profile.data.avatar} alt="" referrerPolicy="no-referrer" /><div><span className="section-eyebrow">UP 主</span><h1>{profile.data.name}</h1><p>{profile.data.description || '这位 UP 主还没有填写简介。'}</p>{profile.data.fans !== undefined && <span className="creator-fans"><Users size={15} />{countLabel(profile.data.fans)} 粉丝</span>}</div></section>}
     <nav className="content-tabs" aria-label="UP 主主页板块"><Link className={!collections ? 'active' : ''} aria-current={!collections ? 'page' : undefined} to={`/creator/${mid}`}>视频</Link><Link className={collections ? 'active' : ''} aria-current={collections ? 'page' : undefined} to={`/creator/${mid}?tab=collections`}>合集和列表</Link></nav>
-    {collectionId ? kind === 'season' || kind === 'series' ? <CreatorCollectionVideos mid={mid ?? ''} kind={kind} id={collectionId} page={page} profile={profile.data} refresh={refresh} onRetry={() => setRefresh(value => value + 1)} onPage={next => setParams({ page: String(next) })} /> : <Empty title="没有这个类型的列表" /> : collections ? <CreatorCollections mid={mid ?? ''} page={page} refresh={refresh} onRetry={() => setRefresh(value => value + 1)} onPage={next => setParams({ tab: 'collections', page: String(next) })} /> : <><div className="list-heading"><h2>视频</h2><span>最新发布</span></div>{videos.loading ? <Loading text="正在获取视频" /> : videos.error ? <Failure error={videos.error} retry={() => setRefresh(value => value + 1)} /> : videos.data?.items.length ? <VideoGrid videos={videos.data.items} /> : <Empty title="暂时没有可显示的视频" />}{videos.data && <Pagination page={page} hasMore={videos.data.hasMore} onChange={next => setParams({ page: String(next) })} />}</>}
+    {collectionId ? kind === 'season' || kind === 'series' ? <CreatorCollectionVideos mid={mid ?? ''} kind={kind} id={collectionId} page={page} profile={profile.data} refresh={refresh} onRetry={() => setRefresh(value => value + 1)} onPage={next => setParams({ page: String(next) })} /> : <Empty title="没有这个类型的列表" /> : collections ? <CreatorCollections mid={mid ?? ''} page={page} refresh={refresh} onRetry={() => setRefresh(value => value + 1)} onPage={next => setParams({ tab: 'collections', page: String(next) })} /> : <><div className="list-heading"><h2>视频</h2><span>最新发布</span></div>{videos.loading ? <Loading text="正在获取视频" /> : videos.error ? <Failure error={videos.error} retry={() => setRefresh(value => value + 1)} /> : videos.data?.items.length ? <VideoGrid videos={videos.data.items} renderCoverAction={video => <WatchLaterButton aid={video.aid} />} /> : <Empty title="暂时没有可显示的视频" />}{videos.data && <Pagination page={page} hasMore={videos.data.hasMore} onChange={next => setParams({ page: String(next) })} />}</>}
   </div>;
 }
 
-function Video({ auth, authGeneration, onLogin }: { auth: AuthState | null; authGeneration: number; onLogin: () => void }) {
+function Video({ auth, authGeneration, commentLikes, onLogin }: { auth: AuthState | null; authGeneration: number; commentLikes: CommentLikes; onLogin: () => void }) {
   useEffect(() => { void preloadPlayer().catch(() => {}); }, []);
   const { bvid } = useParams(); const [params, setParams] = useSearchParams(); const [refresh, setRefresh] = useState(0);
   const { data, error, loading } = useResource<VideoDetail>(`/api/videos/${encodeURIComponent(bvid ?? '')}`, refresh);
-  const requestedPart = positivePage(params.get('p')); const part = data?.parts.find(item => item.page === requestedPart) ?? data?.parts[0];
+  const requestedPart = positivePage(params.get('p'));
+  const requestedCid = Number(params.get('cid'));
+  const matchingPart = requestedCid > 0 ? data?.parts.find(item => item.cid === requestedCid) : undefined;
+  const part = matchingPart ?? data?.parts.find(item => item.page === requestedPart) ?? data?.parts[0];
   useEffect(() => { document.title = `${data?.title ?? '视频'} · Bilight`; }, [data]);
   if (loading) return <div className="page-container"><Loading text="正在打开视频" /></div>;
   if (error) return <div className="page-container"><Failure error={error} retry={() => setRefresh(value => value + 1)} /></div>;
   if (!data || !part) return <div className="page-container"><Empty title="这个视频暂时无法播放" /></div>;
+  const requestedProgress = Number(params.get('t'));
+  const validWatchLaterProgress = matchingPart && Number.isFinite(requestedProgress) && requestedProgress > 0 && (!part.duration || requestedProgress < part.duration);
+  const progress = requestedCid > 0
+    ? (validWatchLaterProgress ? requestedProgress : 0)
+    : Math.max(0, Math.min(part.duration, requestedProgress || 0));
   return <div className="page-container watch-page"><div className="watch-title"><h1>{data.title}</h1><p><span>{countLabel(data.views)} 播放</span><span>{dateLabel(data.publishedAt)}</span><span className="watch-bvid">{data.bvid}</span></p></div>
-    <div className={`watch-layout${data.parts.length > 1 ? ' has-parts' : ''}`}><div className="watch-primary"><VideoPlayer key={`${data.bvid}:${part.cid}`} bvid={data.bvid} cid={part.cid} poster={data.cover} startTime={Math.max(0, Math.min(part.duration, Number(params.get('t')) || 0))} accountMid={auth?.authenticated ? auth.user?.mid : undefined} />
+    <div className={`watch-layout${data.parts.length > 1 ? ' has-parts' : ''}`}><div className="watch-primary"><VideoPlayer key={`${data.bvid}:${part.cid}`} bvid={data.bvid} aid={data.aid} cid={part.cid} poster={data.cover} startTime={progress} accountMid={auth?.authenticated ? auth.user?.mid : undefined} onLogin={onLogin} />
       <TripleActions key={`actions:${data.bvid}:${auth?.user?.mid ?? 'anonymous'}:${authGeneration}`} bvid={data.bvid} auth={auth} onLogin={onLogin} snapshot={data.interaction} title={data.title} page={part.page} />
       <Link className="watch-creator" to={`/creator/${data.owner.mid}`}><img src={data.owner.avatar} alt="" referrerPolicy="no-referrer" /><div><strong>{data.owner.name}</strong><span>查看 UP 主的视频</span></div><ArrowRight size={18} /></Link>
-      {data.description && <details className="video-description"><summary>视频简介<CaretDown size={15} /></summary><p>{data.description}</p></details>}
-      <Comments key={`comments:${data.bvid}:${auth?.user?.mid ?? 0}:${authGeneration}`} bvid={data.bvid} />
+      {data.description && <VideoDescription description={data.description} />}
+      <Comments key={`comments:${data.bvid}:${auth?.user?.mid ?? 0}:${authGeneration}`} endpoint={`/api/videos/${encodeURIComponent(data.bvid)}/comments`} access={{ auth, onLogin }} likes={commentLikes} rememberExpansion />
     </div>{data.parts.length > 1 && <aside className="parts-panel" aria-label="视频分P"><div className="parts-heading"><h2>分 P 列表</h2><span>{part.page} / {data.parts.length}</span></div><p className="parts-note">点击切换分 P</p><div className="parts-list">{data.parts.map(item => <button key={item.cid} className={item.cid === part.cid ? 'active' : ''} onClick={() => setParams({ p: String(item.page) })} aria-current={item.cid === part.cid ? 'true' : undefined}><span className="part-number">{String(item.page).padStart(2, '0')}</span><span className="part-title">{item.title}</span><span className="part-duration">{duration(item.duration)}</span></button>)}</div></aside>}</div>
   </div>;
+}
+
+const videoDescriptionExpansionKey = 'bilight:video-description-expanded';
+
+function VideoDescription({ description }: { description: string }) {
+  const [expanded, setExpanded] = useState(() => {
+    try { return localStorage.getItem(videoDescriptionExpansionKey) === 'true'; }
+    catch { return false; }
+  });
+
+  return <details className="video-description" open={expanded}>
+    <summary onClick={event => {
+      event.preventDefault();
+      const next = !expanded;
+      setExpanded(next);
+      try { localStorage.setItem(videoDescriptionExpansionKey, String(next)); }
+      catch { /* The current page remains usable when browser storage is unavailable. */ }
+    }}>视频简介<CaretDown className={expanded ? 'rotate' : ''} size={15} /></summary>
+    <p>{description}</p>
+  </details>;
 }
 
 function OpenLink() {

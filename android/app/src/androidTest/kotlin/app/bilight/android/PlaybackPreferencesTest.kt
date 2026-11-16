@@ -12,10 +12,16 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.graphics.Rect
 import android.os.SystemClock
+import android.os.Bundle
 import android.view.MotionEvent
 import android.view.ViewGroup
 import androidx.activity.compose.setContent
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.text.input.TextFieldValue
 import app.bilight.android.ui.MainApp
+import app.bilight.android.ui.CommentComposerSheet
+import app.bilight.android.ui.CommentDraft
+import app.bilight.android.ui.VideoCommentComposerState
 import androidx.test.ext.junit.rules.ActivityScenarioRule
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -30,6 +36,7 @@ import app.bilight.android.downloads.DownloadState
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.Rule
@@ -47,6 +54,7 @@ class PlaybackPreferencesTest {
     private val activity=ActivityScenarioRule(MainActivity::class.java)
     @get:Rule val activityLaunch=org.junit.rules.TestRule { statement,description ->
         if (description.methodName in setOf(
+            "progressiveMp4StartsWithARangeOnCdnsThatRejectWholeFileRequests",
             "captionsSpeedAndDanmakuFollowExplicitChoicesAcrossVideosAndRecreatedPlayers",
             "explicitQualitySurvivesNewPlayersAndUnavailableQualityDoesNotReplaceIt",
             "danmakuPreferencesPersistAndStyleChangesOrCancelledReadsCannotRefetchOrResurrectIt",
@@ -97,11 +105,11 @@ class PlaybackPreferencesTest {
             main {
                 item=player.currentMediaItem!!
                 assertEquals("file",item.localConfiguration!!.uri.scheme)
-                assertFalse(model.detailLoaded); assertTrue(model.comments.isEmpty())
+                assertFalse(model.detailLoaded); assertTrue(model.videoComments.comments.isEmpty())
                 player.pause(); model.seek(500); model.speed(1.5f)
             }
             shell("svc wifi enable"); shell("svc data enable")
-            await("Reconnecting did not load cached-video metadata and comments") { model.networkAvailable && model.detailLoaded && model.comments.singleOrNull()?.text=="缓存页评论测试" && model.engagement!=null }
+            await("Reconnecting did not load cached-video metadata and comments") { model.networkAvailable && model.detailLoaded && model.videoComments.comments.singleOrNull()?.text=="缓存页评论测试" && model.engagement!=null }
             main {
                 assertSame(player,model.player); assertEquals(item,player.currentMediaItem)
                 assertFalse(player.playWhenReady); assertEquals(1.5f,player.playbackParameters.speed)
@@ -171,6 +179,13 @@ class PlaybackPreferencesTest {
         val controller=MediaController(f.app,token)
         assertEquals("A lock-screen card must identify the current video","偏好恢复测试",controller.metadata?.getString(MediaMetadata.METADATA_KEY_TITLE))
         assertEquals("隔离测试",controller.metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST))
+        val state=controller.playbackState!!
+        assertEquals(0L,state.actions and (PlaybackState.ACTION_SKIP_TO_PREVIOUS or PlaybackState.ACTION_SKIP_TO_NEXT))
+        val (back,forward)=state.customActions
+        val seekIcons=listOf("media3_icon_skip_back_10","media3_icon_skip_forward_10")
+        assertEquals(seekIcons,state.customActions.map { f.app.resources.getResourceEntryName(it.icon) })
+        assertEquals(seekIcons,listOf(notification.actions.first(),notification.actions.last())
+            .map { f.app.resources.getResourceEntryName(it.getIcon().resId) })
         check(!f.app.getSystemService(KeyguardManager::class.java).isDeviceSecure)
         main { model.background() }
         instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_HOME)
@@ -179,6 +194,12 @@ class PlaybackPreferencesTest {
         await("System pause did not pause the actual player") { !model.player.playWhenReady }
         controller.transportControls.seekTo(2000)
         await("System seek did not update the actual player") { kotlin.math.abs(model.player.currentPosition-2000)<250 }
+        controller.transportControls.sendCustomAction(forward,null)
+        await("The card did not jump forward ten seconds") { kotlin.math.abs(model.player.currentPosition-12000)<250 }
+        controller.transportControls.sendCustomAction(back,null)
+        await("The card did not jump back ten seconds") { kotlin.math.abs(model.player.currentPosition-2000)<250 }
+        controller.transportControls.sendCustomAction(back,null)
+        await("The card must stop at the start of the video") { model.player.currentPosition==0L }
         main { assertFalse("Seeking a paused item must keep it paused",model.player.playWhenReady) }
         controller.transportControls.play()
         await("System play did not resume the same player") { model.player.isPlaying }
@@ -203,16 +224,17 @@ class PlaybackPreferencesTest {
             screen.findViewById<ViewGroup>(android.R.id.content).removeAllViews()
             screen.setContent { MainApp(f.owner) }
         }
+        fun findNode(node: android.view.accessibility.AccessibilityNodeInfo?, matches: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean): android.view.accessibility.AccessibilityNodeInfo? {
+            if (node==null || matches(node)) return node
+            for (i in 0 until node.childCount) findNode(node.getChild(i), matches)?.let { return it }
+            return null
+        }
         fun videoBounds(): Rect {
-            fun find(node: android.view.accessibility.AccessibilityNodeInfo?): Rect? {
-                if (node==null) return null
-                if (node.contentDescription?.toString()=="视频画面") return Rect().also { node.getBoundsInScreen(it) }
-                for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
-                return null
-            }
             val deadline=SystemClock.elapsedRealtime()+3000
             while (SystemClock.elapsedRealtime()<deadline) {
-                find(instrumentation.uiAutomation.rootInActiveWindow)?.let { if (!it.isEmpty) return it }
+                val node=findNode(instrumentation.uiAutomation.rootInActiveWindow) { it.contentDescription?.toString()=="视频画面" }
+                val bounds=Rect().also { node?.getBoundsInScreen(it) }
+                if (!bounds.isEmpty) return bounds
                 Thread.sleep(30)
             }
             error("The actual video surface was not accessible")
@@ -226,7 +248,11 @@ class PlaybackPreferencesTest {
                 try { check(instrumentation.uiAutomation.injectInputEvent(event,true)) } finally { event.recycle() }
             }
             touch(MotionEvent.ACTION_DOWN)
-            try { Thread.sleep(650); main { assertEquals("The actual held surface did not accelerate (fullscreen=$fullscreen)",2f,player.playbackParameters.speed) } }
+            try {
+                Thread.sleep(650)
+                main { assertEquals("The actual held surface did not accelerate (fullscreen=$fullscreen)",2f,player.playbackParameters.speed) }
+                assertNull("Holding for 2× speed must not show a center banner", findNode(instrumentation.uiAutomation.rootInActiveWindow) { it.text?.toString()=="2× 倍速" })
+            }
             finally { touch(MotionEvent.ACTION_UP) }
             Thread.sleep(80); main { assertEquals(1.5f,player.playbackParameters.speed) }
         }
@@ -253,26 +279,36 @@ class PlaybackPreferencesTest {
         }
         main { model.foreground(); assertFalse("Foregrounding cannot undo a pause made while hidden",player.playWhenReady); assertSame(player,model.player) }
     }
-    @Test fun optimisticLikeCoinAndTripleRollBackSilentlyWhileTotalsStayReal() = fixture(authenticated=true) { f ->
+    @Test fun interactionCountsUpdateBeforeConfirmationAndRollBackOnFailure() = fixture(authenticated=true) { f ->
         lateinit var model: PlaybackModel
         main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
         await("The initial account engagement did not load") { model.engagement!=null }
         val before=model.engagement!!
-        for (action in listOf(VideoWrite.Like(true),VideoWrite.Coin(1,true),VideoWrite.Triple)) {
+        val totals=model.statistics!!
+        val actions=listOf(
+            VideoWrite.Like(true) to Statistics(1,0,0),
+            VideoWrite.Coin(2,true) to Statistics(1,2,0),
+            VideoWrite.Favorite(setOf(1L,2L)) to Statistics(0,0,1),
+            VideoWrite.Triple to Statistics(1,1,1)
+        )
+        for ((action,expected) in actions) {
             f.engagementGate=CountDownLatch(1); f.failEngagement=true
             main {
                 model.write(action)
-                assertTrue("The pending icon did not update immediately",model.engagement!!.liked)
-                if (action !is VideoWrite.Like) assertTrue(model.engagement!!.coins>0)
-                if (action==VideoWrite.Triple) assertTrue(model.engagement!!.favorite)
-                assertEquals(0L,model.detail!!.statistics.likes)
+                assertEquals(expected,model.statistics)
+                assertEquals(expected.likes>0,model.engagement!!.liked)
+                assertEquals(expected.coins.toInt(),model.engagement!!.coins)
+                assertEquals(expected.favorites>0,model.engagement!!.favorite)
             }
             f.engagementGate!!.countDown()
             await("The failed operation did not finish") { !model.actionBusy }
-            main { assertEquals(before,model.engagement); assertNull(model.supportError) }
+            main {
+                assertEquals(before,model.engagement); assertEquals(totals,model.statistics)
+                if (action is VideoWrite.Favorite) assertNotNull(model.supportError) else assertNull(model.supportError)
+            }
         }
     }
-    @Test fun confirmedLikeUnlocksOtherActionsBeforePublicCountsReturn() = fixture(authenticated=true) { f ->
+    @Test fun confirmedLikeKeepsItsCountWithoutRequiringPublicTotals() = fixture(authenticated=true) { f ->
         lateinit var model: PlaybackModel
         main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
         await("The initial account engagement did not load") { model.engagement!=null && model.detailLoaded }
@@ -280,11 +316,144 @@ class PlaybackPreferencesTest {
         f.detailGate=CountDownLatch(1)
         try {
             main { model.write(VideoWrite.Like(true)) }
-            await("Confirmed like did not start refreshing public totals") { f.likePosts.get()==1 && f.detailReads.get()>reads }
-            await("Public totals must not keep coin and favorite locked after a confirmed like") { !model.actionBusy }
-            main { assertTrue(model.engagement!!.liked); assertEquals(0L,model.detail!!.statistics.likes) }
+            await("The confirmed like must unlock coin and favorite") { f.likePosts.get()==1 && !model.actionBusy }
+            main { assertTrue(model.engagement!!.liked); assertEquals(1L,model.statistics!!.likes) }
+            main { model.write(VideoWrite.Like(true)) }
+            await("The repeated like should finish without another write") { !model.actionBusy }
+            main { assertEquals(1L,model.statistics!!.likes) }
+            assertEquals(reads,f.detailReads.get())
             assertEquals("The like must only be submitted once",1,f.likePosts.get())
         } finally { f.detailGate!!.countDown() }
+    }
+    @Test fun commentInteractionShowsPendingLikeAndPreservesRejectedDraft() = fixture(authenticated=true) { f ->
+        f.seedVideoComment=true
+        lateinit var model: PlaybackModel
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
+        await("The isolated video comment did not load") { model.videoComments.comments.size==1 }
+        val comment=model.videoComments.comments.single()
+        f.commentLikeGate=CountDownLatch(1)
+        f.rejectCommentWrites=true
+        try {
+            main {
+                model.videoComments.toggleCommentLike(comment)
+                assertTrue(model.videoComments.commentLikePending(comment))
+                assertEquals(CommentLikeState(true,5),model.videoComments.commentLike(comment))
+            }
+        } finally { f.commentLikeGate!!.countDown() }
+        await("Rejected comment like did not settle") { model.videoComments.commentLikeErrors[comment.id]!=null && !model.videoComments.commentLikePending(comment) }
+        main { assertEquals(CommentLikeState(false,4),model.videoComments.commentLike(comment)) }
+        val message="隔离评论正文"
+        val composer=VideoCommentComposerState()
+        main {
+            composer.open(null); composer.draft=CommentDraft(TextFieldValue(message))
+            model.videoComments.sendComment(composer.draft.field.text,emptyList(),null,composer::sent)
+        }
+        await("Rejected comment send did not settle") { model.videoComments.commentSendError!=null && !model.videoComments.commentSending }
+        main {
+            assertTrue(composer.visible)
+            assertEquals(message,composer.draft.field.text)
+            assertEquals(listOf(comment.id),model.videoComments.comments.map { it.id })
+        }
+        f.rejectCommentWrites=false
+        f.unconfirmedCommentWrite=true
+        main { model.videoComments.sendComment(composer.draft.field.text,emptyList(),null,composer::sent) }
+        await("Incomplete publish response did not require a refresh") { model.videoComments.commentSendNeedsRefresh && !model.videoComments.commentSending }
+        main {
+            assertTrue(composer.visible)
+            assertEquals(message,composer.draft.field.text)
+            model.videoComments.sendComment(composer.draft.field.text,emptyList(),null,composer::sent)
+            assertFalse(model.videoComments.commentSending)
+            model.videoComments.refreshComments()
+        }
+        await("The comments were not refreshed") { !model.videoComments.commentSendNeedsRefresh }
+        f.unconfirmedCommentWrite=false
+        main { model.videoComments.sendComment(composer.draft.field.text,emptyList(),null,composer::sent) }
+        await("Confirmed comment did not appear") { model.videoComments.comments.firstOrNull()?.id=="17" }
+        main { assertFalse(composer.visible); assertEquals("",composer.draft.field.text); assertEquals(message,model.videoComments.comments.first().text) }
+        assertEquals(1,f.commentLikeWrites.get())
+        assertEquals(3,f.commentPosts.get())
+    }
+    @Test fun commentComposerKeepsSendAccessibleWhileSelectingAMention() = fixture(authenticated=true) { f ->
+        lateinit var model: PlaybackModel
+        val composer=VideoCommentComposerState()
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1")) }
+        await("The test video did not load") { model.detailLoaded }
+        main { composer.open(null) }
+        activity.scenario.onActivity { screen ->
+            screen.findViewById<ViewGroup>(android.R.id.content).removeAllViews()
+            screen.setContent { MaterialTheme { if (composer.visible) CommentComposerSheet(model.videoComments,composer) } }
+        }
+        val automation=instrumentation.uiAutomation
+        automation.serviceInfo=automation.serviceInfo.apply { flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        fun find(node: android.view.accessibility.AccessibilityNodeInfo?,test: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean): android.view.accessibility.AccessibilityNodeInfo? {
+            if (node==null) return null
+            if (node.isVisibleToUser && test(node)) return node
+            for (index in 0 until node.childCount) find(node.getChild(index),test)?.let { return it }
+            return null
+        }
+        fun findInApp(test: (android.view.accessibility.AccessibilityNodeInfo) -> Boolean) =
+            (listOfNotNull(automation.rootInActiveWindow)+automation.windows.mapNotNull { it.root })
+                .filter { it.packageName==f.app.packageName }.firstNotNullOfOrNull { find(it,test) }
+        fun visibleNode(text: String) = findInApp { it.text?.contains(text)==true || it.contentDescription?.contains(text)==true }
+        fun findEditor(): android.view.accessibility.AccessibilityNodeInfo {
+            val deadline=SystemClock.elapsedRealtime()+7000
+            while (SystemClock.elapsedRealtime()<deadline) {
+                findInApp { it.isEditable }?.let { return it }
+                Thread.sleep(30)
+            }
+            error("The comment editor was not visible")
+        }
+        findEditor()
+        assertNull("The composer must not have a standalone mention button",findInApp { it.text?.toString()=="@" })
+        assertEquals(0,f.commentMentionReads.get())
+        fun input(value: String) {
+            assertTrue(findEditor().performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SET_TEXT,Bundle().apply {
+                putCharSequence(android.view.accessibility.AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,value)
+            }))
+        }
+        input("＠")
+        await("Bare @ did not fetch the default Bilibili candidates") { f.commentMentionReads.get()==1 }
+        input("＠隔离")
+        val deadline=SystemClock.elapsedRealtime()+7000
+        var scrolled=false
+        while ((f.commentMentionReads.get()<2 || visibleNode("隔离候选1")==null || visibleNode("发送评论")==null) && SystemClock.elapsedRealtime()<deadline) {
+            if (f.commentMentionReads.get()==2 && !scrolled && visibleNode("发送")!=null) {
+                scrolled=findInApp { it.isScrollable }
+                    ?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)==true
+            }
+            Thread.sleep(30)
+        }
+        val candidate=checkNotNull(visibleNode("隔离候选1")) { "The first mention candidate was not reachable" }
+        assertEquals(2,f.commentMentionReads.get())
+        assertNotNull("The Send action must remain visible while suggestions are shown",visibleNode("发送评论"))
+        val control=generateSequence(candidate) { it.parent }.first { it.isClickable }
+        assertTrue(control.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK))
+        await("The selected mention was not inserted into the draft") { composer.draft.field.text=="@隔离候选1 " }
+        main { assertEquals(1L,composer.draft.users.single().mid); composer.close() }
+    }
+    @Test fun sectionExpansionPersistsIndependentlyAcrossFreshPlaybackModels() = fixture { f ->
+        main {
+            val first=f.owner.playback(Route.Watch("BV12qnt6VEM1"))
+            assertTrue(first.commentsExpanded)
+            assertFalse(first.descriptionExpanded)
+            first.toggleDescriptionExpanded()
+            assertTrue(first.commentsExpanded)
+            assertTrue(PlaybackSettings(f.app).descriptionExpanded)
+            first.toggleCommentsExpanded()
+            assertFalse(PlaybackSettings(f.app).commentsExpanded)
+            f.owner.releasePlayback(first)
+            val second=f.owner.playback(Route.Watch("BV1NGZtBwELa"))
+            assertFalse(second.commentsExpanded)
+            assertTrue(second.descriptionExpanded)
+            second.toggleCommentsExpanded()
+            second.toggleDescriptionExpanded()
+            assertTrue(PlaybackSettings(f.app).commentsExpanded)
+            assertFalse(PlaybackSettings(f.app).descriptionExpanded)
+            f.owner.releasePlayback(second)
+            val reopened=f.owner.playback(Route.Watch("BV12qnt6VEM1"))
+            assertTrue(reopened.commentsExpanded)
+            assertFalse(reopened.descriptionExpanded)
+        }
     }
     @Test fun captionsSpeedAndDanmakuFollowExplicitChoicesAcrossVideosAndRecreatedPlayers() = fixture(8) { f ->
         lateinit var model: PlaybackModel
@@ -417,7 +586,25 @@ class PlaybackPreferencesTest {
         main { assertTrue(model.danmaku); assertTrue(PlaybackSettings(f.app).danmaku) }
         assertEquals(5,f.danmakuReads.get())
     }
+    @Test fun progressiveMp4StartsWithARangeOnCdnsThatRejectWholeFileRequests() = fixture(durationSeconds=8) { f ->
+        f.requireMediaRange=true
+        lateinit var model: PlaybackModel
+        main { model=f.owner.playback(Route.Watch("BV12qnt6VEM1",progress=2)) }
+        await("Expected playback to advance or a terminal error after HTTP 567") {
+            model.error!=null || (model.player.isPlaying && model.player.currentPosition>=2100)
+        }
+        main {
+            assertNull(model.error)
+            assertEquals(120,model.playback?.quality)
+            assertEquals(127,PlaybackSettings(f.app).quality)
+        }
+        assertEquals(listOf("bytes=0-"),f.firstRequestRanges)
+        assertEquals(listOf(127),f.requestedQualities.toList())
+    }
+
     private inner class Fixture(val app: BilightApplication, durationSeconds: Int, audio: Boolean, authenticated: Boolean) {
+        @Volatile var requireMediaRange=false
+        val firstRequestRanges=CopyOnWriteArrayList<String>()
         private val cachedIds=CopyOnWriteArrayList<String>()
         var languages=listOf("en","zh-CN")
         val subtitleReads=AtomicInteger()
@@ -429,6 +616,13 @@ class PlaybackPreferencesTest {
         @Volatile var failEngagement=false
         @Volatile var liked=false
         val likePosts=AtomicInteger()
+        @Volatile var seedVideoComment=false
+        @Volatile var rejectCommentWrites=false
+        @Volatile var unconfirmedCommentWrite=false
+        @Volatile var commentLikeGate: CountDownLatch?=null
+        val commentLikeWrites=AtomicInteger()
+        val commentPosts=AtomicInteger()
+        val commentMentionReads=AtomicInteger()
         val detailReads=AtomicInteger()
         @Volatile var detailGate: CountDownLatch?=null
         private val file=File(app.cacheDir,"preferences-fixture.mp4").also { encodedFixture(it,audio,durationSeconds) }
@@ -455,7 +649,37 @@ class PlaybackPreferencesTest {
                     """{"code":0,"data":{"subtitle":{"subtitles":[$tracks]}}}"""
                 }
                 "/en.json", "/zh.json" -> """{"body":[{"from":0,"to":1,"content":"字幕测试"}]}"""
-                "/x/v2/reply/wbi/main" -> if (cachedIds.isEmpty()) """{"code":0,"data":{"cursor":{"is_end":true,"all_count":0},"replies":[]}}""" else """{"code":0,"data":{"cursor":{"is_end":true,"all_count":1},"replies":[{"rpid_str":"1","member":{"mid":42,"uname":"隔离评论"},"content":{"message":"缓存页评论测试"},"like":0}]}}"""
+                "/x/v2/reply/wbi/main" -> when {
+                    seedVideoComment -> """{"code":0,"data":{"cursor":{"is_end":true,"all_count":1},"replies":[{"rpid_str":"2","member":{"mid":42,"uname":"隔离评论"},"content":{"message":"播放页评论"},"like":4,"action":0}]}}"""
+                    cachedIds.isEmpty() -> """{"code":0,"data":{"cursor":{"is_end":true,"all_count":0},"replies":[]}}"""
+                    else -> """{"code":0,"data":{"cursor":{"is_end":true,"all_count":1},"replies":[{"rpid_str":"1","member":{"mid":42,"uname":"隔离评论"},"content":{"message":"缓存页评论测试"},"like":0}]}}"""
+                }
+                "/x/v2/reply/detail" -> {
+                    check(commentLikeGate?.await(5,TimeUnit.SECONDS)!=false)
+                    """{"code":0,"data":{"root":{"rpid_str":"2","type":1,"root":0,"parent":0,"oid":42,"like":4,"action":0}}}"""
+                }
+                "/x/v2/reply/at" -> {
+                    val expected = if (commentMentionReads.get()==0) "" else "隔离"
+                    check(request.url.queryParameter("keyword")==expected)
+                    commentMentionReads.incrementAndGet()
+                    val people=(1..5).joinToString(",") { """{"mid":$it,"name":"隔离候选$it"}""" }
+                    """{"code":0,"data":{"groups":[{"items":[$people]}]}}"""
+                }
+                "/x/v2/reply/action" -> {
+                    check(request.method=="POST"); commentLikeWrites.incrementAndGet()
+                    check(rejectCommentWrites)
+                    """{"code":-403,"message":"隔离点赞被拒绝"}"""
+                }
+                "/x/v2/reply/add" -> {
+                    check(request.method=="POST"); commentPosts.incrementAndGet()
+                    if (rejectCommentWrites) """{"code":-403,"message":"隔离评论被拒绝"}"""
+                    else if (unconfirmedCommentWrite) """{"code":0,"data":{}}"""
+                    else {
+                        val form=request.body as FormBody
+                        val message=(0 until form.size).first { form.name(it)=="message" }.let(form::value)
+                        """{"code":0,"data":{"reply":{"rpid_str":"17","type":1,"root":0,"parent":0,"oid":42,"mid":900000003,"member":{"mid":900000003,"uname":"隔离测试"},"content":{"message":${JSONObject.quote(message)}}}}}"""
+                    }
+                }
                 "/x/v1/dm/list.so" -> {
                     danmakuReads.incrementAndGet(); check(danmakuGate?.await(5,TimeUnit.SECONDS)!=false)
                     """<i><d p="0,1,25,16777215">cid-${request.url.queryParameter("oid")}</d></i>"""
@@ -469,7 +693,19 @@ class PlaybackPreferencesTest {
             Response.Builder().request(request).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(body.toResponseBody("application/octet-stream".toMediaType())).build()
         }.build()
         private val media=OkHttpClient.Builder().addInterceptor { chain ->
-            Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK").body(bytes.toResponseBody("video/mp4".toMediaType())).build()
+            val request=chain.request()
+            val response=Response.Builder().request(request).protocol(Protocol.HTTP_1_1).message("Fixture")
+            if (requireMediaRange) {
+                val headers=request.headers("Range")
+                if (firstRequestRanges.isEmpty() && headers.isNotEmpty()) firstRequestRanges.addAll(headers)
+                val start=headers.singleOrNull()?.let { Regex("bytes=(\\d+)-").matchEntire(it)?.groupValues?.get(1)?.toInt() }
+                if (start==null || start !in bytes.indices) {
+                    response.code(567).body(ByteArray(0).toResponseBody()).build()
+                } else {
+                    response.code(206).header("Content-Range","bytes $start-${bytes.lastIndex}/${bytes.size}")
+                        .body(bytes.copyOfRange(start,bytes.size).toResponseBody("video/mp4".toMediaType())).build()
+                }
+            } else response.code(200).body(bytes.toResponseBody("video/mp4".toMediaType())).build()
         }.build()
         private val store=ViewModelStore()
         val owner: AppModel
@@ -495,7 +731,8 @@ class PlaybackPreferencesTest {
         }
         fun close() {
             main { cachedIds.forEach(owner.downloads::remove) }
-            subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); detailGate?.countDown(); main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
+            subtitleGate?.countDown(); danmakuGate?.countDown(); engagementGate?.countDown(); detailGate?.countDown(); commentLikeGate?.countDown()
+            main { store.clear() }; api.dispatcher.cancelAll(); media.dispatcher.cancelAll(); file.delete()
         }
     }
 }

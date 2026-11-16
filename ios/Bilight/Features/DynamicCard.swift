@@ -9,7 +9,7 @@ struct DynamicCard: View {
     @State private var gallery: PostGallerySelection?
     var body: some View {
         let state = app.dynamicLikeState(post)
-        let selected = app.dynamicLikePending[post.id] ?? state.liked
+        let pending = app.dynamicLikes.pending[post.id] != nil
         VStack(alignment: .leading, spacing: 13) {
             HStack(spacing: 10) {
                 Button {
@@ -35,9 +35,8 @@ struct DynamicCard: View {
                     }.font(.system(size: 11)).foregroundStyle(Color.biliMuted)
                 }
                 Spacer(minLength: 0)
-                if !quoted {
+                if detail && !quoted {
                     Menu {
-                        if !detail { Button("查看动态", systemImage: "text.bubble") { app.open(post) } }
                         ShareLink(item: post.url) { Label("分享链接", systemImage: "square.and.arrow.up") }
                     } label: {
                         Image(systemName: "ellipsis").foregroundStyle(Color.biliMuted).frame(width: 44, height: 44)
@@ -66,10 +65,8 @@ struct DynamicCard: View {
             if !quoted {
                 HStack {
                     ShareLink(item: post.url) {
-                        Label(
-                            post.forwards > 0 ? "\(countLabel(post.forwards)) 转发" : "分享",
-                            systemImage: "arrowshape.turn.up.right")
-                    }.accessibilityLabel("分享动态链接")
+                        Label(countLabel(post.forwards), systemImage: "arrowshape.turn.up.right")
+                    }.accessibilityLabel("分享动态链接").accessibilityValue(countLabel(post.forwards))
                     Spacer()
                     if !detail {
                         Button {
@@ -83,15 +80,14 @@ struct DynamicCard: View {
                     }
                     Spacer()
                     Button { app.toggleDynamicLike(post) } label: {
-                        Label(state.likes > 0 ? countLabel(state.likes) : "赞", systemImage: selected ? "hand.thumbsup.fill" : "hand.thumbsup")
+                        Label(state.likes > 0 ? String(state.likes) : "赞", systemImage: state.liked ? "hand.thumbsup.fill" : "hand.thumbsup")
                             .frame(minWidth: 44, minHeight: 44).contentShape(Rectangle())
-                    }.foregroundStyle(selected ? Color.biliPink : Color.biliMuted)
-                        .disabled(app.dynamicLikePending[post.id] != nil)
-                        .accessibilityLabel(selected ? "取消动态点赞" : "点赞动态")
-                        .accessibilityValue("\(state.likes)赞" + (app.dynamicLikePending[post.id] != nil ? "，正在处理" : selected ? "，已点赞" : "，未点赞"))
+                    }.foregroundStyle(state.liked ? Color.biliPink : Color.biliMuted)
+                        .accessibilityLabel(state.liked ? "取消动态点赞" : "点赞动态")
+                        .accessibilityValue("\(state.likes)赞" + (pending ? "，正在处理" : state.liked ? "，已点赞" : "，未点赞"))
                         .accessibilityIdentifier("dynamic-like-\(post.id)")
                 }.font(.system(size: 13)).labelStyle(DynamicActionLabelStyle()).foregroundStyle(Color.biliMuted).padding(.top, 6).frame(minHeight: 44)
-                if let error = app.dynamicLikeErrors[post.id] { Text(error).font(.caption).foregroundStyle(.red).accessibilityIdentifier("dynamic-like-error-\(post.id)") }
+                if let error = app.dynamicLikes.errors[post.id] { Text(error).font(.caption).foregroundStyle(.red).accessibilityIdentifier("dynamic-like-error-\(post.id)") }
             }
         }.buttonStyle(.plain).fullScreenCover(item: $gallery) { selection in
             PostGallery(images: selection.images, selection: selection.index)
@@ -110,6 +106,9 @@ struct DynamicCard: View {
                                 .background(LinearGradient(colors: [.clear, .black.opacity(0.65)], startPoint: .top, endPoint: .bottom))
                         }.clipShape(RoundedRectangle(cornerRadius: 7))
                 }.accessibilityLabel("播放视频：" + video.title)
+                    .overlay(alignment: .topTrailing) {
+                        if video.aid > 0 { WatchLaterButton(store: app.watchLater, video: video) }
+                    }
                 Button { if detail { app.open(video) } else { app.open(post) } } label: {
                     Text(video.title).font(.system(size: 15, weight: .medium)).lineLimit(2).foregroundStyle(.primary)
                         .multilineTextAlignment(.leading).frame(maxWidth: .infinity, minHeight: 44, alignment: .leading).contentShape(Rectangle())

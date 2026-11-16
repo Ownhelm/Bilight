@@ -40,7 +40,7 @@ import SwiftUI
         if let request { await request.value; return }
         if !initialized { await load(client: client, mid: mid, reset: true) }
     }
-    func updateLike(_ id: String, state: DynamicLikeState) {
+    func updateLike(_ id: String, state: LikeState) {
         for index in posts.indices where posts[index].id == id { posts[index].liked = state.liked; posts[index].likes = state.likes }
     }
     func removeAuthor(_ mid: Int) { posts.removeAll { $0.author.mid == mid } }
@@ -121,32 +121,33 @@ struct FollowingView: View {
                         Text("我的关注").font(.system(size: 26, weight: .bold))
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 12)
-                            .background(Color.biliBackground).padding(.bottom, 8)
                             .id("following-top")
+                        if !model.posts.isEmpty { postSeparator }
                         ForEach(model.posts) { post in
-                            DynamicCard(post: post)
-                                .padding(16).background(Color.biliBackground).padding(.bottom, 8)
+                            DynamicCard(post: post).padding(16).padding(.bottom, 8)
+                                .background(alignment: .bottom) { postSeparator }
                         }
                         if let error = model.error {
                             FailureBlock(error: error) { Task { await model.retry(client: app.client, mid: user.mid) } }
-                        } else if model.refreshing {
-                            EmptyView()
-                        } else if model.busy {
-                            LoadingBlock(label: "正在获取关注更新")
-                        } else if model.hasMore {
-                            Button("加载更多") { Task { await model.load(client: app.client, mid: user.mid) } }.font(
-                                .footnote
-                            ).frame(maxWidth: .infinity).padding(.vertical, 12).onAppear {
-                                moreVisible = true
-                                if didScroll && !model.posts.isEmpty {
-                                    Task { await model.load(client: app.client, mid: user.mid) }
-                                }
-                            }.onDisappear { moreVisible = false }
-                        } else if model.posts.isEmpty {
+                                .buttonStyle(.bordered)
+                        } else if model.initialized && model.posts.isEmpty && !model.hasMore {
                             EmptyBlock(symbol: "person.2", title: "暂无动态")
-                        } else {
-                            Text("已加载全部更新").font(.caption).foregroundStyle(Color.biliMuted).frame(maxWidth: .infinity)
-                                .padding()
+                        } else if model.initialized && !model.refreshing {
+                            if model.busy {
+                                LoadingBlock(label: "正在获取关注更新")
+                            } else if model.hasMore {
+                                Button("加载更多") { Task { await model.load(client: app.client, mid: user.mid) } }
+                                    .font(.footnote).buttonStyle(.bordered)
+                                    .frame(maxWidth: .infinity).padding(.vertical, 12).onAppear {
+                                        moreVisible = true
+                                        if didScroll && !model.posts.isEmpty {
+                                            Task { await model.load(client: app.client, mid: user.mid) }
+                                        }
+                                    }.onDisappear { moreVisible = false }
+                            } else {
+                                Text("已加载全部更新").font(.caption).foregroundStyle(Color.biliMuted)
+                                    .frame(maxWidth: .infinity).padding()
+                            }
                         }
                     }.scrollTargetLayout().background(FollowingRefreshControl(
                         refreshing: model.refreshing, reveal: revealRefresh, entryRevision: model.entryRevision,
@@ -158,7 +159,7 @@ struct FollowingView: View {
                         if moreVisible && model.error == nil { Task { await model.load(client: app.client, mid: user.mid) } }
                     })
                     .onDisappear { didScroll = false; moreVisible = false; revealRefresh = false }
-                    .background(Color.biliSoft).task(id: "\(user.mid):\(model.entryRevision)") {
+                    .task(id: "\(user.mid):\(model.entryRevision)") {
                     let entry = model.entryRevision
                     if model.consumeEntry() {
                         revealRefresh = true
@@ -180,9 +181,15 @@ struct FollowingView: View {
                     Spacer()
                 }.padding(.top, 35)
             }
-        }.onChange(of: model.loginExpired, initial: true) { _, expired in
-            if expired { app.handle(BiliFailure(code: "-101", message: "登录已失效，请重新登录。")) }
-        }
+        }.frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color.biliBackground)
+            .onChange(of: model.loginExpired, initial: true) { _, expired in
+                if expired { app.handle(BiliFailure(code: "-101", message: "登录已失效，请重新登录。")) }
+            }
+    }
+
+    private var postSeparator: some View {
+        Rectangle().fill(Color.biliSoft).frame(height: 8).accessibilityHidden(true)
     }
 }
 
@@ -211,6 +218,7 @@ final class FollowingRefreshAnchor: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         isUserInteractionEnabled = false
+        control.backgroundColor = .clear
         control.tintColor = UIColor(Color.biliPink)
         control.attributedTitle = NSAttributedString(string: "正在刷新关注动态", attributes: [.foregroundColor: UIColor.secondaryLabel])
         control.accessibilityLabel = "正在刷新关注动态"
@@ -232,7 +240,11 @@ final class FollowingRefreshAnchor: UIView {
             }
         }
         guard let scroll else { return }
-        if scroll.refreshControl !== control { scroll.refreshControl = control; scroll.alwaysBounceVertical = true }
+        if scroll.refreshControl !== control {
+            scroll.backgroundColor = .systemBackground
+            scroll.refreshControl = control
+            scroll.alwaysBounceVertical = true
+        }
         if refreshing {
             let began = !control.isRefreshing
             if began { control.beginRefreshing() }

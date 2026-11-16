@@ -6,11 +6,13 @@ import { TripleActions } from '../src/TripleActions.js';
 import { createLikePress, LIKE_HOLD_MS } from '../src/likePress.js';
 import { coinChoices, engagementCounts, favoriteChanged, optimisticEngagement } from '../src/interactionModel.js';
 
-test('optimistic icons preserve the previous state and do not invent public totals', () => {
+test('optimistic engagement applies the requested changes without mutating the confirmed state', () => {
   const before = { liked: true, coins: 1, favorited: false };
   assert.deepEqual(optimisticEngagement(before, 'like'), { ...before, liked: false });
   assert.deepEqual(optimisticEngagement(before, { type: 'coin', coins: 2, selectLike: true }), { ...before, coins: 2 });
   assert.deepEqual(optimisticEngagement(before, 'triple'), { liked: true, coins: 1, favorited: true });
+  assert.deepEqual(optimisticEngagement(before, { type: 'favorite', folderIds: [10, 20] }), { ...before, favorited: true });
+  assert.deepEqual(optimisticEngagement({ ...before, favorited: true }, { type: 'favorite', folderIds: [] }), before);
   assert.deepEqual(before, { liked: true, coins: 1, favorited: false });
 });
 
@@ -61,6 +63,16 @@ test('toolbar counts use public totals and only the current account delta withou
   assert.deepEqual(engagementCounts(snapshot, baseline, state), { likes: 11, coins: 21, favorites: 29 });
   assert.deepEqual(engagementCounts(snapshot, baseline, state), { likes: 11, coins: 21, favorites: 29 });
   assert.deepEqual(engagementCounts(snapshot), { likes: 10, coins: 20, favorites: 30 }); assert.equal(engagementCounts(), null);
+});
+
+test('toolbar totals follow pending engagement and can roll back to the confirmed state', () => {
+  const snapshot = { coinLimit: 2 as const, likes: 3_007_001, coins: 20, favorites: 30 };
+  const confirmed = { liked: false, coins: 0, favorited: false };
+  const pendingCoin = optimisticEngagement(confirmed, { type: 'coin', coins: 2, selectLike: true });
+  assert.deepEqual(engagementCounts(snapshot, confirmed, pendingCoin), { likes: 3_007_002, coins: 22, favorites: 30 });
+  const pendingFavorite = optimisticEngagement(pendingCoin, { type: 'favorite', folderIds: [1, 2] });
+  assert.deepEqual(engagementCounts(snapshot, confirmed, pendingFavorite), { likes: 3_007_002, coins: 22, favorites: 31 });
+  assert.deepEqual(engagementCounts(snapshot, confirmed, confirmed), { likes: 3_007_001, coins: 20, favorites: 30 });
 });
 
 test('an unavailable hold is consumed without animating or writing', t => {

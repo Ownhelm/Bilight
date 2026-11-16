@@ -1,14 +1,117 @@
 import SwiftUI
 import UIKit
 
+struct LikeState: Equatable { var liked: Bool; var likes: Int }
+
+struct LikeIntent {
+    let state: LikeState
+    let deadline: ContinuousClock.Instant
+}
+
+@MainActor final class LikeSync<Key: Hashable> {
+    private(set) var confirmed: [Key: LikeState] = [:]
+    private(set) var pending: [Key: LikeIntent] = [:]
+    private(set) var errors: [Key: String] = [:]
+    private(set) var revision = 0
+    private var versions: [Key: Int] = [:]
+    private var tasks: [Key: Task<Void, Never>] = [:]
+    private var uncertain = Set<Key>()
+    private var generation = UUID()
+    var onChange: (() -> Void)?
+    var onError: ((Error) -> Void)?
+
+    func reset() {
+        generation = UUID()
+        for task in tasks.values { task.cancel() }
+        onChange?()
+        confirmed.removeAll(); pending.removeAll(); errors.removeAll()
+        tasks.removeAll(); versions.removeAll(); uncertain.removeAll(); revision = 0
+    }
+    func state(_ key: Key, fallback: LikeState) -> LikeState {
+        pending[key]?.state ?? confirmed[key] ?? fallback
+    }
+    func canRecord(_ key: Key, readVersion: Int) -> Bool {
+        pending[key] == nil && (versions[key] ?? 0) <= readVersion
+    }
+    func record(_ key: Key, state: LikeState) {
+        guard confirmed[key] != state else { return }
+        onChange?()
+        confirmed[key] = state
+    }
+    func setError(_ error: String?, for key: Key) {
+        guard errors[key] != error else { return }
+        onChange?()
+        errors[key] = error
+    }
+    func toggle(_ key: Key, fallback: LikeState, sync: @escaping (Bool) async throws -> LikeState) {
+        let visible = state(key, fallback: fallback)
+        if confirmed[key] == nil { confirmed[key] = visible }
+        let next = LikeState(liked: !visible.liked, likes: max(0, visible.likes + (visible.liked ? -1 : 1)))
+        advanceVersion(of: key)
+        onChange?()
+        pending[key] = LikeIntent(state: next, deadline: .now.advanced(by: .milliseconds(800)))
+        errors[key] = nil
+        guard tasks[key] == nil else { return }
+        let generation = generation
+        tasks[key] = Task { [weak self] in
+            await self?.flush(key, generation: generation, sync: sync)
+        }
+    }
+    private func advanceVersion(of key: Key) {
+        revision += 1
+        versions[key] = revision
+    }
+    private func flush(_ key: Key, generation: UUID, sync: (Bool) async throws -> LikeState) async {
+        defer {
+            if self.generation == generation {
+                onChange?()
+                pending[key] = nil
+                tasks[key] = nil
+            }
+        }
+        while self.generation == generation, !Task.isCancelled, let intent = pending[key] {
+            if .now < intent.deadline {
+                do { try await ContinuousClock().sleep(until: intent.deadline) } catch { return }
+                continue
+            }
+            let target = intent.state.liked
+            guard target != confirmed[key]?.liked || uncertain.contains(key) else { return }
+            do {
+                let state = try await sync(target)
+                guard self.generation == generation, !Task.isCancelled else { return }
+                advanceVersion(of: key)
+                uncertain.remove(key)
+                record(key, state: state)
+                if pending[key]?.state.liked == state.liked { return }
+            } catch is CancellationError { return } catch {
+                guard self.generation == generation, !Task.isCancelled else { return }
+                uncertain.insert(key)
+                if (error as? BiliFailure)?.code == "-101" || pending[key]?.state.liked == target {
+                    setError(error.localizedDescription, for: key)
+                    onError?(error)
+                    return
+                }
+            }
+        }
+    }
+}
+
+struct CommentLikeKey: Hashable {
+    let oid: String
+    let type: Int
+    let id: String
+}
+
 @MainActor final class AppModel: ObservableObject {
     let client: BiliClient
     let downloads: DownloadStore
     let history: WatchHistory
+    let watchLater: WatchLaterStore
     let followedPeople: FollowedPeopleSearch
     let following = FollowingModel()
     @Published var user: User?
     @Published var restoring = true
+    @Published private(set) var searchHomeRequest = UUID()
     @Published var accountError: String?
     @Published var showLogin = false
     @Published var showAccount = false
@@ -18,12 +121,10 @@ import UIKit
     @Published var relations: [Int: Relation] = [:]
     @Published var followBusy = Set<Int>()
     @Published var accountGeneration = UUID()
-    @Published var dynamicLikeErrors: [String: String] = [:]
-    @Published var dynamicLikeStates: [String: DynamicLikeState] = [:]
-    @Published var dynamicLikePending: [String: Bool] = [:]
-    private(set) var dynamicLikeRevision = 0
-    private var dynamicLikeVersions: [String: Int] = [:]
-    private var dynamicLikeTasks: [String: Task<Void, Never>] = [:]
+    let dynamicLikes = LikeSync<String>()
+    let commentLikes = LikeSync<CommentLikeKey>()
+    private var dynamicLikeRechecks: [String: Task<Void, Never>] = [:]
+    private var confirmedDynamicLikes = Set<String>()
     var people: [Int: User] = [:]
     var videos: [String: Video] = [:]
     var catalogs: [String: CreatorCollection] = [:]
@@ -36,6 +137,7 @@ import UIKit
         #endif
         self.client = client
         history = WatchHistory(client: client)
+        watchLater = WatchLaterStore(client: client)
         downloads = DownloadStore(client: client)
         #if DEBUG
             let localPeopleCache = suppliedClient == nil && !DemoFixtures.enabled && !InteractionRegression.enabled
@@ -44,8 +146,15 @@ import UIKit
             let localPeopleCache = suppliedClient == nil
         #endif
         followedPeople = FollowedPeopleSearch(cache: localPeopleCache ? FollowedPeopleCache() : nil)
-        following.likeReadVersion = { [weak self] in self?.dynamicLikeRevision ?? 0 }
-        following.didRead = { [weak self] posts, version in for post in posts { self?.recordDynamic(post, readVersion: version) } }
+        watchLater.onError = { [weak self] in self?.handle($0) }
+        dynamicLikes.onChange = { [weak self] in self?.objectWillChange.send() }
+        commentLikes.onChange = { [weak self] in self?.objectWillChange.send() }
+        dynamicLikes.onError = { [weak self] in self?.handle($0) }
+        commentLikes.onError = { [weak self] in self?.handle($0) }
+        following.likeReadVersion = { [weak self] in self?.dynamicLikes.revision ?? 0 }
+        following.didRead = { [weak self] posts, version in
+            for post in posts { self?.recordDynamic(post, readVersion: version, fromFeed: true) }
+        }
     }
     func restore() async {
         downloads.restoreLocalAccount()
@@ -66,11 +175,13 @@ import UIKit
             shareVideo = nil
             following.account(value?.mid)
             history.account(value?.mid)
+            watchLater.account(value?.mid)
             downloads.account(value?.mid)
             relations = [:]
             dynamics = [:]
-            for task in dynamicLikeTasks.values { task.cancel() }
-            dynamicLikeTasks = [:]; dynamicLikeErrors = [:]; dynamicLikeStates = [:]; dynamicLikePending = [:]; dynamicLikeVersions = [:]; dynamicLikeRevision = 0
+            for task in dynamicLikeRechecks.values { task.cancel() }
+            dynamicLikeRechecks.removeAll(); confirmedDynamicLikes.removeAll()
+            dynamicLikes.reset(); commentLikes.reset()
             path = []
             accountPath = []
             if value == nil { showAccount = false }
@@ -86,11 +197,17 @@ import UIKit
         accountError = nil
     }
     func logout() async {
+        watchLater.account(nil)
         await client.logout()
         downloads.account(nil)
         update(nil)
         accountError = nil
         showAccount = false
+    }
+    func openSearchHome() {
+        showAccount = false
+        path = []
+        searchHomeRequest = UUID()
     }
     func register(_ user: User) { people[user.mid] = user }
     func navigate(_ route: Route) {
@@ -105,6 +222,12 @@ import UIKit
         people[video.owner.mid] = video.owner
         navigate(.video(video.bvid, 1, 0))
     }
+    func open(_ item: WatchLaterItem) {
+        guard let video = item.video else { return }
+        videos[video.bvid] = video
+        register(video.owner)
+        navigate(.watchLaterVideo(video.bvid, item.cid, item.progress))
+    }
     func open(_ collection: CreatorCollection) {
         catalogs[collection.id + "-\(collection.mid)"] = collection
         navigate(.collection(collection.mid, collection.kind, collection.number))
@@ -113,33 +236,66 @@ import UIKit
         dynamics[post.id] = post
         navigate(.dynamic(post.id))
     }
-    func dynamicLikeState(_ post: DynamicPost) -> DynamicLikeState {
-        dynamicLikeStates[post.id] ?? DynamicLikeState(liked: post.liked, likes: post.likes)
+    func dynamicLikeState(_ post: DynamicPost) -> LikeState {
+        dynamicLikes.state(post.id, fallback: LikeState(liked: post.liked, likes: post.likes))
     }
-    func recordDynamic(_ post: DynamicPost, readVersion: Int) {
+    func recordDynamic(_ post: DynamicPost, readVersion: Int, fromFeed: Bool = false) {
+        guard dynamicLikes.canRecord(post.id, readVersion: readVersion) else { return }
+        let state = LikeState(liked: post.liked, likes: post.likes)
+        if fromFeed, confirmedDynamicLikes.contains(post.id), dynamicLikes.confirmed[post.id] != state {
+            recheckDynamicLike(post.id, readVersion: readVersion)
+            return
+        }
         dynamics[post.id] = post
-        guard dynamicLikePending[post.id] == nil, (dynamicLikeVersions[post.id] ?? 0) <= readVersion else { return }
-        dynamicLikeStates[post.id] = DynamicLikeState(liked: post.liked, likes: post.likes)
+        dynamicLikes.record(post.id, state: state)
+    }
+    private func recheckDynamicLike(_ id: String, readVersion: Int) {
+        guard dynamicLikeRechecks[id] == nil else { return }
+        let generation = accountGeneration
+        dynamicLikeRechecks[id] = Task { [weak self] in
+            guard let self else { return }
+            defer { if accountGeneration == generation { dynamicLikeRechecks[id] = nil } }
+            do {
+                let post = try await client.dynamic(id, strictLikes: true)
+                guard accountGeneration == generation, !Task.isCancelled, dynamicLikes.canRecord(id, readVersion: readVersion) else { return }
+                recordDynamic(post, readVersion: readVersion)
+                following.updateLike(id, state: dynamicLikeState(post))
+                dynamicLikes.setError(nil, for: id)
+            } catch is CancellationError { return } catch {
+                guard accountGeneration == generation, !Task.isCancelled, dynamicLikes.canRecord(id, readVersion: readVersion) else { return }
+                dynamicLikes.setError(error.localizedDescription, for: id)
+                handle(error)
+            }
+        }
     }
     func toggleDynamicLike(_ post: DynamicPost) {
         guard user != nil else { showLogin = true; return }
-        guard dynamicLikePending[post.id] == nil else { return }
-        let generation = accountGeneration, target = !dynamicLikeState(post).liked
-        dynamicLikeRevision += 1; dynamicLikeVersions[post.id] = dynamicLikeRevision
-        dynamicLikePending[post.id] = target; dynamicLikeErrors[post.id] = nil
-        dynamicLikeTasks[post.id] = Task { [weak self] in
-            guard let self else { return }
-            defer { if accountGeneration == generation { dynamicLikePending[post.id] = nil; dynamicLikeTasks[post.id] = nil } }
-            do {
-                let after = try await client.setDynamicLike(post.id, liked: target)
-                try Task.checkCancellation()
-                guard accountGeneration == generation else { return }
-                dynamicLikeRevision += 1; dynamicLikeVersions[post.id] = dynamicLikeRevision
-                let state = DynamicLikeState(liked: after.liked, likes: after.likes)
-                dynamicLikeStates[post.id] = state; dynamics[post.id] = after; following.updateLike(post.id, state: state)
-            } catch is CancellationError { return } catch {
-                if accountGeneration == generation { dynamicLikeErrors[post.id] = error.localizedDescription; handle(error) }
-            }
+        let id = post.id
+        let generation = accountGeneration
+        dynamicLikes.toggle(id, fallback: LikeState(liked: post.liked, likes: post.likes)) { [weak self] target in
+            guard let self, accountGeneration == generation else { throw CancellationError() }
+            let after = try await client.setDynamicLike(id, liked: target)
+            try Task.checkCancellation()
+            guard accountGeneration == generation else { throw CancellationError() }
+            confirmedDynamicLikes.insert(id)
+            let state = LikeState(liked: after.liked, likes: after.likes)
+            dynamics[id] = after; following.updateLike(id, state: state)
+            return state
+        }
+    }
+    func recordCommentLikes(_ comments: [Comment], oid: String, type: Int, readVersion: Int) {
+        for comment in comments {
+            let key = CommentLikeKey(oid: oid, type: type, id: comment.id)
+            guard commentLikes.confirmed[key] != nil, commentLikes.canRecord(key, readVersion: readVersion) else { continue }
+            commentLikes.record(key, state: LikeState(liked: comment.liked, likes: comment.likes))
+        }
+    }
+    func toggleCommentLike(_ comment: Comment, channel: CommentChannel) {
+        guard let user else { showLogin = true; return }
+        let key = CommentLikeKey(oid: channel.oid, type: channel.type, id: comment.id)
+        commentLikes.toggle(key, fallback: LikeState(liked: comment.liked, likes: comment.likes)) { [client] target in
+            let after = try await client.setCommentLike(channel: channel, actorMid: user.mid, rpid: comment.id, liked: target)
+            return LikeState(liked: after.liked, likes: after.likes)
         }
     }
     func readRelation(_ mid: Int) async {
@@ -174,12 +330,14 @@ import UIKit
 }
 enum Route: Hashable {
     case video(String, Int, Double)
+    case watchLaterVideo(String, Int, Double)
     case creator(Int)
     case dynamic(String)
     case collection(Int, CollectionKind, Int)
     case history
     case followedPeople(Bool)
     case favoriteFolders
+    case watchLater
     case favoriteFolder(FavoriteFolder)
     case downloads
     case offline(UUID)

@@ -2,6 +2,7 @@ package app.bilight.android.core
 
 import android.app.Application
 import android.content.Context
+import android.os.SystemClock
 import androidx.compose.runtime.*
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -9,6 +10,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import app.bilight.android.playback.PlaybackModel
 
@@ -21,6 +23,7 @@ sealed interface Route {
     data object History: Route
     data class People(val frequent: Boolean): Route
     data object Favorites: Route
+    data object WatchLater: Route
     data object Downloads: Route
 }
 /** Session-owned reads outlive composables, but never outlive the account that started them. */
@@ -50,6 +53,7 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     var showAccount by mutableStateOf(false)
     var sessionRevision by mutableLongStateOf(0); private set
     private var accountVersion = -1L
+    internal val watchLater = WatchLaterModel(this, viewModelScope)
     var tab by mutableIntStateOf(0)
     val routes = mutableStateListOf<Route>()
     private val browseStates = mutableMapOf<Triple<Int,Route?,Any>,Any>()
@@ -59,11 +63,13 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     val following = mutableStateListOf<Post>()
     val expandedPosts = mutableStateMapOf<String,Boolean>()
     val dynamicPosts = mutableStateMapOf<String,Post>()
-    val dynamicLikeStates = mutableStateMapOf<String,DynamicLikeState>()
-    val dynamicLikePending = mutableStateMapOf<String,Boolean>()
-    var dynamicLikeRevision = 0L; private set
-    private val dynamicLikeVersions = mutableMapOf<String,Long>()
-    private val dynamicLikeJobs = mutableMapOf<String,Job>()
+    private val dynamicLikes = DebouncedLikes<String>(viewModelScope) { http.generation }
+    val dynamicLikeStates = dynamicLikes.confirmed
+    val dynamicLikePending = dynamicLikes.pending
+    val dynamicLikeRevision get() = dynamicLikes.revision
+    internal val commentLikes = DebouncedLikes<Triple<String,Int,String>>(viewModelScope) { http.generation }
+    private val dynamicLikeConfirmedUntil = mutableMapOf<String,Long>()
+    private val dynamicLikeRechecks = mutableMapOf<String,Job>()
     var feedLoaded by mutableStateOf(false); private set
     var feedBusy by mutableStateOf(false); private set
     var feedMore by mutableStateOf(false); private set
@@ -169,6 +175,25 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
     var searchOffset = 0
     private var searchJob: Job? = null
     private var searchRequest = 0L
+    fun enterSearch() {
+        resetSearch()
+        tab = 0
+    }
+    private fun resetSearch() {
+        searchRequest++
+        searchJob?.cancel()
+        searchJob = null
+        keyword = ""
+        submittedSearch = ""
+        searchUsers = false
+        searched = false
+        searchBusy = false
+        searchMore = false
+        searchError = null
+        searchPage = 0
+        searchItems.clear()
+        resetSearchScroll()
+    }
     fun search(reset: Boolean = true) {
         if (reset) {
             val query = keyword.trim()
@@ -247,23 +272,24 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
         val keepNavigation=initialRestore && accountVersion == -1L && user==null
         peopleAccount(value?.mid)
         if (!keepNavigation && (value?.mid != user?.mid || accountVersion!=http.generation)) {
-            sessionRevision++; searchRevision++
+            sessionRevision++
             currentPlayback?.close(); currentPlayback=null
             downloads.pauseAll()
             feedRequest++; feedJob?.cancel(); accountJobs.forEach(Job::cancel); accountJobs.clear()
-            dynamicLikeJobs.values.forEach(Job::cancel); dynamicLikeJobs.clear()
-            dynamicPosts.clear(); dynamicLikeStates.clear(); dynamicLikePending.clear(); dynamicLikeVersions.clear(); dynamicLikeRevision=0
+            dynamicLikes.clear(); commentLikes.clear()
+            dynamicLikeRechecks.values.toList().forEach(Job::cancel); dynamicLikeRechecks.clear()
+            dynamicLikeConfirmedUntil.clear()
+            dynamicPosts.clear()
             browseStates.clear()
             following.clear(); expandedPosts.clear(); feedLoaded = false; feedMore = false; feedBusy = false; feedRefreshing=false; feedError = null
             feedCursor = null; feedIndex = 0; feedOffset = 0; feedAnchor=null; relations.clear(); followBusy.clear(); routes.clear()
             repository.invalidateFollowing()
-            searchRequest++
-            searchJob?.cancel(); searchItems.clear(); searched=false; searchBusy=false; searchIndex=0; searchOffset=0
-            submittedSearch=""; keyword=""; searchUsers=false; searchPage=0; searchMore=false; searchError=null
+            resetSearch()
         }
         user = value
         accountVersion=http.generation
         reporter.account(http.generation)
+        watchLater.account(http.generation, value?.mid)
         downloads.account(value?.mid)
     }
     fun open(route: Route) { showAccount = false; if (route is Route.Dynamic) dynamicPosts.putIfAbsent(route.post.id,route.post); routes.add(route) }
@@ -273,24 +299,40 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
         viewModelScope.launch { try { update(http.acceptLogin(header)); error = null; showLogin = false; complete(true,null) } catch (e: CancellationException) { throw e } catch (e: Exception) { complete(false,e.message) } finally { if (accountVersion!=http.generation) update(http.user) } }
     fun logout() { viewModelScope.launch { http.logout(); update(null); showAccount = false } }
     fun dynamicLikeState(post: Post) = dynamicLikeStates[post.id] ?: DynamicLikeState(post.liked,post.likes)
-    fun recordDynamic(post: Post,readVersion: Long) {
+    fun recordDynamic(post: Post,readVersion: Long,fromFeed: Boolean = false) {
         dynamicPosts[post.id]=post
-        if (!dynamicLikePending.containsKey(post.id) && (dynamicLikeVersions[post.id] ?: 0)<=readVersion) dynamicLikeStates[post.id]=DynamicLikeState(post.liked,post.likes)
+        if (!dynamicLikes.acceptsRead(post.id,readVersion)) return
+        val incoming=DynamicLikeState(post.liked,post.likes)
+        if (fromFeed && post.id in dynamicLikeConfirmedUntil && incoming!=dynamicLikeStates[post.id]) {
+            recheckDynamicLike(post.id,readVersion)
+            return
+        }
+        dynamicLikeStates[post.id]=incoming
+    }
+    private fun recheckDynamicLike(id: String,readVersion: Long) {
+        if (dynamicLikeRechecks[id]?.isActive==true) return
+        val version=http.generation
+        dynamicLikeRechecks[id]=viewModelScope.launch {
+            try {
+                val detail=repository.dynamic(id,strictLikes=true)
+                http.check(version)
+                recordDynamic(detail,readVersion)
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) { /* Keep the confirmed state until a future read can verify the change. */ }
+            finally { if (dynamicLikeRechecks[id]===coroutineContext[Job]) dynamicLikeRechecks.remove(id) }
+        }
     }
     fun toggleDynamicLike(post: Post) {
-        if (!requireLogin() || dynamicLikePending.containsKey(post.id)) return
-        val version=http.generation; val target=!dynamicLikeState(post).liked
-        dynamicLikeRevision++; dynamicLikeVersions[post.id]=dynamicLikeRevision; dynamicLikePending[post.id]=target
-        dynamicLikeJobs[post.id]=viewModelScope.launch {
-            try {
-                val after=repository.setDynamicLike(post.id,target); http.check(version)
-                dynamicLikeRevision++; dynamicLikeVersions[post.id]=dynamicLikeRevision
-                val state=DynamicLikeState(after.liked,after.likes)
-                dynamicLikeStates[post.id]=state; dynamicPosts[post.id]=after
-                for (index in following.indices) if (following[index].id==post.id) following[index]=following[index].copy(likes=after.likes,liked=after.liked)
-            } catch (cancelled: CancellationException) { throw cancelled }
-            catch (e: Exception) { if (version==http.generation) error=e.message ?: "动态点赞失败，请刷新后重试。" }
-            finally { if (version==http.generation) { dynamicLikePending.remove(post.id); dynamicLikeJobs.remove(post.id) } }
+        if (!requireLogin()) return
+        val id=post.id
+        dynamicLikeRechecks.remove(id)?.cancel()
+        dynamicLikes.toggle(id,dynamicLikeState(post),onError={ error=it.message ?: "动态点赞失败，请刷新后重试。" }) { requested,version ->
+            val after=repository.setDynamicLike(id,requested,expectedGeneration=version)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive(); http.check(version)
+            dynamicLikeConfirmedUntil[id]=SystemClock.elapsedRealtime()+60000
+            dynamicPosts[id]=after
+            for (index in following.indices) if (following[index].id==id) following[index]=following[index].copy(likes=after.likes,liked=after.liked)
+            DynamicLikeState(after.liked,after.likes)
         }
     }
     fun loadFeed(refresh: Boolean = false) {
@@ -308,7 +350,9 @@ class AppModel @JvmOverloads constructor(application: Application, val http: Bil
                 val result = repository.following(if (refresh || !feedLoaded) null else feedCursor)
                 http.check(version); if (feedRequest!=token) return@launch
                 if (refresh || !feedLoaded) { following.clear(); feedIndex = 0; feedOffset = 0; feedAnchor=null }
-                result.items.forEach { recordDynamic(it,likeVersion) }
+                val now=android.os.SystemClock.elapsedRealtime()
+                dynamicLikeConfirmedUntil.values.removeAll { it<=now }
+                result.items.forEach { recordDynamic(it,likeVersion,fromFeed=true) }
                 val known = following.map { it.id }.toSet(); following.addAll(result.items.filter { it.id !in known })
                 feedLoaded = true; feedMore = result.more; feedCursor = result.cursor
             } catch (e: CancellationException) { throw e } catch (e: Exception) { if (version == http.generation && feedRequest==token) feedError = e.message ?: "关注动态读取失败，请重试。" }

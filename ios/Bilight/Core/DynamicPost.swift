@@ -42,6 +42,11 @@ struct DynamicPost: Hashable, Identifiable {
     var commentType: Int
     var warning: String
     var url: URL { URL(string: "https://t.bilibili.com/\(id)")! }
+    var commentChannel: CommentChannel? {
+        guard let commentID else { return nil }
+        let channel = CommentChannel.dynamic(id: id, oid: commentID, type: commentType)
+        return channel.valid ? channel : nil
+    }
     static func validID(_ value: String) -> Bool {
         value.range(of: "^[1-9][0-9]{0,31}$", options: .regularExpression) != nil
     }
@@ -149,5 +154,3 @@ struct DynamicPost: Hashable, Identifiable {
         return raw.compactMap(PostImage.map).filter { seen.insert($0.url).inserted }
     }
 }
-
-struct DynamicLikeState: Equatable { var liked: Bool; var likes: Int }

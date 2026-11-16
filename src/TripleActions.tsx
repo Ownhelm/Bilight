@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
 import { ArrowClockwise, Check, Coins, Plus, SpinnerGap, Star, ThumbsUp, X } from '@phosphor-icons/react';
-import type { AuthState, CoinInfo, EngagementAction, FavoriteFolder, TripleResult, VideoEngagement, VideoInteraction } from '../shared/types';
+import type { AuthState, CoinInfo, EngagementAction, FavoriteFolder, TripleResult, VideoDetail, VideoEngagement, VideoInteraction } from '../shared/types';
 import { api, ApiError, errorMessage, isAbort } from './api';
-import { countLabel } from './components';
 import { coinChoices, engagementCounts, favoriteChanged, optimisticEngagement } from './interactionModel';
 import { createLikePress, LIKE_CHARGE_MS } from './likePress';
-import { ShareVideo } from './ShareVideo';
+import { formatEngagementCount, ShareVideo } from './ShareVideo';
 
 export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频', page = 1 }: { bvid: string; auth: AuthState | null; onLogin: () => void; snapshot?: VideoInteraction; title?: string; page?: number }) {
   const [state, setState] = useState<VideoEngagement | null>(null);
   const [optimistic, setOptimistic] = useState<VideoEngagement | null>(null);
+  const [refreshedSnapshot, setRefreshedSnapshot] = useState<VideoInteraction>();
   const [busy, setBusy] = useState(false), [working, setWorking] = useState('');
   const [message, setMessage] = useState(''), [error, setError] = useState('');
   const [retryRequired, setRetryRequired] = useState(false);
@@ -24,7 +24,7 @@ export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频',
   const press = useRef<ReturnType<typeof createLikePress> | null>(null), origin = useRef({ x: 0, y: 0 });
   if (!press.current) press.current = createLikePress(() => actions.current.like(), () => actions.current.triple(), setHolding, () => actions.current.canHold());
   const displayState = optimistic ?? state;
-  const complete = Boolean(displayState?.liked && displayState.coins > 0 && displayState.favorited), counts = engagementCounts(snapshot, baseline.current, state);
+  const complete = Boolean(displayState?.liked && displayState.coins > 0 && displayState.favorited), counts = engagementCounts(refreshedSnapshot ?? snapshot, baseline.current, displayState);
   const choices = coinChoices(coinLimit, state?.coins ?? 0), changed = favoriteChanged(folders, folderIds);
   function updateState(current: VideoEngagement) { baseline.current ??= current; setState(current); }
   async function readState(signal?: AbortSignal, silentAuthFailure = false) { const current = await api<VideoEngagement>(`/api/videos/${bvid}/engagement`, { signal, silentAuthFailure }); if (!signal?.aborted) updateState(current); return current; }
@@ -69,11 +69,22 @@ export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频',
     if (action === 'triple' && complete) { setMessage('已经三连，感谢支持。'); return; }
     const controller = new AbortController(); active.current = controller;
     const before = state, silent = action === 'like' || action === 'triple' || (typeof action === 'object' && action.type === 'coin');
-    if (silent) { setOptimistic(optimisticEngagement(state, action)); if (typeof action === 'object') setPanel(null); }
+    if (action !== 'refresh') {
+      setOptimistic(optimisticEngagement(state, action));
+      if (typeof action === 'object') setPanel(null);
+    }
     setBusy(true); setWorking(typeof action === 'string' ? action : action.type); setError(''); setMessage(''); statusRequest.current?.abort();
     try {
       if (retryRequired && action !== 'refresh') { await readState(controller.signal, silent); if (controller.signal.aborted) return; setRetryRequired(false); }
-      if (action === 'refresh') { await readState(controller.signal); if (!controller.signal.aborted) { setRetryRequired(false); setMessage('已更新互动状态。'); } }
+      if (action === 'refresh') {
+        const [detail, current] = await Promise.all([
+          api<VideoDetail>(`/api/videos/${bvid}`, { signal: controller.signal }),
+          api<VideoEngagement>(`/api/videos/${bvid}/engagement`, { signal: controller.signal }),
+        ]);
+        if (controller.signal.aborted) return;
+        if (detail.interaction) { baseline.current = current; setRefreshedSnapshot(detail.interaction); setCoinLimit(detail.interaction.coinLimit); }
+        updateState(current); setRetryRequired(false); setMessage('已更新互动状态。');
+      }
       else if (action === 'triple') {
         if (!baseline.current) await readState(controller.signal, true);
         if (controller.signal.aborted) return;
@@ -82,9 +93,14 @@ export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频',
         if (!result.complete) { setState(before); setRetryRequired(true); return; }
         updateState(result.state); setCelebrating('triple'); setMessage('三连成功，感谢支持 UP 主。');
       } else {
-        const target = action === 'like' ? { type: 'like' as const, liked: !(await readState(controller.signal, true)).liked } : action;
+        let target: EngagementAction;
+        if (action === 'like') {
+          const current = await readState(controller.signal, true);
+          if (controller.signal.aborted) return;
+          target = { type: 'like', liked: !current.liked };
+          setOptimistic(optimisticEngagement(current, target));
+        } else target = action;
         if (controller.signal.aborted) return;
-        if (silent) setOptimistic(optimisticEngagement(state, target));
         const result = await api<VideoEngagement>(`/api/videos/${bvid}/interaction`, { method: 'POST', body: target, signal: controller.signal, silentAuthFailure: silent });
         if (controller.signal.aborted) return;
         updateState(result); setPanel(null); if (target.type === 'like' && result.liked) setCelebrating('like');
@@ -146,11 +162,11 @@ export function TripleActions({ bvid, auth, onLogin, snapshot, title = '视频',
   return <div className={`triple-actions${holding ? ' is-holding' : ''}${celebrating ? ` celebrate-${celebrating}` : ''}`} ref={mount} aria-label="支持 UP 主">
     <div className="triple-summary">
       <button type="button" className={`engagement-button like-button${displayState?.liked ? ' done' : ''}`} disabled={disabled} aria-label={displayState?.liked ? '取消点赞' : '点赞'} aria-pressed={Boolean(displayState?.liked)} aria-describedby={`triple-note-${bvid}`} title={`${displayState?.liked ? '已点赞' : '点赞'}（Q），长按一键三连`} onPointerDown={start} onPointerMove={move} onPointerUp={() => press.current?.end()} onPointerLeave={() => press.current?.cancel()} onPointerCancel={() => press.current?.cancel()} onBlur={() => press.current?.cancel()} onContextMenu={event => event.preventDefault()} onKeyDown={keyDown} onKeyUp={keyUp} onClick={() => press.current?.click()}>
-        <span className="engagement-icon"><ThumbsUp weight={displayState?.liked ? 'fill' : 'regular'} size={28} /></span><span>{counts?.likes ? countLabel(counts.likes) : '点赞'}</span>
+        <span className="engagement-icon"><ThumbsUp weight="fill" size={24} /></span><span>{formatEngagementCount(counts?.likes) ?? '点赞'}</span>
       </button>
-      <button type="button" className={`engagement-button${displayState?.coins ? ' done' : ''}`} disabled={disabled} aria-label="投币" title={`投币（W）${displayState?.coins ? `，已投 ${displayState.coins} 枚` : ''}`} onClick={() => void openPanel('coin')}><span className="engagement-icon">{ring()}<Coins weight={displayState?.coins ? 'fill' : 'regular'} size={28} /></span><span>{counts?.coins ? countLabel(counts.coins) : '投币'}</span></button>
-      <button type="button" className={`engagement-button${displayState?.favorited ? ' done' : ''}`} disabled={disabled} aria-label="收藏" title={`收藏（E）${displayState?.favorited ? '，已收藏' : ''}`} onClick={() => void openPanel('favorite')}><span className="engagement-icon">{ring()}<Star weight={displayState?.favorited ? 'fill' : 'regular'} size={28} /></span><span>{counts?.favorites ? countLabel(counts.favorites) : '收藏'}</span></button>
-      <ShareVideo key={`${bvid}:${page}`} bvid={bvid} title={title} page={page} />
+      <button type="button" className={`engagement-button${displayState?.coins ? ' done' : ''}`} disabled={disabled} aria-label="投币" title={`投币（W）${displayState?.coins ? `，已投 ${displayState.coins} 枚` : ''}`} onClick={() => void openPanel('coin')}><span className="engagement-icon">{ring()}<span className="engagement-coin" aria-hidden="true" /></span><span>{formatEngagementCount(counts?.coins) ?? '投币'}</span></button>
+      <button type="button" className={`engagement-button${displayState?.favorited ? ' done' : ''}`} disabled={disabled} aria-label="收藏" title={`收藏（E）${displayState?.favorited ? '，已收藏' : ''}`} onClick={() => void openPanel('favorite')}><span className="engagement-icon">{ring()}<Star weight="fill" size={24} /></span><span>{formatEngagementCount(counts?.favorites) ?? '收藏'}</span></button>
+      <ShareVideo key={`${bvid}:${page}`} bvid={bvid} title={title} page={page} shares={(refreshedSnapshot ?? snapshot)?.shares} />
     </div>
     <div className="triple-submit">{complete && <span className="triple-complete"><Check size={16} />已三连</span>}<button className="triple-refresh" aria-label="刷新三连状态" title="刷新互动状态" disabled={!auth?.authenticated || busy} onClick={() => void submit('refresh')}><ArrowClockwise className={working === 'refresh' ? 'spin' : ''} size={18} /></button></div>
     <p id={`triple-note-${bvid}`} className="triple-note">长按点赞，圆环蓄满即可一键三连；蓄力中松开或移开取消。投币不可撤回，三连收藏到默认收藏夹。</p>

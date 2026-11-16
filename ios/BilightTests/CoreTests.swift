@@ -300,10 +300,14 @@ final class CoreTests: XCTestCase {
         try await Task.sleep(for: .milliseconds(150))
         host.enterFullscreen(rotate: false)
         let fullscreen = try XCTUnwrap(host.presentedViewController)
-        let button = try XCTUnwrap(fullscreen.view.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == "player-fullscreen-toggle" })
+        let identifier = settle ? "player-fullscreen-back" : "player-fullscreen-toggle"
+        let button = try XCTUnwrap(fullscreen.view.subviews.compactMap { $0 as? UIButton }.first { $0.accessibilityIdentifier == identifier })
         if settle {
             try await Task.sleep(for: .milliseconds(200))
             XCTAssertTrue(PlayerContainer.orientation(fullscreen.view.window?.windowScene)?.isPortrait == true)
+            fullscreen.view.layoutIfNeeded()
+            XCTAssertEqual(button.bounds.size, CGSize(width: 44, height: 44))
+            XCTAssertEqual(button.layer.cornerRadius, button.bounds.width / 2)
         }
         XCTAssertTrue(button.isUserInteractionEnabled)
         button.sendActions(for: .touchUpInside)

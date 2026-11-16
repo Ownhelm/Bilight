@@ -117,7 +117,7 @@ final class BufferingIndicatorTests: XCTestCase {
         XCTAssertFalse(indicator.isHidden)
         XCTAssertTrue(indicator.window === fixture.window)
         XCTAssertFalse(indicator.isUserInteractionEnabled)
-        let settings = try XCTUnwrap(fixture.container.controller.contentOverlayView?.viewWithTag(1743) as? UIButton)
+        let settings = try XCTUnwrap(fixture.container.presentedViewController?.viewIfLoaded?.viewWithTag(1743) as? UIButton)
         let point = settings.convert(CGPoint(x: settings.bounds.midX, y: settings.bounds.midY), to: fixture.window)
         let hit = fixture.window.hitTest(point, with: nil)
         XCTAssertTrue(hit === settings || hit?.isDescendant(of: settings) == true, "Loading must leave settings directly tappable")

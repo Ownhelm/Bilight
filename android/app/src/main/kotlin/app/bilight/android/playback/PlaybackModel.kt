@@ -29,6 +29,8 @@ class PlaybackSettings(context: Context) {
         set(value) { if (value.isFinite() && value in .25f..4f) store.edit().putFloat("speed",value).apply() }
     var subtitlesEnabled: Boolean get() = store.getBoolean("subtitlesEnabled",true); set(value) { store.edit().putBoolean("subtitlesEnabled",value).apply() }
     var subtitleLanguage: String? get() = store.getString("subtitleLanguage",null); set(value) { store.edit().putString("subtitleLanguage",value).apply() }
+    var commentsExpanded: Boolean get() = store.getBoolean("commentsExpanded",true); set(value) { store.edit().putBoolean("commentsExpanded",value).apply() }
+    var descriptionExpanded: Boolean get() = store.getBoolean("descriptionExpanded",false); set(value) { store.edit().putBoolean("descriptionExpanded",value).apply() }
     var quality: Int get() = store.getInt("quality",127); set(value) { store.edit().putInt("quality",value).apply() }
     var danmaku: Boolean get() = store.getBoolean("danmaku",false); set(value) { store.edit().putBoolean("danmaku",value).apply() }
     var font: Int get() = store.getInt("danmakuFont",20); set(value) { store.edit().putInt("danmakuFont",value).apply() }
@@ -43,6 +45,7 @@ private fun playbackMediaClient() = OkHttpClient.Builder().connectTimeout(10,Tim
     if (response.isSuccessful && type.isNotEmpty() && !type.startsWith("video/") && !type.startsWith("audio/") && !type.startsWith("application/octet-stream")) { response.close(); throw IOException("媒体响应类型不正确") }
     response
 }.build()
+
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
 class PlaybackModel(private val app: AppModel,val route: Route.Watch, private val mediaClient: OkHttpClient = playbackMediaClient()) {
     val offline get() = route.downloadId != null
@@ -98,6 +101,18 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     var danmakuItems by mutableStateOf(emptyList<Danmaku>()); private set
     var danmakuError by mutableStateOf<String?>(null); private set
     var engagement by mutableStateOf<Engagement?>(null); private set
+    private var engagementBaseline by mutableStateOf<Engagement?>(null)
+    val statistics: Statistics?
+        get() {
+            val counts = detail?.statistics?.takeIf { detailLoaded } ?: return null
+            val before = engagementBaseline ?: return counts
+            val current = engagement ?: return counts
+            return Statistics(
+                likes = (counts.likes + current.liked.compareTo(before.liked)).coerceAtLeast(0),
+                coins = (counts.coins + current.coins - before.coins).coerceAtLeast(0),
+                favorites = (counts.favorites + current.favorite.compareTo(before.favorite)).coerceAtLeast(0)
+            )
+        }
     var actionBusy by mutableStateOf(false); private set
     var fullscreen by mutableStateOf(false)
     var portraitFullscreen by mutableStateOf(false)
@@ -106,25 +121,30 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     var controlsVisible by mutableStateOf(true)
     var informationIndex = 0
     var informationOffset = 0
-    val comments = mutableStateListOf<Comment>()
-    var commentsBusy by mutableStateOf(false); private set
-    var commentsMore by mutableStateOf(true); private set
-    var commentsError by mutableStateOf<String?>(null); private set
-    var commentsExpanded by mutableStateOf(true)
-    private var commentCursor: String? = null
+    var commentsExpanded by mutableStateOf(preferences.commentsExpanded); private set
+    var descriptionExpanded by mutableStateOf(preferences.descriptionExpanded); private set
+    internal val videoComments = CommentsModel(app, scope,
+        subject = { detail?.video?.takeIf { detailLoaded }?.let { CommentSubject.video(it) } }, available = { networkAvailable })
+    fun toggleCommentsExpanded() {
+        commentsExpanded = !commentsExpanded
+        preferences.commentsExpanded = commentsExpanded
+    }
+    fun toggleDescriptionExpanded() {
+        descriptionExpanded = !descriptionExpanded
+        preferences.descriptionExpanded = descriptionExpanded
+    }
     private var prepareJob: Job? = null
     private var subtitleTracksJob: Job? = null
     private var subtitleJob: Job? = null
     private var danmakuJob: Job? = null
     private var bufferJob: Job? = null
     private var engagementRead: Job? = null
-    private var statisticsRead: Job? = null
     private var refreshSupport = false
     private var temporarySpeed: Float? = null
     private val version=app.http.generation
     private val visibility=PlaybackVisibility()
     private var lastPosition=0L
-    private var advanced=false
+    private var unreportedProgress: Long? = null
     private var lastReport=0L
     private var closed=false
     private var refreshedMedia=false
@@ -169,9 +189,9 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         scope.launch { while (isActive) {
             delay(if (visibility.background) 1000 else 250)
             position=player.currentPosition.coerceAtLeast(0); duration=player.duration.takeIf { it>0 } ?: ((playback?.duration ?: 0.0)*1000).toLong()
-            if (player.isPlaying && position-lastPosition in 1..(1500*maxOf(1f,speed)).toLong()) advanced=true
+            if (player.isPlaying && position-lastPosition in 1..(1500*maxOf(1f,speed)).toLong()) unreportedProgress=position
             lastPosition=position
-            if (advanced && android.os.SystemClock.elapsedRealtime()-lastReport>=15000) flushHistory()
+            if (unreportedProgress!=null && android.os.SystemClock.elapsedRealtime()-lastReport>=15000) flushHistory()
             val seconds=position/1000.0; subtitleText=cues.firstOrNull { seconds>=it.from && seconds<it.to }?.text.orEmpty()
         } }
     }
@@ -197,7 +217,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
             val selected=if (route.cid!=null) value.parts.firstOrNull { it.cid==route.cid } else value.parts.firstOrNull { it.page==route.page }
             if (selected==null) invalid("该分P已失效，请选择其他分P。")
             part=selected; prepare(selected,route.progress*1000,true)
-            loadComments(); readEngagement()
+            videoComments.loadComments(); readEngagement()
         } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
     private fun networkChanged() { scope.launch {
@@ -218,7 +238,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
                 detail=fresh.copy(parts=listOf(selected)); detailLoaded=true
             } catch (e: CancellationException) { throw e } catch (e: Exception) { metadataError=e.message }
         }
-        if (comments.isEmpty() || commentsError!=null) loadComments()
+        if (videoComments.comments.isEmpty() || videoComments.commentsError!=null) videoComments.loadComments()
         if (offline) {
             part?.let { if (tracks.isEmpty()) loadSubtitles(it) }
             if (danmakuItems.isEmpty()) loadDanmaku()
@@ -228,7 +248,14 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     private suspend fun prepare(selected: Part,progress: Long,autoplay: Boolean,loadSupport: Boolean = true,preserveCurrent: Boolean = false,preferredQuality: Int = preferences.quality) {
         val result=app.repository.playback(route.bvid,selected.cid,preferredQuality); app.http.check(version)
         playback=result
-        val sourceFactory=DefaultDataSource.Factory(context,OkHttpDataSource.Factory(mediaClient))
+        val httpSource=OkHttpDataSource.Factory { request ->
+            // Some B站 CDNs return 567 for a progressive MP4 GET without a Range header.
+            val ranged=if (result.mp4!=null && request.header("Range")==null)
+                request.newBuilder().header("Range","bytes=0-").build()
+            else request
+            mediaClient.newCall(ranged)
+        }
+        val sourceFactory=DefaultDataSource.Factory(context,httpSource)
         val item=mediaItem(Uri.parse(result.mp4 ?: "https://www.bilibili.com/bilight-manifest.mpd"),selected)
         val source=if (result.mp4!=null) ProgressiveMediaSource.Factory(sourceFactory).createMediaSource(item) else {
             // Sideload the static MPD: Media3's CMCD URI handling rejects opaque data: URIs.
@@ -253,7 +280,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         endTemporarySpeed()
         if (offline) return
         flushHistory(); player.pause(); prepareJob?.cancel(); subtitleTracksJob?.cancel(); subtitleJob?.cancel(); danmakuJob?.cancel()
-        part=selected; playback=null; tracks=emptyList(); subtitle=null; subtitleError=null; subtitleText=""; cues=emptyList(); danmakuItems=emptyList(); hasFrame=false; preparing=true; error=null; advanced=false; lastPosition=player.currentPosition; refreshedMedia=false
+        part=selected; playback=null; tracks=emptyList(); subtitle=null; subtitleError=null; subtitleText=""; cues=emptyList(); danmakuItems=emptyList(); hasFrame=false; preparing=true; error=null; unreportedProgress=null; lastPosition=player.currentPosition; refreshedMedia=false
         prepareJob=scope.launch { try { prepare(selected,progress,true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
     fun chooseQuality(id: Int) {
@@ -268,7 +295,11 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
         prepareJob=scope.launch { try { prepare(selected,progress,autoplay,loadSupport=false,preserveCurrent=true) } catch (e: CancellationException) { throw e } catch (e: Exception) { error=e.message; preparing=false } }
     }
     fun speed(value: Float) { if (!value.isFinite() || value !in .25f..4f) return; preferences.speed=value; speed=value; if (temporarySpeed!=null) temporarySpeed=value else player.setPlaybackSpeed(value) }
-    fun beginTemporarySpeed() { if (temporarySpeed==null && player.playWhenReady && playback!=null) { temporarySpeed=speed; player.setPlaybackSpeed(2f) } }
+    fun beginTemporarySpeed(): Boolean {
+        if (temporarySpeed!=null || !player.playWhenReady || playback==null) return false
+        temporarySpeed=speed; player.setPlaybackSpeed(2f)
+        return true
+    }
     fun endTemporarySpeed() { val value=temporarySpeed ?: return; temporarySpeed=null; player.setPlaybackSpeed(value) }
     fun toggle() {
         if (error!=null) { retry(); return }; if (playback==null) return
@@ -281,6 +312,7 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     fun seek(milliseconds: Long) {
         // The native timeline can be ready before the UI timer publishes its first duration.
         duration=(player.duration.takeIf { it>0 } ?: duration).coerceAtLeast(0)
+        if (player.playbackState==Player.STATE_ENDED) player.playWhenReady=false
         player.seekTo(milliseconds.coerceIn(0,duration)); lastPosition=player.currentPosition; position=lastPosition
     }
     fun doubleTap(fraction: Float) {
@@ -292,38 +324,50 @@ class PlaybackModel(private val app: AppModel,val route: Route.Watch, private va
     fun background() { endTemporarySpeed(); visibility.leave(player.playWhenReady); flushHistory() }
     fun foreground() { val resume=visibility.enter(); if (!closed && resume && error==null) player.playWhenReady=true }
     private fun flushHistory() {
-        if (!advanced) return
+        // The player's cursor may already show a seek target that has not played yet.
+        val progress=unreportedProgress ?: return
         val d=detail ?: return; val p=part ?: return
-        app.report(d,p,player.currentPosition.coerceAtLeast(0)/1000,version); advanced=false; lastReport=android.os.SystemClock.elapsedRealtime()
+        app.report(d,p,progress/1000,version); unreportedProgress=null; lastReport=android.os.SystemClock.elapsedRealtime()
     }
-    fun loadComments() {
-        val d=detail ?: return; if (!networkAvailable || commentsBusy || !commentsMore) return
-        commentsBusy=true; commentsError=null
-        scope.launch { try { val page=app.repository.comments("${d.video.aid}",cursor=commentCursor); app.http.check(version); val known=comments.map { it.id }.toSet(); comments.addAll(page.items.filter { it.id !in known }); commentsMore=page.more; commentCursor=page.cursor } catch (e: CancellationException) { throw e } catch (e: Exception) { commentsError=e.message } finally { commentsBusy=false } }
+    fun readEngagement() {
+        if (!networkAvailable || app.user == null || actionBusy) return
+        engagementRead?.cancel()
+        engagementRead = scope.launch {
+            try {
+                val value = app.repository.engagement(route.bvid, true)
+                ensureActive(); app.http.check(version)
+                if (!actionBusy) {
+                    if (engagementBaseline == null) engagementBaseline = value
+                    engagement = value; refreshSupport = false; supportError = null
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { supportError = e.message }
+        }
     }
-    fun readEngagement() { if (!networkAvailable || app.user==null || actionBusy) return; engagementRead?.cancel(); engagementRead=scope.launch { try { val value=app.repository.engagement(route.bvid,true); app.http.check(version); if (!actionBusy) { engagement=value; refreshSupport=false; supportError=null } } catch (e: CancellationException) { throw e } catch (e: Exception) { supportError=e.message } } }
     fun write(action: VideoWrite) {
         if (!networkAvailable || (offline && !detailLoaded) || !app.requireLogin() || actionBusy) return
-        val d=detail ?: return; actionBusy=true; engagementRead?.cancel(); statisticsRead?.cancel()
-        val before=engagement; val pending=before ?: Engagement(false,0,false)
+        val d=detail ?: return; actionBusy=true; engagementRead?.cancel()
+        var before=engagement
         val silent=action !is VideoWrite.Favorite
-        engagement=when (action) {
-            is VideoWrite.Like -> pending.copy(liked=action.selected)
-            is VideoWrite.Coin -> pending.copy(coins=maxOf(pending.coins,action.target),liked=pending.liked || action.like)
-            VideoWrite.Triple -> pending.copy(liked=true,coins=maxOf(1,pending.coins),favorite=true)
-            is VideoWrite.Favorite -> before
+        fun preview(current: Engagement) = when (action) {
+            is VideoWrite.Like -> current.copy(liked=action.selected)
+            is VideoWrite.Coin -> current.copy(coins=maxOf(current.coins,action.target),liked=current.liked || action.like)
+            VideoWrite.Triple -> current.copy(liked=true,coins=maxOf(1,current.coins),favorite=true)
+            is VideoWrite.Favorite -> current.copy(favorite=action.ids.isNotEmpty())
         }
+        engagement=before?.let(::preview)
         supportError=null
         scope.launch { try {
-            if (refreshSupport) app.repository.engagement(route.bvid,true)
-            app.http.check(version)
-            val value=app.repository.write(d,action); app.http.check(version); engagement=value; refreshSupport=false
-            // Public totals must not hold the confirmed engagement write open.
-            statisticsRead=scope.launch {
-                try { val fresh=app.repository.detail(route.bvid); ensureActive(); app.http.check(version); detail=if (offline) fresh.copy(parts=listOfNotNull(part)) else fresh }
-                catch (e: CancellationException) { throw e }
-                catch (e: Exception) { ensureActive(); app.http.check(version); if (!silent) supportError="互动已更新，计数暂时无法刷新：${e.message}" }
+            if (refreshSupport || before==null) {
+                val current=app.repository.engagement(route.bvid,true)
+                ensureActive(); app.http.check(version)
+                before=current
+                if (engagementBaseline==null) engagementBaseline=current
+                engagement=preview(current)
             }
+            app.http.check(version)
+            val value=app.repository.write(d,action); ensureActive(); app.http.check(version)
+            engagement=value; refreshSupport=false
         } catch (e: CancellationException) { if (!closed && app.http.generation==version) engagement=before; throw e }
         catch (e: Exception) { if (!closed && app.http.generation==version) { engagement=before; refreshSupport=true; supportError=if (silent) null else e.message } }
         finally { actionBusy=false } }

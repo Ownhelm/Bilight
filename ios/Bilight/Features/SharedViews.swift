@@ -5,6 +5,13 @@ actor ImageRepository {
     static let shared = ImageRepository()
     private let cache = NSCache<NSURL, UIImage>()
     private let session: URLSession
+    private final class RedirectPolicy: NSObject, URLSessionTaskDelegate {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+            newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+        ) {
+            completionHandler(request.url.map(ImageRepository.allowed) == true ? request : nil)
+        }
+    }
     static func allowed(_ url: URL) -> Bool {
         guard url.scheme == "https", let host = url.host, url.port == nil || url.port == 443,
             url.user == nil, url.password == nil
@@ -17,7 +24,7 @@ actor ImageRepository {
         config.httpShouldSetCookies = false
         config.httpMaximumConnectionsPerHost = 4
         config.urlCache = URLCache(memoryCapacity: 24 * 1024 * 1024, diskCapacity: 0)
-        self.session = session ?? URLSession(configuration: config)
+        self.session = session ?? URLSession(configuration: config, delegate: RedirectPolicy(), delegateQueue: nil)
         cache.totalCostLimit = 48 * 1024 * 1024
     }
     func image(_ url: URL) async throws -> UIImage {
@@ -38,7 +45,8 @@ actor ImageRepository {
         request.setValue(BiliHTTP.userAgent, forHTTPHeaderField: "User-Agent")
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
-        guard (response as? HTTPURLResponse)?.statusCode == 200, response.mimeType?.hasPrefix("image/") == true,
+        guard (response as? HTTPURLResponse)?.statusCode == 200, response.url.map(Self.allowed) == true,
+            response.mimeType?.hasPrefix("image/") == true,
             data.count < 20_000_000, let source = CGImageSourceCreateWithData(data as CFData, nil),
             let cg = CGImageSourceCreateThumbnailAtIndex(
                 source, 0,
@@ -192,6 +200,7 @@ struct UserRow: View {
 struct VideoCard: View {
     @EnvironmentObject private var app: AppModel
     var video: Video
+    var showsWatchLater = false
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
@@ -205,6 +214,8 @@ struct VideoCard: View {
                             .black.opacity(0.6), in: RoundedRectangle(cornerRadius: 3)
                         ).padding(5)
                 }.clipShape(RoundedRectangle(cornerRadius: 7))
+            }.overlay(alignment: .topTrailing) {
+                if showsWatchLater && video.aid > 0 { WatchLaterButton(store: app.watchLater, video: video) }
             }
             Button {
                 app.open(video)
@@ -232,11 +243,12 @@ struct VideoCard: View {
 }
 struct VideoGrid: View {
     var videos: [Video]
+    var showsWatchLater = false
     var body: some View {
         LazyVGrid(
             columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], alignment: .leading,
             spacing: 23
-        ) { ForEach(videos) { VideoCard(video: $0) } }
+        ) { ForEach(videos) { VideoCard(video: $0, showsWatchLater: showsWatchLater) } }
     }
 }
 struct PageButtons: View {

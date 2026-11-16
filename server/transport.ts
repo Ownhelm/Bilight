@@ -6,7 +6,7 @@ export class BiliError extends Error {
   constructor(code: string | number, message: string, readonly status = 502) { super(message); this.name = 'BiliError'; this.code = String(code); }
 }
 type Values = Record<string, string | number | boolean | undefined>;
-export interface BiliRequestOptions { method?: 'GET' | 'POST'; query?: Values; form?: Values; json?: Record<string, unknown>; wbi?: boolean; headers?: Record<string, string>; onResponseCookies?: (names: readonly string[]) => void }
+export interface BiliRequestOptions { method?: 'GET' | 'POST'; query?: Values; form?: Values; multipartForm?: Values; json?: Record<string, unknown>; wbi?: boolean; headers?: Record<string, string>; onResponseCookies?: (names: readonly string[]) => void; sessionJar?: CookieJar; sessionMid?: number; signal?: AbortSignal }
 interface Envelope<T> { code: number; message?: string; msg?: string; data: T }
 const MIXIN = [46,47,18,2,53,8,23,32,15,50,10,31,58,3,45,35,27,43,5,49,33,9,42,19,29,28,14,39,12,38,41,13,37,48,7,16,24,55,40,61,26,17,0,1,60,51,30,4,22,25,54,21,56,59,6,63,57,62,11,36,20,34,44,52];
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.6 Safari/605.1.15';
@@ -26,7 +26,7 @@ export class BiliHttp {
   private wbiLoading?: Promise<string>;
   private readonly deviceRequests = new WeakMap<CookieJar, Promise<void>>();
   constructor(options: { fetch?: typeof fetch; jar?: CookieJar; now?: () => number } = {}) { this.fetcher = options.fetch ?? fetch; this.jar = options.jar ?? new CookieJar(); this.now = options.now ?? Date.now; }
-  async fetchWithCookies(value: string | URL, init: RequestInit = {}): Promise<Response> {
+  async fetchWithCookies(value: string | URL, init: RequestInit = {}, sessionJar?: CookieJar, sessionMid?: number): Promise<Response> {
     let url = trustedUrl(value), method = init.method ?? 'GET', body = init.body;
     const requestedHeaders = new Headers(init.headers);
     for (let hop = 0; hop <= 5; hop++) {
@@ -35,7 +35,12 @@ export class BiliHttp {
       if (!headers.has('user-agent')) headers.set('user-agent', USER_AGENT);
       if (!headers.has('referer')) headers.set('referer', 'https://www.bilibili.com/');
       const jar = this.jar;
+      if (sessionJar && jar !== sessionJar) throw new BiliError('ACCOUNT_CHANGED', 'B 站账号已切换，请刷新页面。', 409);
       const cookies = await jar.getCookieString(url.href);
+      if ((sessionJar && this.jar !== sessionJar) ||
+          (sessionMid !== undefined && cookies.match(/(?:^|;\s*)DedeUserID=(\d+)(?:;|$)/)?.[1] !== String(sessionMid))) {
+        throw new BiliError('ACCOUNT_CHANGED', 'B 站账号已切换，请刷新页面。', 409);
+      }
       if (cookies) headers.set('cookie', cookies);
       let response: Response;
       try { response = await this.fetcher(url, { ...init, method, body, headers, redirect: 'manual' }); }
@@ -68,15 +73,21 @@ export class BiliHttp {
     for (const [key, item] of Object.entries(options.query ?? {})) if (item !== undefined) url.searchParams.set(key, String(item));
     if (options.wbi) await this.sign(url);
     const headers = new Headers(options.headers);
-    let body: URLSearchParams | string | undefined;
-    if (options.form && options.json) throw new BiliError('INVALID_INPUT', '请求体格式冲突', 400);
+    let body: BodyInit | undefined;
+    if ([options.form, options.multipartForm, options.json].filter(Boolean).length > 1) throw new BiliError('INVALID_INPUT', '请求体格式冲突', 400);
     if (options.form) {
       body = new URLSearchParams();
       for (const [key, item] of Object.entries(options.form)) if (item !== undefined) body.set(key, String(item));
       headers.set('content-type', 'application/x-www-form-urlencoded');
     }
+    if (options.multipartForm) {
+      body = new FormData();
+      for (const [key, item] of Object.entries(options.multipartForm)) if (item !== undefined) body.append(key, String(item));
+    }
     if (options.json) { headers.set('content-type', 'application/json'); body = JSON.stringify(options.json); }
-    const response = await this.fetchWithCookies(url, { method: options.method ?? (body ? 'POST' : 'GET'), body, headers, signal: AbortSignal.timeout(20_000) });
+    const timeout = AbortSignal.timeout(20_000);
+    const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
+    const response = await this.fetchWithCookies(url, { method: options.method ?? (body ? 'POST' : 'GET'), body, headers, signal }, options.sessionJar, options.sessionMid);
     const issued = this.responseCookies.get(response);
     options.onResponseCookies?.(issued?.jar === this.jar ? issued.names : []);
     if (!response.ok) throw new BiliError(response.status, response.status === 412 || response.status === 429 ? '哔哩哔哩暂时限制了请求，请稍后重试' : '哔哩哔哩服务暂时不可用', response.status === 429 ? 429 : 502);

@@ -11,7 +11,8 @@ import SwiftUI
         WindowGroup {
             Group {
                 #if DEBUG
-                    if InteractionRegression.player { PlaybackLifecycleRegressionView() }
+                    if InteractionRegression.commentComposer { VideoCommentComposerRegressionView() }
+                    else if InteractionRegression.player { PlaybackLifecycleRegressionView() }
                     else if InteractionRegression.enabled { InteractionRegressionView() }
                     else { RootView(darkAppearance: $darkAppearance) }
                 #else

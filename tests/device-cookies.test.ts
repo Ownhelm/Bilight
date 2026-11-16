@@ -51,3 +51,24 @@ test('JSON writes preserve the dynamic string ID and do not fall back to form en
   await assert.rejects(http.request('https://api.bilibili.com/x/dynamic/feed/dyn/thumb', { json: {}, form: {} }));
   assert.equal(calls, 1);
 });
+
+test('a comment waiting for WBI signing cannot be posted under a replacement account', async () => {
+  let start!: () => void, finish!: (response: Response) => void;
+  const started = new Promise<void>(resolve => { start = resolve; });
+  const http = new BiliHttp({ fetch: (async (url, request) => {
+    assert.match(String(url), /\/nav$/);
+    assert.equal(request?.method, 'GET');
+    start();
+    return new Promise<Response>(resolve => { finish = resolve; });
+  }) as typeof fetch });
+  const write = http.request('https://api.bilibili.com/x/v2/reply/add', {
+    method: 'POST', wbi: true, form: { message: 'fixture', csrf: 'test-only' }, sessionJar: http.jar,
+  });
+  await started;
+  http.jar = new CookieJar();
+  finish(Response.json({ data: { wbi_img: {
+    img_url: `https://i0.hdslb.com/${'a'.repeat(32)}.png`,
+    sub_url: `https://i0.hdslb.com/${'b'.repeat(32)}.png`,
+  } } }));
+  await assert.rejects(write, { code: 'ACCOUNT_CHANGED' });
+});

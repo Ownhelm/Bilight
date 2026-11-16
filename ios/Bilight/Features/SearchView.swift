@@ -106,7 +106,7 @@ struct SearchView: View {
                                     EmptyBlock(title: "没有找到相关视频", message: "换个关键词再试试。")
                                 }
                             } else {
-                                VideoGrid(videos: videos)
+                                VideoGrid(videos: videos, showsWatchLater: true)
                             }
                             PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                         }

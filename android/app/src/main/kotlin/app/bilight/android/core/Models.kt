@@ -99,7 +99,34 @@ enum class TapZone { BACKWARD, TOGGLE, FORWARD }
 fun tapZone(fraction: Float): TapZone = when { fraction < .4f -> TapZone.BACKWARD; fraction < .6f -> TapZone.TOGGLE; else -> TapZone.FORWARD }
 data class Subtitle(val id: Long, val language: String, val label: String, val url: String)
 data class Cue(val from: Double, val to: Double, val text: String)
-data class Comment(val id: String, val user: User, val text: String, val likes: Long, val replyCount: Int = 0, val createdAt: Long = 0)
+data class Comment(
+    val id: String,
+    val user: User,
+    val text: String,
+    val likes: Long,
+    val replyCount: Int = 0,
+    val createdAt: Long = 0,
+    val liked: Boolean = false,
+    val mentions: List<User> = emptyList(),
+    val emotes: Map<String,String> = emptyMap(),
+)
+data class CommentTarget(val root: Comment, val parent: Comment)
+internal data class CommentSubject private constructor(val oid: String, val type: Int, val referer: String) {
+    companion object {
+        private val id = Regex("[1-9][0-9]{0,39}")
+        fun video(video: Video): CommentSubject? = if (video.aid>0 && validBvid(video.bvid)) {
+            CommentSubject(video.aid.toString(),1,"https://www.bilibili.com/video/${video.bvid}")
+        } else null
+        fun dynamic(post: Post): CommentSubject? {
+            val oid = post.commentId ?: return null
+            if (!id.matches(post.id) || !id.matches(oid) || post.commentType <= 0) return null
+            val video = post.video?.let(::video)?.takeIf { post.commentType == it.type && oid == it.oid }
+            return video ?: CommentSubject(oid,post.commentType,"https://www.bilibili.com/opus/${post.id}")
+        }
+    }
+}
+data class LikeState(val liked: Boolean, val likes: Long)
+typealias CommentLikeState = LikeState
 data class CommentReplyPage(val items: List<Comment>, val total: Int, val more: Boolean)
 data class History(val video: Video, val cid: Long, val page: Int, val part: String, val progress: Long, val viewedAt: Long, val completed: Boolean)
 data class Folder(val id: Long, val mid: Long, val title: String, val count: Int, val private: Boolean, val selected: Boolean = false, val capacity: Int = 1000, val cover: String? = null, val type: Int = 11, val state: Int = 0, val creatorName: String = "", val readError: String? = null) {
@@ -107,4 +134,4 @@ data class Folder(val id: Long, val mid: Long, val title: String, val count: Int
 }
 data class Engagement(val liked: Boolean, val coins: Int, val favorite: Boolean) { val complete: Boolean get() = liked && coins > 0 && favorite }
 
-data class DynamicLikeState(val liked: Boolean, val likes: Long)
+typealias DynamicLikeState = LikeState

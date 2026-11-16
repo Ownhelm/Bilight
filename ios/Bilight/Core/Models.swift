@@ -253,12 +253,83 @@ struct Playback {
     var subtitles: [SubtitleTrack] = []
 }
 struct Comment: Identifiable {
+    static let maximumMessageLength = 1000
     var id: String
     var user: User
     var text: String
     var createdAt: Double
     var likes: Int
     var replyCount: Int = 0
+    var liked = false
+    var mentions: [String: Int] = [:]
+    var emotes: [String: URL] = [:]
+}
+
+enum CommentTextPart: Equatable {
+    case text(String)
+    case mention(String, Int)
+    case emote(String, URL)
+}
+
+extension Comment {
+    var textParts: [CommentTextPart] {
+        var alternatives: [String] = []
+        let names = mentions.keys.filter { !$0.isEmpty }.sorted { $0.count > $1.count }
+        if !names.isEmpty {
+            alternatives.append("@(" + names.map(NSRegularExpression.escapedPattern).joined(separator: "|") + ")(?=\\s|$)")
+        }
+        alternatives += emotes.keys.filter { !$0.isEmpty }.sorted { $0.count > $1.count }.map(NSRegularExpression.escapedPattern)
+        guard !alternatives.isEmpty, let pattern = try? NSRegularExpression(pattern: alternatives.joined(separator: "|")) else {
+            return [.text(text)]
+        }
+        var result: [CommentTextPart] = []
+        var cursor = text.startIndex
+        for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+            guard let range = Range(match.range, in: text) else { continue }
+            let token = String(text[range])
+            if cursor < range.lowerBound { result.append(.text(String(text[cursor..<range.lowerBound]))) }
+            if let image = emotes[token] { result.append(.emote(token, image)) }
+            else if let mid = mentions[String(token.dropFirst())], mid > 0 { result.append(.mention(token, mid)) }
+            else { result.append(.text(token)) }
+            cursor = range.upperBound
+        }
+        if cursor < text.endIndex { result.append(.text(String(text[cursor...]))) }
+        return result
+    }
+}
+struct CommentReplyTarget: Equatable {
+    var root: String
+    var parent: String
+    var user: User
+}
+enum CommentChannel: Equatable {
+    case video(aid: Int, bvid: String)
+    case dynamic(id: String, oid: String, type: Int)
+
+    var oid: String {
+        switch self {
+        case .video(let aid, _): return "\(aid)"
+        case .dynamic(_, let oid, _): return oid
+        }
+    }
+    var type: Int {
+        if case .dynamic(_, _, let type) = self { return type }
+        return 1
+    }
+    var referer: String {
+        switch self {
+        case .video(_, let bvid): return "https://www.bilibili.com/video/\(bvid)"
+        case .dynamic(let id, _, _): return "https://t.bilibili.com/\(id)"
+        }
+    }
+    var valid: Bool {
+        guard DynamicPost.validID(oid), type > 0 else { return false }
+        switch self {
+        case .video(_, let bvid): return validBVID(bvid)
+        case .dynamic(let id, _, _): return DynamicPost.validID(id)
+        }
+    }
+    var query: [String: String] { ["oid": oid, "type": "\(type)"] }
 }
 struct CommentReplyPage {
     var items: [Comment]

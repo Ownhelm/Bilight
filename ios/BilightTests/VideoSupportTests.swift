@@ -1,9 +1,93 @@
 import AVKit
+import SwiftUI
 import XCTest
 
 @testable import Bilight
 
 final class VideoSupportTests: XCTestCase {
+    @MainActor func testCommentPlaceholderClearsDuringUncommittedPinyin() async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let previousWindow = scene.keyWindow
+        let window = UIWindow(windowScene: scene)
+        window.overrideUserInterfaceStyle = .dark
+        let composer = VideoCommentComposer(channel: .video(aid: 42, bvid: "BV12qnt6VEM1"), target: nil,
+            participants: [], onPost: { _, _ in XCTFail("Entering text must not publish a comment") })
+        window.rootViewController = UIHostingController(rootView: composer.environmentObject(AppModel()))
+        window.makeKeyAndVisible()
+        defer { window.isHidden = true; previousWindow?.makeKeyAndVisible() }
+
+        func findEditor(in view: UIView) -> UITextView? {
+            if view.accessibilityIdentifier == "video-comment-input" { return view as? UITextView }
+            for subview in view.subviews {
+                if let editor = findEditor(in: subview) { return editor }
+            }
+            return nil
+        }
+        try await Task.sleep(for: .milliseconds(250))
+        let editor = try XCTUnwrap(findEditor(in: window))
+        XCTAssertTrue(editor.becomeFirstResponder())
+
+        func screenshot() -> UIImage {
+            let format = UIGraphicsImageRendererFormat()
+            format.scale = 1
+            return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+                window.drawHierarchy(in: window.bounds, afterScreenUpdates: true)
+            }
+        }
+
+        func pixels(in image: UIImage, at sample: CGRect, matching matches: (Int, Int, Int) -> Bool) throws -> Int {
+            let patch = try XCTUnwrap(image.cgImage?.cropping(to: sample.integral))
+            let count = patch.width * patch.height
+            var bytes = [UInt8](repeating: 0, count: count * 4)
+            try bytes.withUnsafeMutableBytes { buffer in
+                let context = try XCTUnwrap(CGContext(data: buffer.baseAddress, width: patch.width, height: patch.height,
+                    bitsPerComponent: 8, bytesPerRow: patch.width * 4, space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+                context.draw(patch, in: CGRect(x: 0, y: 0, width: patch.width, height: patch.height))
+            }
+            return stride(from: 0, to: bytes.count, by: 4).filter {
+                matches(Int(bytes[$0]), Int(bytes[$0 + 1]), Int(bytes[$0 + 2]))
+            }.count
+        }
+        func hintPixels(in image: UIImage) throws -> Int {
+            // Sample the part of the first line beyond the width of the marked word.
+            let editorFrame = editor.convert(editor.bounds, to: window)
+            let sample = CGRect(x: editorFrame.minX + 70, y: editorFrame.minY + 8, width: 60, height: 25)
+            return try pixels(in: image, at: sample) { red, _, _ in red > 90 }
+        }
+        func publishHighlight(in image: UIImage) throws -> Int {
+            let sample = CGRect(x: window.bounds.maxX - 104, y: window.safeAreaInsets.top, width: 100, height: 65)
+            return try pixels(in: image, at: sample) { red, green, blue in red > 120 && red > green + 25 && blue >= green }
+        }
+
+        let empty = screenshot()
+        let highlight = try publishHighlight(in: empty)
+        XCTAssertGreaterThan(highlight, 10, "Publish is already highlighted with an empty draft")
+        XCTAssertGreaterThan(try hintPixels(in: empty), 10, "The empty editor shows its placeholder")
+        editor.setMarkedText("nihao", selectedRange: NSRange(location: 5, length: 0))
+        XCTAssertNotNil(editor.markedTextRange)
+        try await Task.sleep(for: .milliseconds(150))
+        let composing = screenshot()
+        XCTAssertEqual(try hintPixels(in: composing), 0, "Marked Pinyin must not overlap the placeholder")
+        XCTAssertEqual(try publishHighlight(in: composing), highlight, "Marked text must not change the Publish highlight")
+        let attachment = XCTAttachment(image: composing)
+        attachment.name = "未选字时的输入框与发布按钮"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+
+        editor.insertText("你好")
+        XCTAssertNil(editor.markedTextRange)
+        XCTAssertEqual(editor.text, "你好")
+        try await Task.sleep(for: .milliseconds(150))
+        let committed = screenshot()
+        XCTAssertEqual(try hintPixels(in: committed), 0, "Committed text keeps the placeholder hidden")
+        XCTAssertEqual(try publishHighlight(in: committed), highlight, "Committing text must not change the Publish highlight")
+        editor.deleteBackward()
+        editor.deleteBackward()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertGreaterThan(try hintPixels(in: screenshot()), 10, "Deleting all text restores the placeholder")
+    }
+
     @MainActor func testOnlineExtrasForCachedVideoPreserveTheLocalPlayerAndExplicitPreferences() async throws {
         let lock = NSLock()
         var paths: [String] = []
@@ -72,7 +156,7 @@ final class VideoSupportTests: XCTestCase {
         XCTAssertEqual(source.quality, 80); XCTAssertNotNil(source.mp4)
         XCTAssertEqual(lock.withLock { formats }, ["4048", "1"])
     }
-    @MainActor func testLikeCoinAndTripleUpdateBeforeTheRequestAndSilentlyRestoreTheExactPriorState() async throws {
+    @MainActor func testInteractionCountsUpdateBeforeTheRequestAndRestoreOnFailure() async throws {
         let (client, http) = fixture { request in
             XCTAssertEqual(request.httpMethod, "GET", "This test cannot send a real or simulated engagement write")
             Thread.sleep(forTimeInterval: 0.15)
@@ -80,21 +164,24 @@ final class VideoSupportTests: XCTestCase {
         }
         _ = try await http.acceptLogin(cookies)
         let before = VideoEngagement(liked: true, coins: 1, favorited: false)
-        let actions: [(VideoWrite, VideoEngagement)] = [
-            (.like(false), VideoEngagement(liked: false, coins: 1, favorited: false)),
-            (.coin(target: 2, like: true), VideoEngagement(liked: true, coins: 2, favorited: false)),
-            (.triple, VideoEngagement(liked: true, coins: 1, favorited: true)),
+        let totals = VideoStatistics(likes: 10, coins: 20, favorites: 30)
+        let actions: [(VideoWrite, VideoEngagement, VideoStatistics)] = [
+            (.like(false), VideoEngagement(liked: false, coins: 1, favorited: false), VideoStatistics(likes: 9, coins: 20, favorites: 30)),
+            (.coin(target: 2, like: true), VideoEngagement(liked: true, coins: 2, favorited: false), VideoStatistics(likes: 10, coins: 21, favorites: 30)),
+            (.triple, VideoEngagement(liked: true, coins: 1, favorited: true), VideoStatistics(likes: 10, coins: 20, favorites: 31)),
+            (.favorite([1]), VideoEngagement(liked: true, coins: 1, favorited: true), VideoStatistics(likes: 10, coins: 20, favorites: 31)),
         ]
-        for (action, expected) in actions {
+        for (action, expected, expectedTotals) in actions {
             let model = VideoSupportModel()
-            model.reset(VideoStatistics(likes: 10, coins: 20, favorites: 30)); model.state = before
+            model.reset(totals); model.state = before
             let request = Task { await model.write(client: client, bvid: bvid, action: action) }
             while !model.busy { await Task.yield() }
             XCTAssertEqual(model.state, expected, "The icon state must change while the read is still pending")
-            XCTAssertEqual(model.statistics?.likes, 10); XCTAssertEqual(model.statistics?.coins, 20)
+            XCTAssertEqual(model.statistics, expectedTotals, "The visible counts must change during the request")
             let result = await request.value
             XCTAssertFalse(result); XCTAssertEqual(model.state, before)
-            XCTAssertNil(model.error); XCTAssertFalse(model.busy)
+            XCTAssertEqual(model.statistics, totals); XCTAssertFalse(model.busy)
+            if case .favorite = action { XCTAssertNotNil(model.error) } else { XCTAssertNil(model.error) }
             XCTAssertTrue(model.refreshRequired, "An uncertain result still needs a real read before the next write")
         }
         let model = VideoSupportModel(); model.state = before
@@ -105,7 +192,7 @@ final class VideoSupportTests: XCTestCase {
         XCTAssertNil(model.state, "An old failure cannot restore the previous account's state")
         XCTAssertNil(model.error)
     }
-    @MainActor func testConfirmedLikeReleasesOtherActionsWhilePublicCountsAreStillLoading() async throws {
+    @MainActor func testConfirmedLikeKeepsItsCountWithoutRequiringPublicTotals() async throws {
         let lock = NSLock(); var liked = false, posts = 0, reads = 0
         let (client, http) = fixture { request in
             if request.httpMethod == "POST" {
@@ -116,20 +203,21 @@ final class VideoSupportTests: XCTestCase {
             return lock.withLock { reads += 1; return ["code": 0, "data": ["like": liked, "coin": 0, "favorite": false]] }
         }
         _ = try await http.acceptLogin(cookies)
-        MockProtocol.stalledPath = "/x/web-interface/wbi/view"
         let model = VideoSupportModel()
         model.reset(VideoStatistics(likes: 10, coins: 20, favorites: 30))
         model.state = VideoEngagement(liked: false, coins: 0, favorited: false)
-        let write = Task { await model.write(client: client, bvid: bvid, action: .like(true)) }
-        let end = Date().addingTimeInterval(2)
-        while !lock.withLock({ reads >= 2 && posts == 1 }) && Date() < end { try await Task.sleep(for: .milliseconds(10)) }
-        try await Task.sleep(for: .milliseconds(50))
+        let success = await model.write(client: client, bvid: bvid, action: .like(true))
+        XCTAssertTrue(success)
         XCTAssertTrue(lock.withLock { reads >= 2 && posts == 1 })
         XCTAssertEqual(model.state?.liked, true)
         XCTAssertFalse(model.busy, "Confirmed likes must not keep coin and favorite disabled while only totals are pending")
-        XCTAssertEqual(model.statistics?.likes, 10, "Pending public counts must not be invented")
-        model.reset(nil); write.cancel(); _ = await write.value
-        MockProtocol.stalledPath = nil
+        XCTAssertEqual(model.statistics?.likes, 11)
+        let repeated = await model.write(client: client, bvid: bvid, action: .like(true))
+        XCTAssertTrue(repeated)
+        XCTAssertEqual(model.statistics?.likes, 11, "A second confirmation of the same like adds nothing")
+        XCTAssertEqual(lock.withLock { posts }, 1)
+        model.reset(nil)
+        XCTAssertNil(model.statistics)
         await client.logout()
     }
     private let bvid = "BV0000000001"
@@ -474,55 +562,24 @@ final class VideoSupportTests: XCTestCase {
         defaults.set(0.1, forKey: "bilight.playback.danmakuArea")
         XCTAssertEqual(preferences.danmakuArea, .full)
     }
-    @MainActor func testPlayerSettingsGroupCaptionsAndMinimalDanmakuControls() throws {
-        let suite = "Bilight-area-menu-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    @MainActor func testPlayerSettingsReflectActualCaptionsAndAvailableDanmakuStyles() throws {
+        let suite = "Bilight-area-panel-\(UUID())", defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
         let model = PlayerModel(preferences: PlaybackPreferences(defaults: defaults))
         defer { model.stop() }
-        let player = NativePlayer(model: model, onDanmaku: { model.danmakuEnabled = $0 }, onQuality: { _ in })
-        func section(_ title: String) throws -> UIMenu {
-            try XCTUnwrap(player.settingsMenu().children.compactMap { $0 as? UIMenu }.first { $0.title == title })
-        }
-        func perform(_ action: UIAction) {
-            let button = UIButton()
-            button.addAction(action, for: .touchUpInside)
-            button.sendActions(for: .touchUpInside)
-        }
-        let unavailable = try XCTUnwrap(section("字幕").children.first as? UIAction)
-        XCTAssertTrue(unavailable.attributes.contains(.disabled))
+        let panel = PlaybackSettingsPanel(model: model, onQuality: { _ in }, onDanmaku: { model.danmakuEnabled = $0 }, onClose: {})
+        XCTAssertEqual(panel.subtitleLabel, "暂不可用")
         model.subtitleTracks = [SubtitleTrack(id: 1, language: "zh-CN", label: "中文", url: URL(string: "https://example.com/zh.json")!)]
+        XCTAssertEqual(panel.subtitleLabel, "关闭")
         model.selectedSubtitle = 1
-        let captions = try section("字幕").children.compactMap { $0 as? UIAction }
-        XCTAssertEqual(captions.map(\.title), ["关闭字幕", "中文"])
-        XCTAssertEqual(captions[1].state, .on)
-        perform(captions[0])
-        XCTAssertNil(model.selectedSubtitle)
-        XCTAssertEqual(try (section("字幕").children[0] as? UIAction)?.state, .on)
-
-        XCTAssertEqual(try section("弹幕").children.count, 1)
-        perform(try XCTUnwrap(section("弹幕").children.first as? UIAction))
-        XCTAssertTrue(model.danmakuEnabled)
-        let danmaku = try section("弹幕")
-        XCTAssertEqual((danmaku.children[0] as? UIAction)?.state, .on)
-        let sizes = try XCTUnwrap(danmaku.children[1] as? UIMenu)
-        XCTAssertEqual(danmaku.children.count, 3)
-        let area = try XCTUnwrap(danmaku.children[2] as? UIMenu)
-        XCTAssertEqual(area.title, "显示区域")
-        XCTAssertTrue(area.options.contains(.displayInline))
-        XCTAssertTrue(area.options.contains(.singleSelection))
-        XCTAssertEqual(area.children.map(\.title), ["1/4", "1/2", "3/4", "全屏"])
-        perform(try XCTUnwrap(area.children[1] as? UIAction))
-        XCTAssertEqual(model.danmakuArea, .half)
-        let updatedArea = try XCTUnwrap(section("弹幕").children[2] as? UIMenu)
-        XCTAssertEqual((updatedArea.children[1] as? UIAction)?.state, .on)
-        perform(try XCTUnwrap(sizes.children.last as? UIAction))
-        XCTAssertEqual(model.danmakuFontSize, 24)
-        perform(try XCTUnwrap(section("弹幕").children.first as? UIAction))
-        XCTAssertFalse(model.danmakuEnabled)
-        XCTAssertEqual(try section("弹幕").children.count, 1)
-        // Offline playback does not expose an unavailable online danmaku control.
-        let offline = NativePlayer(model: model, onQuality: { _ in })
-        XCTAssertFalse(offline.settingsMenu().children.contains { $0.title == "弹幕" })
+        XCTAssertEqual(panel.subtitleLabel, "中文")
+        XCTAssertFalse(panel.showsDanmakuStyles)
+        panel.onDanmaku?(true)
+        XCTAssertTrue(panel.showsDanmakuStyles)
+        XCTAssertEqual(PlaybackSettingsPanel.fontSizes.map { $0.0 }, ["小", "中", "大"])
+        XCTAssertEqual(DanmakuArea.allCases.map(\.title), ["1/4", "1/2", "3/4", "全屏"])
+        let offline = PlaybackSettingsPanel(model: model, onQuality: { _ in }, onDanmaku: nil, onClose: {})
+        XCTAssertFalse(offline.showsDanmakuStyles)
     }
     private var detail: JSON {
         ["bvid": bvid, "aid": 10, "title": "Mock video", "copyright": 1,
@@ -614,6 +671,249 @@ final class VideoSupportTests: XCTestCase {
         XCTAssertEqual(items.count, 2); XCTAssertEqual(items[0].text, "hello & world"); XCTAssertEqual(items[1].mode, 5)
         XCTAssertThrowsError(try Danmaku.parse(Data("<!DOCTYPE i [<!ENTITY x SYSTEM 'file:///private'>]><i>&x;</i>".utf8)))
         XCTAssertThrowsError(try Danmaku.parse(Data("<i><d>broken".utf8)))
+    }
+    func testVideoCommentMentionSearchAndPublishingUseRealUserIDsAndReplyTargets() async throws {
+        let writes = NSLock()
+        var parents: [String?] = []
+        let (client, http) = fixture { request in
+            let url = try XCTUnwrap(request.url)
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            switch url.path {
+            case "/x/v2/reply/at":
+                let keyword = try XCTUnwrap(query.first { $0.name == "keyword" }?.value)
+                XCTAssertTrue(["", "隔"].contains(keyword))
+                let item: JSON = ["mid": 24, "name": "隔离测试", "face": "https://i0.hdslb.com/test.jpg"]
+                return ["code": 0, "data": ["groups": [["items": [item]], ["items": [item]]]]]
+            case "/x/v2/reply/detail":
+                XCTAssertEqual(query.first { $0.name == "root" }?.value, "258802991234567890")
+                return ["code": 0, "data": ["root": ["rpid_str": "258802991234567890", "root_str": "11",
+                    "oid_str": "42", "type": 1, "action": 0, "like": 5]]]
+            case "/x/v2/reply/add":
+                let form = try self.commentForm(request)
+                XCTAssertEqual(query.first { $0.name == "w_rid" }?.value?.count, 32)
+                XCTAssertEqual(form["oid"], "42"); XCTAssertEqual(form["type"], "1"); XCTAssertEqual(form["plat"], "1")
+                XCTAssertEqual(form["message"], "你好 @隔离测试 "); XCTAssertEqual(form["csrf"], "test-only")
+                XCTAssertEqual(form["gaia_source"], "main_web"); XCTAssertEqual(form["root"], form["parent"] == nil ? nil : "11")
+                let at = try XCTUnwrap(form["at_name_to_mid"])
+                XCTAssertEqual(try JSONSerialization.jsonObject(with: Data(at.utf8)) as? [String: Int], ["隔离测试": 24])
+                writes.withLock { parents.append(form["parent"]) }
+                let content: JSON = ["message": form["message"]!, "members": [["mid": 24, "uname": "隔离测试"]]]
+                let reply: JSON = ["rpid_str": "258802991234567891", "oid_str": "42", "type": 1,
+                    "root_str": form["root"] ?? "0", "parent_str": form["parent"] ?? "0",
+                    "member": ["mid": 3, "uname": "Viewer"], "content": content]
+                return ["code": 0, "data": ["reply": reply, "success_toast": "评论正在审核"]]
+            default: XCTFail("Unexpected request path"); throw BiliFailure.invalid
+            }
+        }
+        _ = try await http.acceptLogin(cookies)
+        let initialUsers = try await client.commentMentionUsers("")
+        XCTAssertEqual(initialUsers.map(\.mid), [24])
+        let users = try await client.commentMentionUsers("隔")
+        let user = try XCTUnwrap(users.first)
+        XCTAssertEqual(users.map(\.mid), [24]); XCTAssertEqual(user.avatar?.host, "i0.hdslb.com")
+        let mention = ["隔离测试": 24, "删除后不应发送": 28]
+        let channel = CommentChannel.video(aid: 42, bvid: bvid)
+        let posted = try await client.postComment(channel: channel, authorMid: 3, message: "你好 @隔离测试 ", mentions: mention)
+        XCTAssertEqual(posted.comment.id, "258802991234567891"); XCTAssertEqual(posted.comment.mentions, ["隔离测试": 24])
+        XCTAssertEqual(posted.notice, "评论正在审核")
+        let target = CommentReplyTarget(root: "11", parent: "258802991234567890", user: user)
+        _ = try await client.postComment(channel: channel, authorMid: 3, message: "你好 @隔离测试 ", mentions: mention, target: target)
+        XCTAssertEqual(writes.withLock { parents }, [nil, target.parent])
+    }
+    func testVideoCommentLikeReadsTheExactTargetAndNeverRepeatsTheSameWrite() async throws {
+        let lock = NSLock(), rpid = "258802991234567890"
+        var liked = false
+        var actions: [String] = []
+        let (client, http) = fixture { request in
+            let url = try XCTUnwrap(request.url)
+            if url.path == "/x/v2/reply/action" {
+                let form = try self.commentForm(request)
+                XCTAssertEqual(form["rpid"], rpid); XCTAssertEqual(form["oid"], "42"); XCTAssertEqual(form["type"], "1")
+                XCTAssertEqual(form["csrf"], "test-only")
+                lock.withLock { actions.append(form["action"] ?? ""); liked = form["action"] == "1" }
+                return ["code": 0, "data": NSNull()]
+            }
+            XCTAssertEqual(url.path, "/x/v2/reply/detail")
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            XCTAssertEqual(query.first { $0.name == "root" }?.value, rpid)
+            return lock.withLock { ["code": 0, "data": ["root": ["rpid_str": rpid,
+                "oid_str": "42", "type": 1, "action": liked ? 1 : 0, "like": liked ? 6 : 5]]] }
+        }
+        _ = try await http.acceptLogin(cookies)
+        let channel = CommentChannel.video(aid: 42, bvid: bvid)
+        let selected = try await client.setCommentLike(channel: channel, actorMid: 3, rpid: rpid, liked: true)
+        XCTAssertTrue(selected.liked); XCTAssertEqual(selected.likes, 6)
+        _ = try await client.setCommentLike(channel: channel, actorMid: 3, rpid: rpid, liked: true)
+        let cancelled = try await client.setCommentLike(channel: channel, actorMid: 3, rpid: rpid, liked: false)
+        XCTAssertFalse(cancelled.liked); XCTAssertEqual(cancelled.likes, 5)
+        do {
+            _ = try await client.setCommentLike(channel: .video(aid: 43, bvid: bvid), actorMid: 3, rpid: rpid, liked: true)
+            XCTFail("Must reject comments belonging to another video")
+        } catch { XCTAssertEqual((error as? BiliFailure)?.code, "COMMENT_UNAVAILABLE") }
+        XCTAssertEqual(lock.withLock { actions }, ["1", "0"])
+    }
+    @MainActor func testCommentAndReplyLikeBurstsSendOnlyTheFinalTargetAndVerifyTheCount() async throws {
+        let lock = NSLock()
+        var writes: [String] = [], detailReads = 0
+        let (client, http) = fixture { request in
+            let url = try XCTUnwrap(request.url)
+            if url.path == "/x/v2/reply/action" {
+                let form = try self.commentForm(request)
+                lock.withLock { writes.append("\(form["rpid"] ?? ""):\(form["action"] ?? "")") }
+                return ["code": 0, "data": NSNull()]
+            }
+            XCTAssertEqual(url.path, "/x/v2/reply/detail")
+            let id = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "root" }?.value
+            XCTAssertEqual(id, "12", "A top-level comment that was toggled back must not read or write")
+            return lock.withLock {
+                detailReads += 1
+                return ["code": 0, "data": ["root": ["rpid_str": "12", "oid_str": "42", "type": 1,
+                    "action": writes.isEmpty ? 0 : 1, "like": detailReads < 3 ? 12012 : 12019]]]
+            }
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client)
+        let user = User(mid: 3, name: "隔离账号", avatar: nil)
+        app.user = user
+        let root = Comment(id: "11", user: user, text: "主评论", createdAt: 0, likes: 5)
+        let reply = Comment(id: "12", user: user, text: "回复", createdAt: 0, likes: 12012)
+        let channel = CommentChannel.video(aid: 42, bvid: bvid)
+        let rootKey = CommentLikeKey(oid: "42", type: 1, id: "11")
+        let replyKey = CommentLikeKey(oid: "42", type: 1, id: "12")
+        let olderRead = app.commentLikes.revision
+        app.toggleCommentLike(root, channel: channel)
+        XCTAssertEqual(app.commentLikes.pending[rootKey]?.state, LikeState(liked: true, likes: 6))
+        app.toggleCommentLike(root, channel: channel)
+        XCTAssertEqual(app.commentLikes.pending[rootKey]?.state, LikeState(liked: false, likes: 5))
+
+        app.toggleCommentLike(reply, channel: channel)
+        try await Task.sleep(for: .milliseconds(450))
+        app.toggleCommentLike(reply, channel: channel)
+        XCTAssertEqual(app.commentLikes.pending[replyKey]?.state, LikeState(liked: false, likes: 12012))
+        app.toggleCommentLike(reply, channel: channel)
+        XCTAssertEqual(app.commentLikes.pending[replyKey]?.state, LikeState(liked: true, likes: 12013))
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(lock.withLock { detailReads }, 0, "The debounce interval runs from the last tap")
+
+        let end = ContinuousClock.now.advanced(by: .seconds(4))
+        while !app.commentLikes.pending.isEmpty && ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(app.commentLikes.pending.isEmpty)
+        XCTAssertEqual(lock.withLock { writes }, ["12:1"])
+        XCTAssertEqual(lock.withLock { detailReads }, 3)
+        app.recordCommentLikes([reply], oid: "42", type: 1, readVersion: olderRead)
+        XCTAssertEqual(app.commentLikes.confirmed[replyKey], LikeState(liked: true, likes: 12019))
+    }
+    func testTimedOutVideoCommentPublishReportsUncertaintyWithoutRetrying() async throws {
+        let lock = NSLock()
+        var writes = 0
+        let (client, http) = fixture { request in
+            XCTAssertEqual(request.url?.path, "/x/v2/reply/add")
+            XCTAssertEqual(request.httpMethod, "POST")
+            lock.withLock { writes += 1 }
+            throw URLError(.timedOut)
+        }
+        _ = try await http.acceptLogin(cookies)
+        do {
+            _ = try await client.postComment(channel: .video(aid: 42, bvid: bvid), authorMid: 3, message: "隔离试验", mentions: [:])
+            XCTFail("A timed-out write cannot be confirmed")
+        } catch { XCTAssertEqual((error as? BiliFailure)?.code, "COMMENT_UNCONFIRMED") }
+        XCTAssertEqual(lock.withLock { writes }, 1)
+    }
+    func testCommentMentionFindsTheTokenAtTheCaretAndSkipsExistingMentions() throws {
+        let message = "🙂你好＠隔离 后面的文字"
+        let selection = NSRange(location: "🙂你好＠隔离".utf16.count, length: 0)
+        let query = try XCTUnwrap(CommentMentionQuery(text: message, selection: selection))
+        XCTAssertEqual(query.keyword, "隔离")
+        let range = try XCTUnwrap(Range(query.range, in: message))
+        XCTAssertEqual(message.replacingCharacters(in: range, with: "@隔离测试"), "🙂你好@隔离测试 后面的文字")
+        for text in ["@隔离测试 ", "name@example", "@隔离测试 后面的文字"] {
+            XCTAssertNil(CommentMentionQuery(text: text, selection: NSRange(location: text.utf16.count, length: 0)))
+        }
+    }
+    func testDynamicRepliesAndLikesUseVerifiedCommentOIDAndType() async throws {
+        let lock = NSLock()
+        let id = "1057955152016703512", oid = "1057955152016703513"
+        let root = "258802991234567890", parent = "258802991234567891"
+        var liked = false, writes: [String] = []
+        let (client, http) = fixture { request in
+            let url = try XCTUnwrap(request.url)
+            let query = URLComponents(url: url, resolvingAgainstBaseURL: false)!.queryItems ?? []
+            switch url.path {
+            case "/x/polymer/web-dynamic/v1/detail":
+                XCTAssertEqual(query.first { $0.name == "id" }?.value, id)
+                return ["code": 0, "data": ["item": ["type": "DYNAMIC_TYPE_WORD", "id_str": id,
+                    "basic": ["comment_type": 17, "comment_id_str": oid], "modules": [
+                        "module_author": ["mid": 7, "name": "动态作者"],
+                        "module_dynamic": ["desc": ["text": "示例动态"]],
+                    ]]]]
+            case "/x/v2/reply/detail":
+                XCTAssertEqual(query.first { $0.name == "oid" }?.value, oid)
+                XCTAssertEqual(query.first { $0.name == "type" }?.value, "17")
+                XCTAssertEqual(query.first { $0.name == "root" }?.value, parent)
+                return lock.withLock { ["code": 0, "data": ["root": ["rpid_str": parent, "root_str": root,
+                    "oid_str": oid, "type": 17, "action": liked ? 1 : 0, "like": liked ? 6 : 5]]] }
+            case "/x/v2/reply/action", "/x/v2/reply/add":
+                let form = try self.commentForm(request)
+                XCTAssertEqual(request.value(forHTTPHeaderField: "Referer"), "https://t.bilibili.com/\(id)")
+                XCTAssertEqual(form["oid"], oid); XCTAssertEqual(form["type"], "17")
+                lock.withLock { writes.append(url.path) }
+                if url.path.hasSuffix("/action") {
+                    XCTAssertEqual(form["rpid"], parent); XCTAssertEqual(form["action"], "1")
+                    lock.withLock { liked = true }
+                    return ["code": 0, "data": NSNull()]
+                }
+                XCTAssertEqual(form["root"], root); XCTAssertEqual(form["parent"], parent)
+                return ["code": 0, "data": ["reply": ["rpid_str": "258802991234567892", "oid_str": oid, "type": 17,
+                    "root_str": root, "parent_str": parent, "member": ["mid": 3, "uname": "Viewer"],
+                    "content": ["message": form["message"] ?? ""]]]]
+            default: XCTFail("Unexpected request path"); throw BiliFailure.invalid
+            }
+        }
+        _ = try await http.acceptLogin(cookies)
+        let channel = CommentChannel.dynamic(id: id, oid: oid, type: 17)
+        let target = CommentReplyTarget(root: root, parent: parent, user: User(mid: 27, name: "回复对象", avatar: nil))
+        let after = try await client.setCommentLike(channel: channel, actorMid: 3, rpid: parent, liked: true)
+        XCTAssertTrue(after.liked); XCTAssertEqual(after.likes, 6)
+        let posted = try await client.postComment(channel: channel, authorMid: 3, message: "动态回复🙂", mentions: [:], target: target)
+        XCTAssertEqual(posted.comment.text, "动态回复🙂")
+        let stale = CommentChannel.dynamic(id: id, oid: id, type: 17)
+        do {
+            _ = try await client.postComment(channel: stale, authorMid: 3, message: "不能写到另一评论区", mentions: [:])
+            XCTFail("A stale OID must not be written")
+        } catch { XCTAssertEqual((error as? BiliFailure)?.code, "COMMENT_UNAVAILABLE") }
+        do {
+            _ = try await client.setCommentLike(channel: channel, actorMid: 8, rpid: parent, liked: false)
+            XCTFail("A different account must not change the like")
+        } catch { XCTAssertEqual((error as? BiliFailure)?.code, "ACCOUNT_CHANGED") }
+        XCTAssertEqual(lock.withLock { writes }, ["/x/v2/reply/action", "/x/v2/reply/add"])
+    }
+
+    func testCommentEmotesUseOfficialMetadataWithoutReplacingNativeEmojiOrUnknownTokens() async throws {
+        let imageURL = try XCTUnwrap(URL(string: "https://i0.hdslb.com/bfs/emote/sample.png"))
+        let (client, http) = fixture { request in
+            XCTAssertEqual(request.url?.path, "/x/v2/reply/wbi/main")
+            let row: JSON = ["rpid_str": "12", "content": [
+                "message": "🙂@读者 [试验表情][无效来源][原样保留]",
+                "at_name_to_mid": ["读者": 24],
+                "emote": ["[试验表情]": ["url": imageURL.absoluteString], "[无效来源]": ["url": "https://untrusted.example/a.png"]],
+            ]]
+            return ["code": 0, "data": ["cursor": ["is_end": true], "replies": [row]]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let page = try await client.comments(oid: "42", type: 17)
+        let comment = try XCTUnwrap(page.items.first)
+        XCTAssertEqual(comment.emotes, ["[试验表情]": imageURL])
+        XCTAssertEqual(comment.textParts, [
+            .text("🙂"), .mention("@读者", 24), .text(" "), .emote("[试验表情]", imageURL), .text("[无效来源][原样保留]"),
+        ])
+    }
+    private func commentForm(_ request: URLRequest) throws -> [String: String] {
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Content-Type"), "application/x-www-form-urlencoded")
+        let body = request.httpBody ?? streamData(request.httpBodyStream)
+        var components = URLComponents()
+        components.percentEncodedQuery = String(decoding: body, as: UTF8.self)
+        return Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
     }
     private func streamData(_ stream: InputStream?) -> Data {
         guard let stream else { return Data() }

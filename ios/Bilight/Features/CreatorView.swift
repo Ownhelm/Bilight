@@ -44,7 +44,7 @@ struct CreatorView: View {
                     if videos.items.isEmpty {
                         EmptyBlock(title: "暂时没有公开投稿", message: "仅展示 B 站实际返回的内容。")
                     } else {
-                        VideoGrid(videos: videos.items)
+                        VideoGrid(videos: videos.items, showsWatchLater: true)
                     }
                     PageButtons(page: videoPage, more: videos.hasMore, busy: busy) { videoPage = $0 }
                 } else if let catalog {
@@ -145,7 +145,7 @@ struct CollectionView: View {
                     if result.items.isEmpty {
                         EmptyBlock(title: "没有公开的视频", message: "列表顺序与 B 站保持一致。")
                     } else {
-                        VideoGrid(videos: result.items)
+                        VideoGrid(videos: result.items, showsWatchLater: true)
                     }
                     PageButtons(page: page, more: result.hasMore, busy: busy) { page = $0 }
                 }

@@ -54,9 +54,57 @@ class DynamicLikesTest {
             if(request.method=="POST") { writes++;JSONObject().put("code",-403).put("message","Denied") }
             else { reads++;JSONObject().put("item",item(false)) }
         }
-        try { repo.setDynamicLike(id,true);fail("Unconfirmed write must fail") } catch (_: BiliFailure) {}
+        try { repo.setDynamicLike(id,true);fail("Unconfirmed write must fail") } catch (e: BiliFailure) { assertEquals("-403",e.code) }
         assertEquals(1,writes);assertEquals(4,reads)
         val malformed=repository { request -> assertEquals("GET",request.method);JSONObject().put("item",item(false).apply { obj("modules").obj("module_stat").obj("like").put("status",0.5) }) }
         try { malformed.setDynamicLike(id,true);fail("Ambiguous state cannot authorize a write") } catch (_: BiliFailure) {}
+    }
+    @Test fun acknowledgedWriteWaitsForLaggingDetailWithoutWritingAgain()=runBlocking {
+        var writes=0; var readsAfterWrite=0
+        val repo=repository { request ->
+            if (request.method=="POST") {
+                writes++
+                JSONObject().put("code",0).put("data",JSONObject.NULL)
+            } else {
+                if (writes>0) readsAfterWrite++
+                val confirmed=readsAfterWrite>=4
+                JSONObject().put("item",item(confirmed,if (confirmed) 28 else 12))
+            }
+        }
+        assertEquals(28L,repo.setDynamicLike(id,true).likes)
+        assertEquals(1,writes)
+        assertEquals(4,readsAfterWrite)
+    }
+    @Test fun acknowledgedWriteWaitsForLaggingCountWithTheCorrectLikeStatus()=runBlocking {
+        var writes=0; var readsAfterWrite=0
+        val repo=repository { request ->
+            if (request.method=="POST") {
+                writes++
+                JSONObject().put("code",0).put("data",JSONObject.NULL)
+            } else {
+                if (writes>0) readsAfterWrite++
+                JSONObject().put("item",item(writes>0,if (readsAfterWrite>=2) 13 else 12))
+            }
+        }
+        assertEquals(13L,repo.setDynamicLike(id,true).likes)
+        assertEquals(1,writes)
+        assertEquals(2,readsAfterWrite)
+    }
+    @Test fun unchangedTotalUsesTheVerifiedDetailAfterTheReadLimit()=runBlocking {
+        var writes=0; var readsAfterWrite=0
+        val repo=repository { request ->
+            if (request.method=="POST") {
+                writes++
+                JSONObject().put("code",0).put("data",JSONObject.NULL)
+            } else {
+                if (writes>0) readsAfterWrite++
+                JSONObject().put("item",item(writes>0,12))
+            }
+        }
+        val after=repo.setDynamicLike(id,true)
+        assertTrue(after.liked)
+        assertEquals(12L,after.likes)
+        assertEquals(1,writes)
+        assertEquals(4,readsAfterWrite)
     }
 }

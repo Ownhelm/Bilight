@@ -45,6 +45,7 @@ internal fun videoShareIntent(title: String, url: String): Intent = Intent(Inten
 @Composable internal fun VideoShareSheet(bvid: String, title: String, page: Int, close: () -> Unit) {
     val context = LocalContext.current
     val url = remember(bvid, page) { videoShareUrl(bvid, page) }
+    val copyText = "$title\n$url"
     var error by remember(url) { mutableStateOf<String?>(null) }
     var manualCopy by remember(url) { mutableStateOf(false) }
     val dark = LocalDarkAppearance.current
@@ -55,9 +56,9 @@ internal fun videoShareIntent(title: String, url: String): Intent = Intent(Inten
         Column(Modifier.fillMaxWidth().testTag("video-share-sheet").verticalScroll(rememberScrollState())) {
             Row(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(top = 20.dp, bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ShareOption("复制链接", Icons.Outlined.Link, Modifier.weight(1f), rotation = -45f) {
-                    runCatching { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("B站原视频链接", url)) }
+                    runCatching { (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).setPrimaryClip(ClipData.newPlainText("视频标题和链接", copyText)) }
                         .onSuccess { close(); Toast.makeText(context, "链接已复制", Toast.LENGTH_SHORT).show() }
-                        .onFailure { error = "无法自动复制，请手动复制下方链接。"; manualCopy = true }
+                        .onFailure { error = "无法自动复制，请手动复制下方内容。"; manualCopy = true }
                 }
                 ShareOption("系统分享", Icons.Outlined.IosShare, Modifier.weight(1f)) {
                     runCatching { context.startActivity(Intent.createChooser(videoShareIntent(title, url), "分享视频")) }
@@ -66,7 +67,7 @@ internal fun videoShareIntent(title: String, url: String): Intent = Intent(Inten
                 }
             }
             error?.let { Text(it, Modifier.padding(horizontal = 20.dp).padding(bottom = 14.dp), fontSize = 12.sp, color = Pink) }
-            if (manualCopy) SelectionContainer { Text(url, Modifier.padding(horizontal = 20.dp).padding(bottom = 14.dp), fontSize = 12.sp, color = ink) }
+            if (manualCopy) SelectionContainer { Text(copyText, Modifier.padding(horizontal = 20.dp).padding(bottom = 14.dp), fontSize = 12.sp, color = ink) }
             HorizontalDivider(thickness = 6.dp, color = if (dark) Soft else Color(0xfff6f7f8))
             TextButton(onClick = close, modifier = Modifier.fillMaxWidth().heightIn(min = 50.dp), shape = RoundedCornerShape(0.dp)) {
                 Text("取消", fontSize = 14.sp, color = if (dark) MaterialTheme.colorScheme.onSurface else Color(0xff18191c))

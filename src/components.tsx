@@ -31,18 +31,23 @@ export function useDismissibleDetails() {
   return { details, open, setOpen };
 }
 
-export function useResource<T>(url: string | null, refresh = 0) {
+export function useResource<T>(url: string | null, refresh = 0, observe?: () => (value: T) => void) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [loading, setLoading] = useState(Boolean(url));
   useEffect(() => {
     const controller = new AbortController();
+    const onData = observe?.();
     setData(null); setError(null); setLoading(Boolean(url));
-    if (url) api<T>(url, { signal: controller.signal }).then(value => { if (!controller.signal.aborted) setData(value); }).catch((error: unknown) => {
+    if (url) api<T>(url, { signal: controller.signal }).then(value => {
+      if (controller.signal.aborted) return;
+      onData?.(value);
+      setData(value);
+    }).catch((error: unknown) => {
       if (!controller.signal.aborted && !isAbort(error)) setError(error instanceof Error ? error : new Error(errorMessage(error)));
     }).finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => controller.abort();
-  }, [url, refresh]);
+  }, [url, refresh, observe]);
   return { data, error, loading };
 }
 
@@ -75,8 +80,8 @@ export function SearchBox({ initial = '', large = false }: { initial?: string; l
 }
 
 export function Loading({ text = '正在加载' }: { text?: string }) { return <div className="status-block" role="status"><SpinnerGap className="spin" size={24} /><span>{text}</span></div>; }
-export function Empty({ title, children, action }: { title: string; children?: ReactNode; action?: ReactNode }) {
-  return <div className="empty-state"><div className="empty-symbol"><MagnifyingGlass size={30} weight="light" /></div><h2>{title}</h2>{children && <p>{children}</p>}{action}</div>;
+export function Empty({ title, children, action, icon }: { title: string; children?: ReactNode; action?: ReactNode; icon?: ReactNode }) {
+  return <div className="empty-state"><div className="empty-symbol" aria-hidden="true">{icon ?? <MagnifyingGlass size={30} weight="light" />}</div><h2>{title}</h2>{children && <p>{children}</p>}{action}</div>;
 }
 export function Failure({ error, retry }: { error: unknown; retry?: () => void }) {
   return <div className="error-state" role="alert"><WarningCircle size={25} /><p>{errorMessage(error)}</p>{retry && <button className="button button-quiet" onClick={retry}>重新加载</button>}</div>;
@@ -112,9 +117,12 @@ function DeferredCover({ src, priority }: { src: string; priority: boolean }) {
   return <img ref={image} src={visible ? src : undefined} alt="" loading="eager" decoding="async" fetchPriority={priority ? 'high' : 'auto'} referrerPolicy="no-referrer" />;
 }
 
-export function VideoGrid({ videos, columns, titleLink, renderFooter }: { videos: VideoSummary[]; columns?: number; titleLink?: (video: VideoSummary) => string; renderFooter?: (video: VideoSummary) => React.ReactNode }) {
+export function VideoGrid({ videos, columns, titleLink, renderCoverAction, renderFooter }: { videos: VideoSummary[]; columns?: number; titleLink?: (video: VideoSummary) => string; renderCoverAction?: (video: VideoSummary) => React.ReactNode; renderFooter?: (video: VideoSummary) => React.ReactNode }) {
   return <div className="video-grid">{videos.map((video, index) => <article className="video-card" key={video.bvid}>
-    <Link className="video-cover" to={`/video/${video.bvid}`} aria-label={`观看 ${video.title}`}>{columns ? <DeferredCover src={video.cover} priority={index < columns} /> : <img src={video.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />}<span className="duration">{duration(video.duration)}</span><span className="cover-play" aria-hidden="true"><Play weight="fill" size={23} /></span></Link>
+    <div className="video-cover-actions">
+      <Link className="video-cover" to={`/video/${video.bvid}`} aria-label={`观看 ${video.title}`}>{columns ? <DeferredCover src={video.cover} priority={index < columns} /> : <img src={video.cover} alt="" loading="lazy" referrerPolicy="no-referrer" />}<span className="duration">{duration(video.duration)}</span><span className="cover-play" aria-hidden="true"><Play weight="fill" size={23} /></span></Link>
+      {renderCoverAction?.(video)}
+    </div>
     <h2><Link to={titleLink?.(video) ?? `/video/${video.bvid}`}>{video.title}</Link></h2>
     <Link className="video-owner" to={`/creator/${video.owner.mid}`}><span className="up-tag">UP</span>{video.owner.name}</Link>
     <p className="video-meta">{video.views !== undefined && <span>{countLabel(video.views)} 播放</span>}<span>{dateLabel(video.publishedAt)}</span></p>

@@ -76,7 +76,7 @@ enum DanmakuArea: Double, CaseIterable {
         if let window, safeAreaSource?.window === window { NSLayoutConstraint.activate(safeAreaConstraints) }
         else { NSLayoutConstraint.deactivate(safeAreaConstraints) }
     }
-    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20, area: DanmakuArea = .full) {
+    func update(player: AVPlayer, items: [Danmaku], enabled: Bool, revision: UUID, fontSize: CGFloat = 20, area: DanmakuArea = .full, opacity: CGFloat = 1) {
         self.player = player
         let fontSize = min(24, max(16, fontSize))
         if self.fontSize != fontSize {
@@ -85,7 +85,7 @@ enum DanmakuArea: Double, CaseIterable {
             lastTime = .nan
         }
         if self.area != area { self.area = area; lastTime = .nan }
-        alpha = 1
+        if alpha != opacity { alpha = opacity }
         if self.revision != revision { self.revision = revision; self.items = items; lastTime = .nan; clear() }
         isHidden = !enabled
         if !enabled { stop() } else if window != nil { start() } else { suspend() }

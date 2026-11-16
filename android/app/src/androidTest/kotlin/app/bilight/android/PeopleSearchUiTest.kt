@@ -58,8 +58,10 @@ class PeopleSearchUiTest {
                 @Suppress("UNCHECKED_CAST") override fun <T: androidx.lifecycle.ViewModel> create(modelClass: Class<T>)=AppModel(context,http,peopleStoreFactory={ cached }) as T
             })[AppModel::class.java] }
             rule.waitUntil(5000) { !model.restoring }
-            rule.runOnUiThread { model.open(Route.People(false)) }
+            rule.runOnUiThread { model.showAccount = true }
             rule.setContent { MainApp(model) }
+            rule.onNodeWithText("我关注的UP主").assertIsDisplayed().performClick()
+            rule.onNodeWithText("我关注的UP主").assertIsDisplayed()
             val field=rule.onNodeWithTag("people-search-field")
             field.performTextInput("law")
             rule.waitUntil(10000) { rule.onAllNodesWithText("小鹿Lawrence").fetchSemanticsNodes().isNotEmpty() }

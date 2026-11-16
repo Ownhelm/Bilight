@@ -3,7 +3,7 @@ import staticFiles from '@fastify/static';
 import { resolve } from 'node:path';
 import { existsSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { account, people, videos, collections, history, page } from './demo-fixtures.mjs';
+import { account, people, videos, collections, history, watchLater, page } from './demo-fixtures.mjs';
 
 // A separate loopback-only server: no gateway, credentials, database or upstream fetches.
 export async function createDemo({ assetsDir = resolve(process.env.BILIGHT_DEMO_ASSETS_DIR ?? '../Promotion/DemoAssets') } = {}) {
@@ -21,6 +21,8 @@ export async function createDemo({ assetsDir = resolve(process.env.BILIGHT_DEMO_
   app.get('/api/auth/state', async () => ({ authenticated: true, user: account }));
   app.get('/api/following', async () => page(videos));
   app.get('/api/history', async request => page(history.slice(0, Number(request.query.limit) || 20)));
+  app.get('/api/watch-later', async () => ({ ...page(watchLater), total: watchLater.length, accountMid: account.mid }));
+  app.get('/api/watch-later/membership', async () => ({ aids: watchLater.map(video => video.aid), accountMid: account.mid }));
   app.get('/api/resolve', async (request, reply) => {
     const keyword = typeof request.query.input === 'string' ? request.query.input.trim() : '';
     if (!keyword || keyword.length > 200) return reply.code(400).send({ error: { code: 'DEMO_KEYWORD', message: '请输入离线预览的搜索关键词。' } });

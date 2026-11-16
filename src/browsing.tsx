@@ -77,7 +77,7 @@ export function BrowsingScroll() {
   const [refresh] = useBrowsingRefresh();
   useLayoutEffect(() => {
     if (location.pathname === '/following') return;
-    const retained = location.pathname === '/search' || location.pathname.startsWith('/creator/');
+    const retained = location.pathname === '/search' || location.pathname === '/watch-later' || location.pathname.startsWith('/creator/');
     window.scrollTo({ top: retained ? cache.scroll.get(location.key) ?? 0 : 0, behavior: 'instant' });
     if (!retained) return;
     const remember = () => cache.scroll.set(location.key, Math.max(0, window.scrollY));

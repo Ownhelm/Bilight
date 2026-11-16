@@ -4,24 +4,24 @@ import { ChatCircle, ThumbsUp } from '@phosphor-icons/react';
 import type { AuthState, DynamicLikeState, VideoDynamic } from '../shared/types';
 import { api, errorMessage, isAbort } from './api';
 import { countLabel, dateLabel, Failure, Loading, VideoGrid } from './components';
-import { Comments } from './Comments';
+import { Comments, type CommentLikes } from './Comments';
 
 import { DynamicLikes } from './dynamicLikes';
 export { DynamicLikes } from './dynamicLikes';
 
-export function DynamicActions({ id, initial, comments, store, auth, onLogin, detail = false }: { id: string; initial: DynamicLikeState; comments: number; store: DynamicLikes; auth: AuthState | null; onLogin: () => void; detail?: boolean }) {
-  const [failure, setFailure] = useState('');
-  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot), state = snapshot.states[id] ?? initial;
-  const pending = Object.hasOwn(snapshot.pending, id), selected = pending ? snapshot.pending[id] : state.liked;
+export function DynamicActions({ id, initial, comments, store, auth, onLogin, detail = false }: { id: string; initial?: DynamicLikeState; comments: number; store: DynamicLikes; auth: AuthState | null; onLogin: () => void; detail?: boolean }) {
+  const snapshot = useSyncExternalStore(store.subscribe, store.getSnapshot), optimistic = snapshot.pending[id];
+  const failure = snapshot.errors[id];
+  const state = optimistic ?? snapshot.states[id] ?? initial, pending = Boolean(optimistic), selected = state?.liked;
   return <div className="following-dynamic-actions">
     {detail ? <a href="#dynamic-comments" aria-label={`查看评论，共${comments}条`}><ChatCircle size={16} />{countLabel(comments)}</a> : <Link to={`/dynamic/${id}`} aria-label={`查看评论，共${comments}条`}><ChatCircle size={16} />{countLabel(comments)}</Link>}
-    <button type="button" aria-label={selected ? '取消动态点赞' : '点赞动态'} aria-pressed={selected} aria-busy={pending} disabled={pending || !auth} className={selected ? 'selected' : ''} onClick={() => { if (!auth?.authenticated) { onLogin(); return; } setFailure(''); void store.toggle(id, initial).catch(error => { if (!isAbort(error)) setFailure(errorMessage(error)); }); }}>
-      <ThumbsUp size={16} weight={selected ? 'fill' : 'regular'} /><span>{state.likes > 0 ? countLabel(state.likes) : '赞'}</span>
+    <button type="button" aria-label={state ? selected ? '取消动态点赞' : '点赞动态' : '动态点赞状态暂不可用'} aria-pressed={selected} aria-busy={pending} disabled={!auth || !state} className={selected ? 'selected' : ''} onClick={() => { if (!auth?.authenticated) { onLogin(); return; } if (state) store.toggle(id, state); }}>
+      <ThumbsUp size={16} weight={selected ? 'fill' : 'regular'} /><span>{state && state.likes > 0 ? state.likes.toLocaleString('zh-CN') : '赞'}</span>
     </button>{failure && <span className="dynamic-like-error" role="alert">{failure}</span>}
   </div>;
 }
 
-export function DynamicDetail({ store, auth, onLogin }: { store: DynamicLikes; auth: AuthState | null; onLogin: () => void }) {
+export function DynamicDetail({ store, commentLikes, auth, onLogin }: { store: DynamicLikes; commentLikes: CommentLikes; auth: AuthState | null; onLogin: () => void }) {
   const { id = '' } = useParams();
   const [post, setPost] = useState<VideoDynamic | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(true), [retry, setRetry] = useState(0);
   useEffect(() => {
@@ -39,7 +39,7 @@ export function DynamicDetail({ store, auth, onLogin }: { store: DynamicLikes; a
       {post.text && <p className="dynamic-detail-text">{post.text}</p>}
       <div className="dynamic-detail-video"><VideoGrid videos={[post.video]} /></div>
       <DynamicActions id={post.id} initial={{ liked: post.liked, likes: post.likes }} comments={post.comments} store={store} auth={auth} onLogin={onLogin} detail />
-      <div id="dynamic-comments"><Comments key={post.id} bvid={post.video.bvid} /></div>
+      <div id="dynamic-comments"><Comments key={`${post.id}:${auth?.user?.mid ?? 0}`} endpoint={`/api/dynamics/${encodeURIComponent(post.id)}/comments`} access={{ auth, onLogin }} likes={commentLikes} /></div>
     </>}
     {busy && <Loading text="正在读取动态" />}{error && <Failure error={new Error(error)} retry={() => setRetry(value => value + 1)} />}
   </div>;

@@ -13,8 +13,17 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
+
+private val commentId = Regex("^[1-9][0-9]{0,39}$")
+private val commentEmoteToken = Regex("\\[[^\\[\\]\\r\\n]{1,100}\\]")
+private fun JSONObject.replyId(key: String) = text(key + "_str",text(key))
+private fun commentEmoteUrl(raw: String): String? = secureUrl(raw)?.takeIf { safe ->
+    val host = safe.toHttpUrl().host
+    host == "hdslb.com" || host.endsWith(".hdslb.com") || host == "biliimg.com" || host.endsWith(".biliimg.com")
+}
 
 sealed interface VideoWrite {
     data class Like(val selected: Boolean): VideoWrite
@@ -29,6 +38,7 @@ class BiliRepository(val http: BiliHttp) {
     private val followLocks = ConcurrentHashMap<Long,Mutex>()
     private val dynamicLocks = ConcurrentHashMap<String,Mutex>()
     private val videoLocks = ConcurrentHashMap<String,Mutex>()
+    private val commentLikeWrites = ConcurrentHashMap.newKeySet<Triple<Long,Pair<String,Int>,String>>()
     private val uncertain = ConcurrentHashMap<String,Long>()
     fun invalidateFollowing() { relationEpoch++; relationCache.clear(); relationVersion = http.generation }
     private suspend fun account(): Long = http.ensureAccount()
@@ -124,23 +134,33 @@ class BiliRepository(val http: BiliHttp) {
         }
         return Post.parse(item)?.takeIf { it.id==id } ?: invalid("动态内容与当前编号不一致。")
     }
-    suspend fun setDynamicLike(id: String, liked: Boolean): Post {
+    suspend fun setDynamicLike(id: String, liked: Boolean, expectedGeneration: Long = http.generation): Post {
         if (!Regex("^[1-9][0-9]{0,31}$").matches(id)) invalid("动态编号无效。")
-        val version=http.generation
+        val version=expectedGeneration
         return dynamicLocks.getOrPut(id) { Mutex() }.withLock {
             http.check(version); account(); val csrf=http.csrf()
             val before=dynamic(id,true); http.check(version)
             if (before.liked==liked) return@withLock before
             var writeError: Exception?=null
-            try { http.request("/x/dynamic/feed/dyn/thumb",query=mapOf("csrf" to csrf),json=JSONObject().put("dyn_id_str",id).put("up",if(liked) 1 else 2),referer="https://t.bilibili.com/$id") }
+            try { http.request("/x/dynamic/feed/dyn/thumb",query=mapOf("csrf" to csrf),json=JSONObject().put("dyn_id_str",id).put("up",if(liked) 1 else 2),referer="https://t.bilibili.com/$id",expectedGeneration=version) }
             catch (cancelled: CancellationException) { throw cancelled } catch (error: Exception) { writeError=error }
-            repeat(3) { attempt ->
+            val accepted=writeError==null
+            var matchingDetail: Post?=null
+            var readError: Exception?=null
+            for (wait in if (accepted) listOf(0L,250L,500L,1000L) else listOf(0L,150L,150L)) {
+                delay(wait)
                 http.check(version)
-                if (attempt>0) kotlinx.coroutines.delay(150)
-                try { val after=dynamic(id,true); http.check(version); if (after.liked==liked) return@withLock after }
-                catch (cancelled: CancellationException) { throw cancelled } catch (error: Exception) { if (writeError==null) writeError=error }
+                try {
+                    val after=dynamic(id,true); http.check(version)
+                    if (after.liked!=liked) continue
+                    if (!accepted || after.likes!=before.likes) return@withLock after
+                    matchingDetail=after
+                }
+                catch (cancelled: CancellationException) { throw cancelled } catch (error: Exception) { if (readError==null) readError=error }
             }
-            throw writeError ?: BiliFailure("DYNAMIC_LIKE_UNCONFIRMED","点赞结果暂未确认，请刷新动态后再操作。")
+            http.check(version)
+            matchingDetail?.let { return@withLock it }
+            throw writeError ?: BiliFailure("DYNAMIC_LIKE_UNCONFIRMED",readError?.message ?: "点赞结果暂未确认，请刷新动态后再操作。")
         }
     }
     suspend fun detail(bvid: String): Detail {
@@ -201,22 +221,146 @@ class BiliRepository(val http: BiliHttp) {
         if (data.optJSONArray("replies") == null && !(end && paging.optInt("all_count") == 0)) invalid(data.obj("control").text("show_text","评论暂时无法读取。"))
         val next = paging.obj("pagination_reply").text("next_offset")
         if (!end && (next.isEmpty() || next == cursor)) invalid("评论分页暂时异常。")
-        return Page(data.rows("replies").map { Comment(it.text("rpid_str",it.text("rpid")),User.parse(it.obj("member")),it.obj("content").text("message"),it.optLong("like"),it.optInt("rcount").coerceAtLeast(0),it.optLong("ctime")) },!end,next.takeUnless { end })
+        return Page(data.rows("replies").map { parseComment(it,type) },!end,next.takeUnless { end })
     }
     suspend fun commentReplies(oid: String, type: Int = 1, root: String, page: Int = 1): CommentReplyPage {
         if (!Regex("^[1-9][0-9]{0,39}$").matches(oid) || !Regex("^[1-9][0-9]{0,39}$").matches(root) || type <= 0 || page !in 1..1000) invalid("回复参数无效。")
         val data = http.request("/x/v2/reply/reply", mapOf("type" to "$type", "oid" to oid, "root" to root, "pn" to "$page", "ps" to "20"))
         val parent = data.obj("root"); val paging = data.obj("page")
-        fun id(item: JSONObject, key: String) = item.text(key + "_str", item.text(key))
         val total = paging.optInt("count", -1); val size = paging.optInt("size")
-        if (id(parent,"rpid") != root || (parent.has("oid") && id(parent,"oid") != oid) || paging.optInt("num") != page || total < 0 || size !in 1..20 || (data.optJSONArray("replies") == null && total != 0)) invalid("回复数据不完整或不属于当前评论，请重试。")
+        if (parent.replyId("rpid") != root || (parent.has("oid") && parent.replyId("oid") != oid) || paging.optInt("num") != page || total < 0 || size !in 1..20 || (data.optJSONArray("replies") == null && total != 0)) invalid("回复数据不完整或不属于当前评论，请重试。")
         val items = data.rows("replies").map { item ->
-            if (!Regex("^[1-9][0-9]{0,39}$").matches(id(item,"rpid")) || id(item,"root") != root || (item.has("oid") && id(item,"oid") != oid)) invalid("回复归属校验失败，请重试。")
-            Comment(id(item,"rpid"), User.parse(item.obj("member")), item.obj("content").text("message"), item.optLong("like"), createdAt=item.optLong("ctime"))
+            if (!commentId.matches(item.replyId("rpid")) || item.replyId("root") != root || (item.has("oid") && item.replyId("oid") != oid)) invalid("回复归属校验失败，请重试。")
+            parseComment(item,type)
         }
         val more = page.toLong() * size < total
         if (more && items.isEmpty()) invalid("回复分页数据不完整，请重试。")
         return CommentReplyPage(items,total,more)
+    }
+    private fun parseComment(item: JSONObject,type: Int): Comment {
+        val content = item.obj("content")
+        val message = if (type==1) content.optString("message","").take(30000) else content.text("message")
+        val people = content.rows("members").map(User::parse).filter { it.mid>0 && it.name.isNotBlank() }.associateByTo(linkedMapOf()) { it.name }
+        val confirmedMentions = content.obj("at_name_to_mid")
+        for (rawName in confirmedMentions.keys()) {
+            val name = clean(rawName,80)
+            val mid = confirmedMentions.optLong(rawName)
+            if (mid>0 && name.isNotBlank() && people[name]?.mid!=mid) people[name]=User(mid,name,null)
+        }
+        val emotes = content.optJSONObject("emote")?.let { metadata ->
+            commentEmoteToken.findAll(message).map { it.value }.distinct().mapNotNull { token ->
+                val raw = metadata.optJSONObject(token)?.optString("url").orEmpty()
+                commentEmoteUrl(raw)?.let { token to it }
+            }.toMap()
+        }.orEmpty()
+        return Comment(item.replyId("rpid"),User.parse(item.obj("member")),message,
+            item.optLong("like").coerceAtLeast(0),item.optInt("rcount").coerceAtLeast(0),item.optLong("ctime"),
+            liked=item.optInt("action")==1,mentions=people.values.toList(),emotes=emotes)
+    }
+
+    suspend fun commentMentionUsers(keyword: String): List<User> {
+        if (keyword.length>32) return emptyList()
+        val version = http.generation
+        account(); http.check(version)
+        val data = http.request("/x/v2/reply/at",mapOf("keyword" to keyword),expectedGeneration=version)
+        if (data.optJSONArray("groups")==null) invalid("B站返回的可提及用户数据不完整。")
+        return data.rows("groups").flatMap { it.rows("items") }.map(User::parse)
+            .filter { it.mid>0 && it.name.isNotBlank() }.distinctBy { it.mid }.take(5)
+    }
+
+    private suspend fun readComment(subject: CommentSubject,id: String,version: Long): JSONObject {
+        if (!commentId.matches(id)) invalid("评论参数无效。")
+        val item = http.request("/x/v2/reply/detail",mapOf("type" to subject.type.toString(),"oid" to subject.oid,"root" to id),
+            referer=subject.referer,expectedGeneration=version).obj("root")
+        if (!matchesComment(item,subject,id)) invalid("评论与当前内容不匹配。")
+        return item
+    }
+
+    private fun matchesComment(item: JSONObject,subject: CommentSubject,id: String) =
+        commentId.matches(id) && item.replyId("rpid")==id && item.replyId("oid")==subject.oid && item.optInt("type")==subject.type
+
+    suspend fun setCommentLike(video: Video,id: String,desired: Boolean): CommentLikeState =
+        setCommentLike(CommentSubject.video(video) ?: invalid("评论参数无效。"),id,desired)
+
+    internal suspend fun setCommentLike(subject: CommentSubject,id: String,desired: Boolean,expectedGeneration: Long = http.generation): CommentLikeState {
+        if (!commentId.matches(id)) invalid("评论参数无效。")
+        val version = expectedGeneration
+        val key = Triple(version,subject.oid to subject.type,id)
+        if (!commentLikeWrites.add(key)) throw BiliFailure("BUSY","评论点赞正在处理中。")
+        try {
+            http.check(version); account(); http.check(version)
+            suspend fun read(): CommentLikeState {
+                val row = readComment(subject,id,version)
+                val action = row.optInt("action",-1); val likes = row.optLong("like",-1)
+                if (action !in 0..2 || likes<0) invalid("B站暂时无法确认评论点赞状态。")
+                return CommentLikeState(action==1,likes)
+            }
+            val before = read()
+            if (before.liked==desired) return before
+            http.ensureDevice(); http.check(version)
+            http.request("/x/v2/reply/action",form=mapOf("oid" to subject.oid,"type" to subject.type.toString(),"rpid" to id,
+                "action" to if (desired) "1" else "0","csrf" to http.csrf()),
+                referer=subject.referer,expectedGeneration=version)
+            var matchingDetail: CommentLikeState? = null
+            var readError: Exception? = null
+            for (wait in listOf(0L,250L,500L,1000L)) {
+                delay(wait); http.check(version)
+                try {
+                    val after = read()
+                    if (after.liked!=desired) continue
+                    if (after.likes!=before.likes) return after
+                    matchingDetail=after
+                } catch (cancelled: CancellationException) { throw cancelled }
+                catch (failure: Exception) { if (readError==null) readError=failure }
+            }
+            http.check(version)
+            return matchingDetail ?: throw BiliFailure("COMMENT_LIKE_UNCONFIRMED",readError?.message ?: "B站暂未确认评论点赞结果，请稍后再查看。")
+        } finally {
+            commentLikeWrites.remove(key)
+        }
+    }
+
+    suspend fun postVideoComment(video: Video,message: String,mentions: List<User>,target: CommentTarget?): Comment =
+        postComment(CommentSubject.video(video) ?: invalid("评论参数无效。"),message,mentions,target)
+
+    internal suspend fun postComment(subject: CommentSubject,message: String,mentions: List<User>,target: CommentTarget?): Comment {
+        if (message.isBlank() || message.codePointCount(0,message.length)>1000) invalid("请输入1–1000字。")
+        val version = http.generation
+        val mid = account()
+        http.check(version)
+        val root = target?.root?.id ?: "0"
+        val parent = target?.parent?.id ?: "0"
+        if (target!=null) {
+            val rootRow = readComment(subject,root,version)
+            if (rootRow.replyId("root")!="0") invalid("该评论不是当前回复的楼层。")
+            if (root!=parent && readComment(subject,parent,version).replyId("root")!=root) invalid("回复与当前评论不匹配。")
+        }
+        val at = JSONObject()
+        for (user in mentions.distinctBy { it.name }) {
+            if (user.mid>0 && user.name.isNotBlank() && Regex("@${Regex.escape(user.name)}(?=\\s|$)").containsMatchIn(message)) {
+                at.put(user.name,user.mid)
+            }
+        }
+        http.ensureDevice(); http.check(version)
+        val form = mapOf("oid" to subject.oid,"type" to subject.type.toString(),"plat" to "1","message" to message,
+            "at_name_to_mid" to at.toString(),"gaia_source" to "main_web","csrf" to http.csrf()) +
+            if (target==null) emptyMap() else mapOf("root" to root,"parent" to parent)
+        val data = try {
+            http.request("/x/v2/reply/add",form=form,wbi=true,
+                referer=subject.referer,expectedGeneration=version)
+        } catch (failure: BiliFailure) {
+            if (failure.code in setOf("NETWORK","INVALID_RESPONSE") || failure.code.toIntOrNull()?.let { it in 500..599 }==true) {
+                throw BiliFailure("COMMENT_UNCONFIRMED","${failure.message} 发送结果暂未确认，请先核对评论再决定是否重发。")
+            }
+            throw failure
+        }
+        val reply = data.optJSONObject("reply")
+        if (reply!=null && matchesComment(reply,subject,reply.replyId("rpid")) &&
+            reply.replyId("root")==root && reply.replyId("parent")==parent && reply.optLong("mid")==mid) {
+            val comment = parseComment(reply,subject.type)
+            if (comment.text.isNotBlank() && comment.user.mid==mid) return comment
+        }
+        throw BiliFailure("COMMENT_UNCONFIRMED","B站未确认发送结果，请先刷新评论再核对。")
     }
     suspend fun history(cursor: String? = null): Page<History> {
         account(); var query = mapOf("type" to "archive","ps" to "20")

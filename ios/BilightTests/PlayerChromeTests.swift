@@ -109,6 +109,50 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertEqual(progress.value, 2.5)
     }
 
+    @MainActor func testSurfacePreviewCommitsOnceAndCancelledSliderCannotSeekNewItem() async throws {
+        let (player, controls, progress) = try await deferredScrubber()
+        defer { controls.stop() }
+        var previews: [Double?] = []
+        controls.onScrubPreview = { target, _, _ in previews.append(target) }
+        XCTAssertEqual(controls.beginScrub(), 1)
+        controls.previewScrub(at: 4)
+        controls.previewScrub(at: 8)
+        controls.refresh()
+        XCTAssertEqual(progress.value, 8)
+        progress.sendActions(for: .touchDown)
+        progress.value = 3
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        XCTAssertTrue(player.seekRequests.isEmpty)
+        controls.finishScrub(at: 8)
+        XCTAssertEqual(player.seekRequests.count, 1)
+        XCTAssertEqual(previews, [1, 4, 8, nil])
+        XCTAssertEqual(player.timeControlStatus, .paused)
+
+        progress.sendActions(for: .touchDown)
+        progress.value = 9
+        progress.sendActions(for: .valueChanged)
+        let asset = try XCTUnwrap(player.currentItem?.asset)
+        player.replaceCurrentItem(with: AVPlayerItem(asset: asset))
+        let deadline = Date().addingTimeInterval(4)
+        repeat { try await Task.sleep(for: .milliseconds(20)) }
+        while player.currentItem?.status != .readyToPlay && Date() < deadline
+        progress.value = 10
+        progress.sendActions(for: .valueChanged)
+        progress.sendActions(for: .touchUpInside)
+        XCTAssertEqual(player.seekRequests.count, 1)
+    }
+
+    @MainActor func testPlayDoesNotRestartWhileASeekBackFromTheEndIsPending() async throws {
+        let (player, controls, _) = try await deferredScrubber()
+        defer { controls.stop(); player.pause() }
+        player.reportedPosition = 12
+        XCTAssertEqual(controls.beginScrub(), 12)
+        controls.finishScrub(at: 5)
+        controls.togglePlayback()
+        XCTAssertEqual(player.seekRequests.map { $0.time.seconds }, [5])
+    }
+
     @MainActor private func deferredScrubber() async throws -> (DeferredSeekPlayer, PlaybackControls, UISlider) {
         let media = try XCTUnwrap(Bundle(for: Self.self).url(forResource: "fullscreen-motion", withExtension: "mp4"))
         let player = DeferredSeekPlayer(url: media)
@@ -247,12 +291,16 @@ final class PlayerChromeTests: XCTestCase {
         let deadline = Date().addingTimeInterval(3)
         while (containers(root).isEmpty || model.player.currentTime().seconds < 0.1), Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
         let container = try XCTUnwrap(containers(root).first)
+        let feedback = try XCTUnwrap(descendants(container.controller.view).first {
+            $0.accessibilityIdentifier == "player-gesture-feedback"
+        })
         for fullscreen in [false, true] {
             if fullscreen { container.enterFullscreen(rotate: false); try await Task.sleep(for: .milliseconds(100)) }
             for rate: Float in [1, 1.5, 2.5] {
                 model.setRate(rate)
                 container.handleSpeedHold(.began)
                 XCTAssertEqual(model.player.rate, 2)
+                XCTAssertTrue(feedback.isHidden, "Holding for 2× speed must not show a center banner")
                 XCTAssertEqual(preferences.rate, rate, "A temporary hold must not persist its 2× speed")
                 XCTAssertEqual(model.rate, rate, "Temporary acceleration cannot overwrite the selected rate")
                 container.handleSpeedHold(.cancelled)
@@ -684,7 +732,13 @@ final class PlayerChromeTests: XCTestCase {
         progress.sendActions(for: .touchDown)
         progress.value = 3
         progress.sendActions(for: .valueChanged)
+        let scrubHUD = try XCTUnwrap(descendants(host.view).first {
+            $0.accessibilityIdentifier == "player-gesture-feedback"
+        } as? UILabel)
+        XCTAssertFalse(scrubHUD.isHidden)
+        XCTAssertEqual(scrubHUD.text?.trimmingCharacters(in: .whitespaces), "00:03 / 00:12")
         progress.sendActions(for: .touchUpInside)
+        XCTAssertTrue(scrubHUD.isHidden)
         let deadline = Date().addingTimeInterval(2)
         while abs(model.player.currentTime().seconds - 3) > 0.1 && Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
@@ -701,6 +755,13 @@ final class PlayerChromeTests: XCTestCase {
         XCTAssertTrue(model.player.currentItem === currentItem)
         let fullscreenView = try XCTUnwrap(container.controller.view.superview)
         let transport = try XCTUnwrap(descendants(fullscreenView).first { $0 is PlaybackControls } as? PlaybackControls)
+        fullscreenView.layoutIfNeeded()
+        for fraction in [0.23, 0.65] {
+            let point = transport.convert(CGPoint(x: transport.bounds.width * fraction, y: transport.bounds.height - 16), to: window)
+            let hit = window.hitTest(point, with: nil)
+            XCTAssertTrue(hit === container.controller.view || hit?.isDescendant(of: container.controller.view) == true,
+                          "The fullscreen control bar's empty space must pass left and right swipe starts to the video")
+        }
         XCTAssertTrue(progress.isDescendant(of: transport), "Fullscreen must retain the same scrubber")
         progress.sendActions(for: .touchDown)
         progress.value = 5
@@ -746,6 +807,7 @@ private final class DeferredSeekPlayer: AVPlayer, @unchecked Sendable {
     var reportedPosition = 1.0
     var seekRequests: [(time: CMTime, completion: (@Sendable (Bool) -> Void)?)] = []
     override func currentTime() -> CMTime { CMTime(seconds: reportedPosition, preferredTimescale: 600) }
+    override func seek(to time: CMTime) { seekRequests.append((time, nil)) }
     override func seek(to time: CMTime, toleranceBefore: CMTime, toleranceAfter: CMTime) {
         seekRequests.append((time, nil))
     }

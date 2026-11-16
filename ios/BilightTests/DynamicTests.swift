@@ -74,37 +74,193 @@ final class DynamicTests: XCTestCase {
         XCTAssertTrue(selected.liked); XCTAssertEqual(selected.likes, 19)
         XCTAssertEqual(writes, [2, 1]); XCTAssertEqual(reads, 5)
     }
-    func testFailedDynamicLikeDoesNotRetryTheWriteOrClaimSuccess() async throws {
+    func testAcceptedDynamicLikeRechecksUntilBothAccountStateAndCountCatchUp() async throws {
+        let id = "1057955152016703512"
+        var writes = 0, verificationReads = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" {
+                writes += 1
+                return ["code": 0, "data": NSNull()]
+            }
+            if writes > 0 { verificationReads += 1 }
+            var value = self.item(id), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": verificationReads >= 4 ? 31 : 30, "status": verificationReads >= 3]]
+            value["modules"] = modules
+            return ["code": 0, "data": ["item": value]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let result = try await client.setDynamicLike(id, liked: true)
+        XCTAssertTrue(result.liked); XCTAssertEqual(result.likes, 31)
+        XCTAssertEqual(writes, 1); XCTAssertEqual(verificationReads, 4)
+    }
+    func testExpiredDynamicLikeDoesNotTreatGuestStateAsAConfirmedUnlike() async throws {
+        let id = "1057955152016703512"
+        var writes = 0, reads = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" {
+                writes += 1
+                return ["code": -101, "message": "账号未登录"]
+            }
+            reads += 1
+            var value = self.item(id), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": reads == 1 ? 12 : 11, "status": reads == 1]]
+            value["modules"] = modules
+            return ["code": 0, "data": ["item": value]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        do {
+            _ = try await client.setDynamicLike(id, liked: false)
+            XCTFail("An expired login cannot confirm an account's unlike")
+        } catch let error as BiliFailure {
+            XCTAssertEqual(error.code, "-101")
+        }
+        XCTAssertEqual(writes, 1); XCTAssertEqual(reads, 1)
+    }
+    @MainActor func testFailedDynamicLikeRestoresConfirmedStateWithoutRetryingTheWrite() async throws {
         var writes = 0, reads = 0
         let (client, http) = fixture { request in
             if request.httpMethod == "POST" { writes += 1; throw URLError(.notConnectedToInternet) }
             reads += 1; return ["code": 0, "data": ["item": self.item()]]
         }
         _ = try await http.acceptLogin(cookies)
-        do { _ = try await client.setDynamicLike("1057955152016703512", liked: false); XCTFail("Unconfirmed state must fail") } catch {}
+        let app = AppModel(client: client), post = try XCTUnwrap(DynamicPost.map(item()))
+        app.user = User(mid: 3, name: "隔离账号", avatar: nil)
+        app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 11))
+        let end = Date().addingTimeInterval(3)
+        while app.dynamicLikes.pending[post.id] != nil && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 12))
+        XCTAssertNotNil(app.dynamicLikes.errors[post.id])
         XCTAssertEqual(writes, 1); XCTAssertEqual(reads, 4)
     }
     @MainActor func testDynamicLikeStateIsSharedAndLateFeedReadsCannotOverwriteConfirmedMutation() async throws {
-        var liked = true, writes = 0
+        var liked = false, writes = 0
+        func itemWithLikes() -> JSON {
+            var value = item(), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": liked ? 19 : 12, "status": liked]]; value["modules"] = modules
+            return value
+        }
         let (client, http) = fixture { request in
-            if request.httpMethod == "POST" { writes += 1; Thread.sleep(forTimeInterval: 0.1); liked = false; return ["code": 0, "data": NSNull()] }
-            var value = self.item(), modules = obj(value["modules"])
-            modules["module_stat"] = ["like": ["count": liked ? 12 : 11, "status": liked]]; value["modules"] = modules
-            return ["code": 0, "data": ["item": value]]
+            if request.httpMethod == "POST" { writes += 1; liked = true; return ["code": 0, "data": NSNull()] }
+            return ["code": 0, "data": ["item": itemWithLikes()]]
         }
         _ = try await http.acceptLogin(cookies)
-        let app = AppModel(client: client), post = try XCTUnwrap(DynamicPost.map(item()))
+        let app = AppModel(client: client), post = try XCTUnwrap(DynamicPost.map(itemWithLikes()))
         app.user = User(mid: 3, name: "隔离账号", avatar: nil)
-        app.recordDynamic(post, readVersion: app.dynamicLikeRevision)
-        let oldRead = app.dynamicLikeRevision
-        app.toggleDynamicLike(post); app.toggleDynamicLike(post)
-        XCTAssertEqual(app.dynamicLikePending[post.id], false)
-        XCTAssertEqual(app.dynamicLikeState(post).likes, 12, "Pending icon must not invent a public count")
-        let end = Date().addingTimeInterval(3)
-        while app.dynamicLikePending[post.id] != nil && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
-        XCTAssertEqual(writes, 1); XCTAssertEqual(app.dynamicLikeState(post), DynamicLikeState(liked: false, likes: 11))
+        app.recordDynamic(post, readVersion: app.dynamicLikes.revision)
+        let oldRead = app.dynamicLikes.revision
+        app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikes.pending[post.id]?.state.liked, true)
         app.recordDynamic(post, readVersion: oldRead)
-        XCTAssertEqual(app.dynamicLikeState(post).likes, 11)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 13))
+        let end = Date().addingTimeInterval(3)
+        while app.dynamicLikes.pending[post.id] != nil && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(writes, 1); XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 19))
+        app.recordDynamic(post, readVersion: oldRead)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 19))
+    }
+    @MainActor func testRapidDynamicLikeTapsUseTheVisibleCountAndWriteOnlyAfterTheLastTap() async throws {
+        let id = "1057955152016703512"
+        let lock = NSLock()
+        var writes = 0, detailReads = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" {
+                lock.withLock { writes += 1 }
+                return ["code": 0, "data": NSNull()]
+            }
+            let liked = lock.withLock { detailReads += 1; return writes > 0 }
+            return ["code": 0, "data": ["item": self.itemWithLike(id, liked: liked, count: liked ? 12019 : 12012)]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client)
+        let post = try XCTUnwrap(DynamicPost.map(itemWithLike(id, liked: false, count: 12012)))
+        app.user = User(mid: 3, name: "隔离账号", avatar: nil)
+        app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 12013))
+        app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 12012))
+        try await waitForDynamicLike { app.dynamicLikes.pending[id] == nil }
+        XCTAssertEqual(lock.withLock { detailReads }, 0)
+
+        app.toggleDynamicLike(post)
+        try await Task.sleep(for: .milliseconds(450))
+        app.toggleDynamicLike(post)
+        app.toggleDynamicLike(post)
+        try await Task.sleep(for: .milliseconds(450))
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 12013))
+        XCTAssertEqual(lock.withLock { detailReads }, 0, "The debounce interval runs from the final tap")
+        try await waitForDynamicLike { app.dynamicLikes.pending[id] == nil }
+        XCTAssertEqual(lock.withLock { writes }, 1)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 12019))
+    }
+    @MainActor func testInFlightDynamicLikeDoesNotRebaseTheVisibleCountWhileANewerTargetWaits() async throws {
+        let id = "1057955152016703512"
+        let lock = NSLock(), gate = DispatchSemaphore(value: 0)
+        var writes = 0
+        let (client, http) = fixture { request in
+            if request.httpMethod == "POST" {
+                let first = lock.withLock { writes += 1; return writes == 1 }
+                if first { _ = gate.wait(timeout: .now() + 4) }
+                return ["code": 0, "data": NSNull()]
+            }
+            let count = lock.withLock { writes }
+            return ["code": 0, "data": ["item": self.itemWithLike(id, liked: count == 1, count: [12, 19, 18][min(count, 2)])]]
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client)
+        let post = try XCTUnwrap(DynamicPost.map(itemWithLike(id, liked: false, count: 12)))
+        app.user = User(mid: 3, name: "隔离账号", avatar: nil)
+        defer { gate.signal() }
+        app.toggleDynamicLike(post)
+        try await waitForDynamicLike { lock.withLock { writes } == 1 }
+        app.toggleDynamicLike(post)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 12))
+        gate.signal()
+        try await waitForDynamicLike { app.dynamicLikes.confirmed[id]?.liked == true }
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 12))
+        XCTAssertEqual(lock.withLock { writes }, 1)
+        try await waitForDynamicLike { app.dynamicLikes.pending[id] == nil }
+        XCTAssertEqual(lock.withLock { writes }, 2)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 18))
+    }
+    @MainActor func testFeedRefreshRechecksOnlyConflictingDynamicLikesAndAcceptsAnExternalChange() async throws {
+        let id = "1057955152016703512", otherID = "1057955152016703513"
+        func itemWithLikes(_ id: String, _ liked: Bool, _ count: Int) -> JSON {
+            var value = item(id), modules = obj(value["modules"])
+            modules["module_stat"] = ["like": ["count": count, "status": liked]]; value["modules"] = modules
+            return value
+        }
+        var detailLiked = false, detailCount = 12, writes = 0, detailReads = 0
+        let feed = [itemWithLikes(id, false, 12), itemWithLikes(otherID, false, 4)]
+        let (client, http) = fixture { request in
+            switch request.url?.path {
+            case "/x/relation/relations": return ["code": 0, "data": ["7": ["attribute": 2]]]
+            case "/x/polymer/web-dynamic/v1/feed/all": return ["code": 0, "data": ["items": feed, "has_more": false]]
+            case "/x/dynamic/feed/dyn/thumb": writes += 1; detailLiked = true; detailCount = 19; return ["code": 0, "data": NSNull()]
+            case "/x/polymer/web-dynamic/v1/detail":
+                XCTAssertEqual(URLComponents(url: request.url!, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "id" }?.value, id)
+                detailReads += 1
+                return ["code": 0, "data": ["item": itemWithLikes(id, detailLiked, detailCount)]]
+            default: XCTFail("Unexpected fixture request"); return [:]
+            }
+        }
+        _ = try await http.acceptLogin(cookies)
+        let app = AppModel(client: client); app.user = User(mid: 3, name: "隔离账号", avatar: nil)
+        await app.following.enter(client: client, mid: 3)
+        let post = try XCTUnwrap(app.following.posts.first { $0.id == id })
+        app.toggleDynamicLike(post)
+        let end = Date().addingTimeInterval(3)
+        while app.dynamicLikes.pending[id] != nil && Date() < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 19))
+
+        await app.following.refreshLatest(client: client, mid: 3)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: true, likes: 19))
+        XCTAssertEqual(detailReads, 3)
+
+        detailLiked = false; detailCount = 18
+        await app.following.refreshLatest(client: client, mid: 3)
+        XCTAssertEqual(app.dynamicLikeState(post), LikeState(liked: false, likes: 18))
+        XCTAssertEqual(detailReads, 4); XCTAssertEqual(writes, 1)
     }
     @MainActor func testDynamicAndCommentsShareOneLoadingIndicatorWhenDetailFinishesFirst() async throws {
         try await checkDynamicLoading(commentsFirst: false)
@@ -194,6 +350,17 @@ final class DynamicTests: XCTestCase {
                 ],
             ],
         ]
+    }
+    private func itemWithLike(_ id: String, liked: Bool, count: Int) -> JSON {
+        var value = item(id), modules = obj(value["modules"])
+        modules["module_stat"] = ["like": ["count": count, "status": liked]]
+        value["modules"] = modules
+        return value
+    }
+    @MainActor private func waitForDynamicLike(_ ready: () -> Bool) async throws {
+        let end = ContinuousClock.now.advanced(by: .seconds(4))
+        while !ready() && ContinuousClock.now < end { try await Task.sleep(for: .milliseconds(20)) }
+        XCTAssertTrue(ready(), "Timed out waiting for the dynamic-like fixture")
     }
     private var cookies: [HTTPCookie] {
         ["SESSDATA", "bili_jct"].map {

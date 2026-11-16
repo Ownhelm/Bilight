@@ -31,6 +31,7 @@ class VideoShareTest {
         var closed = false
         rule.runOnUiThread { rule.activity.findViewById<android.view.ViewGroup>(android.R.id.content).removeAllViews() }
         rule.setContent { MaterialTheme { VideoShareSheet("BV1xx411c7mD","分享测试",2) { closed = true } } }
+        rule.onNodeWithText("微信分享").assertDoesNotExist()
         rule.onNodeWithText("系统分享").assertIsDisplayed()
         rule.onNodeWithText("二维码").assertDoesNotExist()
         rule.onNodeWithText("更多").assertDoesNotExist()
@@ -44,7 +45,7 @@ class VideoShareTest {
             automation.adoptShellPermissionIdentity("android.permission.READ_CLIPBOARD_IN_BACKGROUND")
             try {
                 val clipboard=rule.activity.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                assertEquals(videoShareUrl("BV1xx411c7mD",2),clipboard.primaryClip?.getItemAt(0)?.text?.toString())
+                assertEquals("分享测试\n${videoShareUrl("BV1xx411c7mD", 2)}", clipboard.primaryClip?.getItemAt(0)?.text?.toString())
             } finally { automation.dropShellPermissionIdentity() }
         }
     }

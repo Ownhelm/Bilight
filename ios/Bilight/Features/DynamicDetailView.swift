@@ -7,6 +7,7 @@ struct DynamicDetailView: View {
     @State private var busy = true
     @State private var error: String?
     @State private var refresh = 0
+    @State private var verifiedAccount: UUID?
     private var hasCommentTarget: Bool { post?.commentID != nil && (post?.commentType ?? 0) > 0 }
     var body: some View {
         ScrollView {
@@ -15,23 +16,27 @@ struct DynamicDetailView: View {
                     DynamicCard(post: post, detail: true)
                     if let oid = post.commentID, post.commentType > 0 {
                         Divider()
-                        CommentsView(oid: oid, commentType: post.commentType, parentLoading: busy).id("\(oid)-\(post.commentType)")
+                        CommentsView(oid: oid, commentType: post.commentType, parentLoading: busy,
+                            channel: verifiedAccount == app.accountGeneration ? post.commentChannel : nil)
+                            .id("\(oid)-\(post.commentType)")
                     }
                 }
                 if busy && !hasCommentTarget { LoadingBlock(label: "正在读取动态") }
                 if let error { FailureBlock(error: error) { refresh += 1 } }
             }.padding(16)
-        }.navigationTitle("动态详情").navigationBarTitleDisplayMode(.inline).task(id: "\(id)-\(refresh)") {
-            let generation = app.accountGeneration, likeVersion = app.dynamicLikeRevision
+        }.navigationTitle("动态详情").navigationBarTitleDisplayMode(.inline).task(id: "\(id)-\(refresh)-\(app.accountGeneration)") {
+            let generation = app.accountGeneration, likeVersion = app.dynamicLikes.revision
             if post == nil { post = app.dynamics[id] }
             busy = true
             error = nil
+            verifiedAccount = nil
             defer { busy = false }
             do {
                 let result = try await app.client.dynamic(id)
                 try Task.checkCancellation()
                 guard app.accountGeneration == generation else { return }
                 post = result
+                verifiedAccount = generation
                 app.recordDynamic(result, readVersion: likeVersion)
             } catch is CancellationError { return } catch {
                 guard !Task.isCancelled, app.accountGeneration == generation else { return }

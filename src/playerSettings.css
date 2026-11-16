@@ -1,0 +1,49 @@
+.bilight-player .art-control-bilightSettings { padding: 0; }
+.bilight-player .player-settings-gear { display: grid; place-items: center; width: 38px; height: var(--art-control-height); color: #fff; }
+.bilight-player .player-settings-gear svg, .bilight-player .player-settings-panel svg { fill: currentColor; }
+.bilight-player .player-settings-gear:focus-visible { outline: 2px solid #fff; outline-offset: -4px; border-radius: 6px; }
+.bilight-player .player-settings-dismiss { position: absolute; z-index: 54; inset: 0; touch-action: manipulation; }
+.bilight-player .player-settings-panel {
+  position: absolute;
+  z-index: 75;
+  inset: auto var(--bilight-settings-end, 60px) var(--bilight-settings-bottom, 66px) auto;
+  width: min(270px, calc(100% - var(--bilight-settings-end, 60px) - 8px));
+  max-height: calc(100% - var(--bilight-settings-bottom, 66px) - 9px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  color: var(--text, #25262d);
+  background: var(--surface, #fff);
+  box-shadow: 0 8px 24px #15161c32;
+  font: inherit;
+  text-shadow: none;
+}
+.player-settings-heading { display: flex; align-items: center; min-height: 39px; gap: 7px; padding: 0 8px 0 12px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.player-settings-heading h2 { font-size: 13px; flex: 1; margin: 0; font-weight: 650; }
+.player-settings-heading button { display: grid; place-items: center; width: 31px; height: 32px; border-radius: 5px; color: var(--muted); }
+.player-settings-heading .player-settings-back { display: inline-flex; gap: 2px; align-items: center; width: auto; padding: 0 4px 0 0; color: var(--pink); font-size: 12px; }
+.player-settings-heading button:hover { color: var(--pink); }
+.player-settings-content { overflow: auto; overscroll-behavior: contain; min-height: 0; padding: 0 10px 4px; }
+.player-settings-row { display: flex; align-items: center; justify-content: space-between; gap: 7px; width: 100%; min-height: 38px; padding: 3px 2px; text-align: start; color: inherit; font: inherit; font-size: 13px; }
+.player-settings-row + .player-settings-row { border-top: 1px solid var(--border); }
+button.player-settings-row:hover, .player-settings-danmaku button:hover { background: var(--soft); }
+.player-settings-value { display: flex; gap: 6px; align-items: center; color: var(--muted); text-align: end; font-size: 12px; }
+.player-settings-choice[aria-pressed="true"] { color: var(--pink); }
+.player-settings-danmaku > button { display: flex; align-items: center; gap: 5px; min-height: 32px; border-radius: 4px; }
+.player-settings-danmaku > button[role="switch"] { padding: 0 4px; }
+.player-settings-danmaku .toggle-track { margin: 0; }
+.player-settings-note, .player-settings-problem { padding: 10px 2px; color: var(--muted); font-size: 12px; line-height: 1.35; }
+.player-settings-problem { color: var(--danger, #ae3258); }
+.player-settings-segment { margin: 9px 0; }
+.player-settings-segment p { color: var(--muted); font-size: 12px; margin: 0 0 4px; }
+.player-settings-segment > div { display: flex; gap: 5px; }
+.player-settings-segment button { border: 1px solid var(--border); border-radius: 5px; background: var(--soft); min-height: 33px; flex: 1; font-size: 12px; }
+.player-settings-segment button[aria-pressed="true"] { border-color: var(--pink); color: var(--pink); }
+.bilight-player .artplayer-plugin-danmuku .apd-config { display: none; }
+
+@media (pointer: coarse) {
+  .bilight-player .player-settings-gear { width: 44px; min-height: 44px; }
+  .player-settings-row, .player-settings-heading button { min-height: 44px; }
+}

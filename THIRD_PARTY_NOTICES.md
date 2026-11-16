@@ -4,6 +4,8 @@ Bilight 原创代码与自制演示素材采用 MIT 许可。依赖分别沿用�
 
 预览中的影视飓风、小鹿Lawrence、超Carry的柴西视频标题、封面、头像及合集信息取自公开页面，原样展示并保留[来源记录](docs/demo-content.md)。仓库外 `Promotion/DemoAssets/` 的公开素材及包含这些内容的界面截图不属于本项目原创素材，不随代码重新授权为 MIT；相关权利仍归原作者或其他权利人所有。README 在 `docs/assets/` 中保留精选界面截图，同样不改变其中第三方内容的权属。预览不捆绑原视频媒体。
 
+「稍后再看」图标使用[哔哩哔哩公开网页图标](https://i0.hdslb.com/bfs/svg-next/BDC/arrow_play_next_line/v1.json)。已加入图标在其基础上调整内圈与透明度。原图标权利归哔哩哔哩，其图形元素不纳入本项目的 MIT 授权。
+
 | 组件 | 用途 | 上游许可 |
 | :--- | :--- | :--- |
 | [React](https://github.com/facebook/react) | 网页界面 | MIT |

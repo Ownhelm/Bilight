@@ -29,8 +29,9 @@ struct AccountView: View {
                     }
                 }
                 Section {
-                    accountLink("我的关注的人", symbol: "person.2", route: .followedPeople(false))
+                    accountLink("我关注的UP主", symbol: "person.2", route: .followedPeople(false))
                     accountLink("我的收藏", symbol: "star", route: .favoriteFolders)
+                    accountLink("稍后再看", symbol: nil, route: .watchLater)
                     accountLink("我的下载", symbol: "arrow.down.circle", route: .downloads)
                 }
                 Section {
@@ -95,14 +96,19 @@ struct AccountView: View {
                     }
                     busy = false
                 }
+        }.overlay(alignment: .bottom) {
+            WatchLaterNotification(store: app.watchLater).padding(.horizontal, 16).padding(.bottom, 12)
         }.tint(Color.biliPink).modifier(VideoSharePresentation())
     }
-    private func accountLink(_ title: String, symbol: String, route: Route) -> some View {
+    private func accountLink(_ title: String, symbol: String?, route: Route) -> some View {
         Button {
             app.navigate(route)
         } label: {
             HStack(spacing: 13) {
-                Image(systemName: symbol).font(.system(size: 20)).foregroundStyle(Color.biliPink).frame(width: 27)
+                Group {
+                    if let symbol { Image(systemName: symbol).font(.system(size: 20)) }
+                    else { WatchLaterGlyph() }
+                }.foregroundStyle(Color.biliPink).frame(width: 27)
                 Text(title).font(.system(size: 15)).foregroundStyle(.primary)
                 Spacer()
                 Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Color.biliMuted)
@@ -226,7 +232,7 @@ private struct FollowedPeopleDirectoryView: View {
                     }
                 }.padding(.horizontal, 18)
             }.scrollDismissesKeyboard(.interactively)
-        }.navigationTitle("我的关注的人").navigationBarTitleDisplayMode(.inline)
+        }.navigationTitle("我关注的UP主").navigationBarTitleDisplayMode(.inline)
             .task(id: app.accountGeneration) { search.account(app.user?.mid); update() }
             .onChange(of: matches.count) { _, count in page = min(page, max(1, (count + 19) / 20)) }
             .onChange(of: search.busy) { _, busy in

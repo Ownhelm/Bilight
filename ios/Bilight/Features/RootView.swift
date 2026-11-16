@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var app: AppModel
+    @Environment(\.scenePhase) private var scene
     @Binding var darkAppearance: Bool
     @State private var tab = 0
     @State private var pendingAccountURL: URL?
@@ -73,7 +74,15 @@ struct RootView: View {
                     .navigationDestination(for: Route.self) { route in
                         RouteDestination(route: route)
                     }
-            }.tint(Color.biliPink).environment(\.locale, Locale(identifier: "zh_CN"))
+            }.overlay(alignment: .bottom) {
+                if !app.showAccount {
+                    WatchLaterNotification(store: app.watchLater).padding(.horizontal, 16)
+                        .padding(.bottom, app.path.isEmpty ? 58 : 16)
+                }
+            }.onChange(of: app.searchHomeRequest) { _, _ in tab = 0 }.tint(Color.biliPink).environment(\.locale, Locale(identifier: "zh_CN"))
+                .onChange(of: scene) { _, phase in
+                    if phase == .active, !app.showAccount, app.watchLater.loaded { app.watchLater.prepare(force: true) }
+                }
                 .sheet(isPresented: $app.showLogin) { LoginView().environmentObject(app) }
                 .sheet(isPresented: $app.showAccount) { AccountView().id(app.accountGeneration).environmentObject(app) }
                 .onChange(of: app.restoring) { _, restoring in
@@ -114,6 +123,7 @@ struct RootView: View {
         case "following": app.accountPath = [.followedPeople(false)]
         case "frequent": app.accountPath = [.followedPeople(true)]
         case "favorites": app.accountPath = [.favoriteFolders]
+        case "watch-later": app.accountPath = [.watchLater]
         case "downloads": app.accountPath = [.downloads]
         default: app.accountPath = []
         }
@@ -138,6 +148,8 @@ struct RouteDestination: View {
     var body: some View {
         switch route {
         case .video(let bvid, let page, let time): VideoView(bvid: bvid, requestedPage: page, startTime: time)
+        case .watchLaterVideo(let bvid, let cid, let time):
+            VideoView(bvid: bvid, startTime: time, requestedCID: cid > 0 ? cid : nil)
         case .creator(let mid): CreatorView(mid: mid)
         case .dynamic(let id): DynamicDetailView(id: id)
         case .collection(let mid, let kind, let number):
@@ -150,6 +162,7 @@ struct RouteDestination: View {
         case .followedPeople(let frequent): FollowedPeopleView(frequent: frequent)
         case .favoriteFolders: FavoriteFoldersView()
         case .favoriteFolder(let folder): FavoriteContentsView(folder: folder)
+        case .watchLater: WatchLaterView(store: app.watchLater)
         case .downloads: DownloadsView(store: app.downloads)
         case .offline(let id): OfflineVideoView(store: app.downloads, id: id)
         }

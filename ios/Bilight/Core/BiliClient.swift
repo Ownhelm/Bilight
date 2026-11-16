@@ -9,6 +9,7 @@ actor BiliClient {
     private var dynamicWrites: [String: (id: UUID, version: UUID, liked: Bool, task: Task<DynamicPost, Error>)] = [:]
     private var supportWrites: [String: (id: UUID, session: UUID, action: VideoWrite, task: Task<VideoEngagement, Error>)] = [:]
     private var uncertainSupport: [String: UUID] = [:]
+    private var commentWrites = Set<String>()
     private let followingTimeout: Duration
     init(http: BiliHTTP = BiliHTTP(), followingTimeout: Duration = .seconds(20)) {
         self.http = http
@@ -440,13 +441,16 @@ actor BiliClient {
         var seen = Set<String>()
         return items.compactMap { DynamicPost.map($0) }.filter { seen.insert($0.id).inserted }
     }
-    func dynamic(_ id: String, strictLikes: Bool = false) async throws -> DynamicPost {
+    func dynamic(_ id: String, strictLikes: Bool = false, expectedVersion: UUID? = nil) async throws -> DynamicPost {
         guard DynamicPost.validID(id) else { throw BiliFailure.invalid }
-        let version = await http.version()
+        let version: UUID
+        if let expectedVersion { version = expectedVersion } else { version = await http.version() }
+        try await http.check(version)
         try await http.ensureDevice()
         let data = try await http.request(
             "/x/polymer/web-dynamic/v1/detail",
-            query: ["id": id, "platform": "web", "features": "itemOpusStyle,opusBigCover,ugcDelete"])
+            query: ["id": id, "platform": "web", "features": "itemOpusStyle,opusBigCover,ugcDelete"],
+            expectedVersion: version)
         try await http.check(version)
         let item = obj(data["item"])
         if strictLikes {
@@ -476,19 +480,38 @@ actor BiliClient {
     }
     private func performDynamicLike(_ id: String, liked: Bool, version: UUID) async throws -> DynamicPost {
         try await http.check(version)
-        let csrf = try await http.csrf(), before = try await dynamic(id, strictLikes: true)
+        let csrf = try await http.csrf()
+        let before = try await dynamic(id, strictLikes: true, expectedVersion: version)
         try await http.check(version); try Task.checkCancellation()
         if before.liked == liked { return before }
         var writeError: Error?
-        do { _ = try await http.request("/x/dynamic/feed/dyn/thumb", query: ["csrf": csrf], json: ["dyn_id_str": id, "up": liked ? 1 : 2], referer: "https://t.bilibili.com/\(id)") }
-        catch is CancellationError { throw CancellationError() } catch { writeError = error }
-        for attempt in 0..<3 {
-            try await http.check(version); try Task.checkCancellation()
-            if attempt > 0 { try await Task.sleep(for: .milliseconds(150)) }
-            do { let after = try await dynamic(id, strictLikes: true); try await http.check(version); if after.liked == liked { return after } }
-            catch is CancellationError { throw CancellationError() } catch { if writeError == nil { writeError = error } }
+        do {
+            _ = try await http.request("/x/dynamic/feed/dyn/thumb", query: ["csrf": csrf],
+                json: ["dyn_id_str": id, "up": liked ? 1 : 2], referer: "https://t.bilibili.com/\(id)",
+                expectedVersion: version)
+        } catch is CancellationError { throw CancellationError() }
+        catch let error as BiliFailure where error.code == "-101" { throw error }
+        catch { writeError = error }
+        let delays = writeError == nil ? [0, 250, 500, 1000] : [0, 150, 150]
+        var confirmed: DynamicPost?
+        var readError: Error?
+        for delay in delays {
+            if delay > 0 { try await Task.sleep(for: .milliseconds(delay)) }
+            try await http.check(version)
+            try Task.checkCancellation()
+            do {
+                let after = try await dynamic(id, strictLikes: true, expectedVersion: version)
+                if after.liked == liked {
+                    confirmed = after
+                    // The account flag and public total can update on different reads.
+                    if after.likes != before.likes { return after }
+                }
+            } catch is CancellationError { throw CancellationError() } catch { readError = error }
         }
+        try await http.check(version)
+        if let confirmed { return confirmed }
         if let writeError { throw writeError }
+        if let readError { throw readError }
         throw BiliFailure(code: "DYNAMIC_LIKE_UNCONFIRMED", message: "点赞结果暂未确认，请刷新动态后再操作。")
     }
     func video(_ bvid: String, known: Video? = nil) async throws -> VideoDetail {
@@ -629,6 +652,149 @@ actor BiliClient {
     func comments(_ aid: Int, cursor: String? = nil) async throws -> Page<Comment> {
         try await comments(oid: "\(aid)", type: 1, cursor: cursor)
     }
+    func commentMentionUsers(_ keyword: String) async throws -> [User] {
+        let keyword = keyword.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard keyword.count <= 30 else { return [] }
+        let version = await http.version()
+        _ = try await http.csrf()
+        let data = try await http.request("/x/v2/reply/at", query: ["keyword": keyword], expectedVersion: version)
+        guard data["groups"] is [JSON] else { throw BiliFailure.invalid }
+        var seen = Set<Int>()
+        return list(data["groups"]).flatMap { list($0["items"]) }.map(User.map).filter {
+            $0.mid > 0 && !$0.name.isEmpty && seen.insert($0.mid).inserted
+        }
+    }
+    func postComment(
+        channel: CommentChannel, authorMid: Int, message: String, mentions: [String: Int], target: CommentReplyTarget? = nil
+    ) async throws -> (comment: Comment, notice: String?) {
+        guard channel.valid, authorMid > 0, message.utf16.count <= Comment.maximumMessageLength,
+            !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            target.map({ DynamicPost.validID($0.root) && DynamicPost.validID($0.parent) }) ?? true
+        else { throw BiliFailure.invalid }
+        let version = await http.version()
+        let key = "\(version):\(channel.type):\(channel.oid):post"
+        guard commentWrites.insert(key).inserted else {
+            throw BiliFailure(code: "COMMENT_BUSY", message: "评论正在发布。")
+        }
+        defer { commentWrites.remove(key) }
+        let names = mentions.filter { $0.value > 0 && !$0.key.isEmpty && message.contains("@\($0.key) ") }
+        let mapping = String(decoding: try JSONSerialization.data(withJSONObject: names), as: UTF8.self)
+        let csrf = try await commentWriteCSRF(channel: channel, actorMid: authorMid, version: version)
+        if let target {
+            let parent = try await commentRow(channel: channel, rpid: target.parent, version: version)
+            let root = Self.commentID(parent, "root")
+            guard target.parent == target.root ? root == "0" : root == target.root else {
+                throw BiliFailure(code: "COMMENT_UNAVAILABLE", message: "回复对象不属于当前评论。")
+            }
+        }
+        try await http.ensureDevice()
+        var form = channel.query.merging([
+            "plat": "1", "message": message, "csrf": csrf,
+            "at_name_to_mid": mapping, "gaia_source": "main_web",
+        ]) { _, value in value }
+        if let target { form["root"] = target.root; form["parent"] = target.parent }
+        let data: JSON
+        do {
+            data = try await http.request(
+                "/x/v2/reply/add", form: form, wbi: true,
+                referer: channel.referer, expectedVersion: version)
+        } catch {
+            try Task.checkCancellation()
+            let code = (error as? BiliFailure)?.code ?? ""
+            if error is URLError || code == "INVALID_RESPONSE" || (500...599).contains(Int(code) ?? 0) {
+                throw BiliFailure(code: "COMMENT_UNCONFIRMED", message: "B 站未能确认发布结果，请刷新评论区确认后再发送。")
+            }
+            throw error
+        }
+        let row = obj(data["reply"])
+        let comment = Self.comment(row)
+        guard DynamicPost.validID(comment.id), comment.user.mid == authorMid,
+            Self.commentID(row, "oid") == channel.oid, int(row["type"]) == channel.type,
+            Self.commentID(row, "root") == (target?.root ?? "0"), Self.commentID(row, "parent") == (target?.parent ?? "0")
+        else { throw BiliFailure(code: "COMMENT_UNCONFIRMED", message: "B 站未返回完整的评论，请刷新评论区确认后再发送。") }
+        let notice = clean(data["success_toast"])
+        return (comment, notice.isEmpty ? nil : notice)
+    }
+    func setCommentLike(channel: CommentChannel, actorMid: Int, rpid: String, liked: Bool) async throws -> Comment {
+        guard channel.valid, actorMid > 0, DynamicPost.validID(rpid) else { throw BiliFailure.invalid }
+        let version = await http.version()
+        let key = "\(version):\(channel.type):\(channel.oid):\(rpid)"
+        guard commentWrites.insert(key).inserted else {
+            throw BiliFailure(code: "COMMENT_BUSY", message: "评论点赞正在同步。")
+        }
+        defer { commentWrites.remove(key) }
+        let csrf = try await commentWriteCSRF(channel: channel, actorMid: actorMid, version: version)
+        let before = Self.comment(try await commentRow(channel: channel, rpid: rpid, version: version))
+        if before.liked == liked { return before }
+        try await http.ensureDevice()
+        _ = try await http.request(
+            "/x/v2/reply/action", form: channel.query.merging(["rpid": rpid, "action": liked ? "1" : "0", "csrf": csrf]) { _, value in value },
+            referer: channel.referer, expectedVersion: version)
+        var matched: Comment?
+        var readError: Error?
+        for delay in [0, 250, 500, 1000] {
+            if delay > 0 { try await Task.sleep(for: .milliseconds(delay)) }
+            do {
+                let after = Self.comment(try await commentRow(channel: channel, rpid: rpid, version: version))
+                if after.liked == liked {
+                    matched = after
+                    if after.likes != before.likes { return after }
+                }
+            } catch is CancellationError { throw CancellationError() }
+            catch let error as BiliFailure where ["-101", "ACCOUNT_CHANGED"].contains(error.code) { throw error }
+            catch { readError = error }
+        }
+        if let matched { return matched }
+        if let readError { throw readError }
+        throw BiliFailure(code: "COMMENT_UNCONFIRMED", message: "B 站暂未确认评论点赞结果，请刷新后查看。")
+    }
+    private func commentWriteCSRF(channel: CommentChannel, actorMid: Int, version: UUID) async throws -> String {
+        let csrf = try await http.csrf()
+        let actor = try await http.request("/x/web-interface/nav", expectedVersion: version)
+        guard actor["isLogin"] as? Bool == true, int(actor["mid"]) == actorMid else {
+            throw BiliFailure(code: "ACCOUNT_CHANGED", message: "账号已变化，请重新打开页面。")
+        }
+        if case .dynamic(let id, _, _) = channel {
+            let post = try await dynamic(id)
+            try await http.check(version)
+            guard post.commentChannel == channel else {
+                throw BiliFailure(code: "COMMENT_UNAVAILABLE", message: "动态的评论区已变化，请刷新后重试。")
+            }
+        }
+        return csrf
+    }
+    private func commentRow(channel: CommentChannel, rpid: String, version: UUID) async throws -> JSON {
+        let data = try await http.request("/x/v2/reply/detail",
+            query: channel.query.merging(["root": rpid]) { _, value in value },
+            referer: channel.referer, expectedVersion: version)
+        let row = obj(data["root"])
+        guard Self.commentID(row, "rpid") == rpid, Self.commentID(row, "oid") == channel.oid, int(row["type"]) == channel.type,
+            let action = row["action"] as? NSNumber, [0, 1, 2].contains(action.intValue), row["like"] is NSNumber
+        else { throw BiliFailure(code: "COMMENT_UNAVAILABLE", message: "B 站返回的评论状态不完整，请刷新后重试。") }
+        return row
+    }
+    private static func commentID(_ item: JSON, _ key: String) -> String {
+        String(describing: item[key + "_str"] ?? item[key] ?? "")
+    }
+    private static func comment(_ row: JSON) -> Comment {
+        let content = obj(row["content"])
+        var mentions: [String: Int] = [:]
+        for value in list(content["members"]).map(User.map) where value.mid > 0 && !value.name.isEmpty {
+            mentions[value.name] = value.mid
+        }
+        for (name, value) in obj(content["at_name_to_mid"]) where !name.isEmpty && int(value) > 0 {
+            mentions[name] = int(value)
+        }
+        var emotes: [String: URL] = [:]
+        for (token, value) in obj(content["emote"]) where token.hasPrefix("[") && token.hasSuffix("]") && token.count > 2 {
+            if let url = secureURL(obj(value)["url"]), ImageRepository.allowed(url) { emotes[token] = url }
+        }
+        return Comment(
+            id: commentID(row, "rpid"), user: User.map(obj(row["member"])),
+            text: clean(content["message"], limit: 6000), createdAt: num(row["ctime"]),
+            likes: max(0, int(row["like"])), replyCount: max(0, int(row["rcount"])),
+            liked: int(row["action"]) == 1, mentions: mentions, emotes: emotes)
+    }
     func comments(oid: String, type: Int, cursor: String? = nil) async throws -> Page<Comment> {
         guard DynamicPost.validID(oid), type > 0 else { throw BiliFailure.invalid }
         let pagination = String(
@@ -647,12 +813,7 @@ actor BiliClient {
                 message: clean(obj(data["control"])["show_text"]).isEmpty
                     ? "评论暂时无法读取。" : clean(obj(data["control"])["show_text"]))
         }
-        let items = list(data["replies"]).map {
-            Comment(
-                id: String(describing: $0["rpid_str"] ?? $0["rpid"] ?? ""), user: User.map(obj($0["member"])),
-                text: clean(obj($0["content"])["message"], limit: 6000), createdAt: num($0["ctime"]),
-                likes: int($0["like"]), replyCount: max(0, int($0["rcount"])))
-        }
+        let items = list(data["replies"]).map(Self.comment)
         let next = obj(paging["pagination_reply"])["next_offset"] as? String
         if !end && (items.isEmpty || next == nil || next == "") { throw BiliFailure.invalid }
         return Page(items: items, hasMore: !end, cursor: end ? nil : next)
@@ -661,19 +822,18 @@ actor BiliClient {
         guard DynamicPost.validID(oid), DynamicPost.validID(root), type > 0, (1...1000).contains(page) else { throw BiliFailure.invalid }
         let data = try await http.request("/x/v2/reply/reply", query: ["type": "\(type)", "oid": oid, "root": root, "pn": "\(page)", "ps": "20"])
         let parent = obj(data["root"]), paging = obj(data["page"])
-        func id(_ item: JSON, _ key: String) -> String { String(describing: item[key + "_str"] ?? item[key] ?? "") }
         let total = int(paging["count"]), size = int(paging["size"])
-        guard id(parent, "rpid") == root, parent["oid"] == nil || id(parent, "oid") == oid,
+        guard Self.commentID(parent, "rpid") == root, parent["oid"] == nil || Self.commentID(parent, "oid") == oid,
             int(paging["num"]) == page, paging["count"] != nil, total >= 0, (1...20).contains(size),
             data["replies"] is [Any] || total == 0 else {
             throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复数据不完整或不属于当前评论，请重试。")
         }
         let items = try list(data["replies"]).map { item -> Comment in
-            guard DynamicPost.validID(id(item, "rpid")), id(item, "root") == root,
-                item["oid"] == nil || id(item, "oid") == oid else {
+            guard DynamicPost.validID(Self.commentID(item, "rpid")), Self.commentID(item, "root") == root,
+                item["oid"] == nil || Self.commentID(item, "oid") == oid else {
                 throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复归属校验失败，请重试。")
             }
-            return Comment(id: id(item, "rpid"), user: User.map(obj(item["member"])), text: clean(obj(item["content"])["message"], limit: 6000), createdAt: num(item["ctime"]), likes: int(item["like"]))
+            return Self.comment(item)
         }
         let more = page * size < total
         guard !more || !items.isEmpty else { throw BiliFailure(code: "COMMENTS_UNAVAILABLE", message: "回复分页数据不完整，请重试。") }

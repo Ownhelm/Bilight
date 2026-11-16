@@ -34,8 +34,11 @@
   .parts-panel, .search-box:focus-within, .coin-options > button { background: var(--surface); }
 
   .search-box, .search-wrap-large .search-box, .video-cover, .empty-symbol, .cover-play,
-  .share-option-icon, .share-sheet-cancel:hover, .parts-list button:hover,
-  .video-placeholder > div, .video-placeholder > span { background: var(--soft); }
+  .share-option-icon, .share-sheet-cancel:hover, .parts-list button:hover { background: var(--soft); }
+
+  .account-popover { --account-action-color: var(--muted); }
+  .following-page .empty-symbol { background: transparent; border: 1px solid var(--border); }
+  .following-page .empty-state h2 { color: var(--text); }
 
   .home-header { background: var(--page); }
   .session-notice, .parts-list button.active, .coin-options > button.selected,
@@ -55,17 +58,17 @@
   .search-box, .search-wrap-large .search-box, .button-quiet, .login-dialog, .qr-frame,
   .phone-field, .code-field, .login-note, .creator-row, .up-tag, .focus-mark,
   .account-menu summary img, .favorite-create-trigger, .share-sheet-cancel,
-  .share-sheet-error input { border-color: var(--border); }
-  .phone-field, .code-field, .favorite-create-form input, .share-sheet-error input {
+  .share-sheet-error textarea { border-color: var(--border); }
+  .phone-field, .code-field, .favorite-create-form input, .share-sheet-error textarea {
     background: var(--soft);
   }
   .phone-field select { background: transparent; }
   .phone-field select option { background: var(--surface); }
   .search-box, .search-wrap-large .search-box, .phone-field, .code-field,
-  .favorite-create-form input, .share-sheet-error input, .coin-options > button {
+  .favorite-create-form input, .share-sheet-error textarea, .coin-options > button {
     border-color: var(--control-border);
   }
-  .favorite-create-form input:focus, .share-sheet-error input:focus { border-color: var(--pink); }
+  .favorite-create-form input:focus, .share-sheet-error textarea:focus { border-color: var(--pink); }
   .account-menu summary img { outline-color: var(--pink-soft); }
   .toggle-track, .share-option:hover:enabled .share-option-icon { background: #4b4e5d; }
   .active .toggle-track { background: var(--accent-fill); }
@@ -73,7 +76,7 @@
   .login-dialog, .search-box input, .phone-field input, .code-field input, .favorite-create-form input,
   .button-quiet:hover:enabled, .icon-button:hover,
   .share-sheet-cancel { color: var(--text); }
-  .following-link, .login-button, .history-menu > summary, .account-popover button,
+  .following-link, .login-button, .history-menu > summary,
   .home-kicker, .home-footnote, .home-footer, .search-box > svg, .search-box input::placeholder,
   .search-submit, .search-clear, .section-eyebrow, .heading-note, .content-tabs button,
   .content-tabs > a, .video-owner, .up-tag, .video-meta, .pagination, .button-quiet,
@@ -90,7 +93,7 @@
   .history-day, .collection-card > p, .collection-order, .engagement-button, .interaction-close,
   .coin-options > button, .coin-like-option, .favorite-folders em, .favorite-create-trigger,
   .favorite-create-cancel, .share-video-dialog, .share-option, .share-option-icon, .share-sheet-hint,
-  .share-sheet-error input, .comment-reply-toggle, .comment-reply-status,
+  .share-sheet-error textarea, .comment-reply-toggle, .comment-reply-status,
   .following-dynamic-actions, .dynamic-detail-author, .dynamic-detail-author a { color: var(--muted); }
 
   .field-error, .login-error, .playback-error, .triple-error, .history-save-error,

@@ -10,13 +10,32 @@ struct PlaybackLifecycleRegressionView: View {
     @State private var taps = 0
     @State private var error: String?
     private let timer = Timer.publish(every: 0.2, on: .main, in: .common).autoconnect()
-    var body: some View {
+    private var playback: some View {
         VStack {
             Text("播放恢复测试").accessibilityIdentifier("lifecycle-title")
-            NativePlayer(model: model, onQuality: { _ in }).frame(height: 240)
+            NativePlayer(model: model, onDanmaku: { model.danmakuEnabled = $0 }, onQuality: { _ in }).frame(height: 240)
             Text(String(format: "%.1f", position)).accessibilityIdentifier("lifecycle-position")
             Button("响应测试 \(taps)") { taps += 1 }.accessibilityIdentifier("lifecycle-response")
             if let error { Text(error) }
+        }
+    }
+    var body: some View {
+        Group {
+            if ProcessInfo.processInfo.arguments.contains("--regression-inline-scroll") {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        Text("画面上方").frame(maxWidth: .infinity, minHeight: 160)
+                            .accessibilityIdentifier("lifecycle-above-player")
+                        playback
+                        ForEach(0..<12) { index in
+                            Text("评论 \(index)").frame(maxWidth: .infinity, minHeight: 60)
+                                .accessibilityIdentifier("lifecycle-comment-\(index)")
+                        }
+                    }
+                }
+            } else {
+                playback
+            }
         }.onReceive(timer) { _ in
             let time = model.player.currentTime().seconds
             if time.isFinite { position = time }

@@ -57,14 +57,29 @@ enum class ImageLoadState { LOADING, READY, FAILED }
         }
     }
 }
-@Composable fun VideoCard(video: Video, onTitleClick: (() -> Unit)? = null, onClick: () -> Unit) {
+@Composable fun VideoCard(video: Video, onTitleClick: (() -> Unit)? = null, overlay: (@Composable BoxScope.() -> Unit)? = null, showMetadataBelowTitle: Boolean = true, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().then(if (onTitleClick==null) Modifier.clickable(onClick=onClick) else Modifier)) {
         Box(Modifier.fillMaxWidth().then(if (onTitleClick!=null) Modifier.clickable(onClick=onClick) else Modifier).aspectRatio(16f/9).clip(RoundedCornerShape(8.dp))) {
             RemoteImage(video.cover,video.title,Modifier.fillMaxSize())
+            if (!showMetadataBelowTitle && video.views > 0) {
+                Row(
+                    modifier = Modifier.align(Alignment.BottomStart).padding(5.dp)
+                        .background(Color.Black.copy(alpha = .6f), RoundedCornerShape(3.dp))
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(Icons.Rounded.PlayArrow, "播放量", Modifier.size(13.dp), tint = Color.White)
+                    Text(count(video.views), color = Color.White, fontSize = 11.sp)
+                }
+            }
             Text(clock(video.duration),Modifier.align(Alignment.BottomEnd).padding(5.dp).background(Color.Black.copy(alpha=.6f),RoundedCornerShape(3.dp)).padding(horizontal=4.dp,vertical=1.dp),color=Color.White,fontSize=11.sp)
+            overlay?.invoke(this)
         }
         Text(video.title,Modifier.padding(top=7.dp).then(if (onTitleClick!=null) Modifier.fillMaxWidth().heightIn(min=44.dp).clickable(onClick=onTitleClick) else Modifier),maxLines=2,overflow=TextOverflow.Ellipsis,fontSize=14.sp,lineHeight=20.sp)
-        Text(video.owner.name + if (video.views > 0) " · ${count(video.views)}播放" else "",Modifier.padding(top=4.dp),fontSize=11.sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
+        if (showMetadataBelowTitle) {
+            Text(video.owner.name + if (video.views > 0) " · ${count(video.views)}播放" else "",Modifier.padding(top=4.dp),fontSize=11.sp,color=Muted,maxLines=1,overflow=TextOverflow.Ellipsis)
+        }
     }
 }
 @Composable fun ErrorNotice(error: String?, retry: (() -> Unit)? = null) {

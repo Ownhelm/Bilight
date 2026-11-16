@@ -9,13 +9,14 @@ import type { AuthService } from './auth.js';
 import type { BiliGateway } from './gateway.js';
 import { MediaRegistry } from './media.js';
 import { isVideoSearchOrder } from '../shared/types.js';
-import type { SmsSend, User, VideoSummary, Comment, EngagementAction, WatchProgress, VideoDynamic } from '../shared/types.js';
+import type { SmsSend, User, VideoSummary, Comment, CommentSubmission, EngagementAction, WatchProgress, VideoDynamic } from '../shared/types.js';
 
 export interface AppOptions { auth: AuthService; gateway: BiliGateway; key: Buffer; media?: MediaRegistry; staticDir?: string; allowedOrigins?: string[] }
 const fail = (code: string, message: string, status = 400) => Object.assign(new Error(message), { code, status });
 const text = (value: unknown, max = 200) => typeof value === 'string' && value.length <= max ? value : '';
 const number = (value: unknown, fallback = 1) => Number.isSafeInteger(Number(value)) && Number(value) > 0 ? Number(value) : fallback;
 const bvidOf = (value: unknown) => { if (!/^BV[0-9A-Za-z]{10}$/.test(String(value))) throw fail('INVALID_VIDEO', '视频 BV 号不正确。'); return String(value); };
+const interactiveWrite = /\/(triple|interaction|favorite-folders|like|comments)$/;
 
 export async function createApp(options: AppOptions) {
   const { auth, gateway } = options;
@@ -40,11 +41,11 @@ export async function createApp(options: AppOptions) {
     const valid = !!token && request.unsignCookie(token).valid;
     if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(request.method)) {
       if (!valid || !origins.has(request.headers.origin ?? '') || request.headers['x-bilight-request'] !== '1') throw fail('INVALID_ORIGIN', '请刷新 Bilight 页面后重试。', 403);
-      if (route.startsWith('/api/auth/') || /\/(triple|interaction|favorite-folders|like)$/.test(route)) {
+      if (route.startsWith('/api/auth/') || interactiveWrite.test(route)) {
         const key = route;
         const now = Date.now();
         const attempts = (limits.get(key) ?? []).filter(at => now - at < 60000);
-        const max = key === '/api/auth/sms/send' ? 2 : /\/(triple|interaction|favorite-folders|like)$/.test(key) ? 10 : 20;
+        const max = key === '/api/auth/sms/send' ? 2 : interactiveWrite.test(key) ? 10 : 20;
         if (attempts.length >= max) throw fail('TOO_MANY_REQUESTS', '操作过于频繁，请稍后再试。', 429);
         attempts.push(now); limits.set(key, attempts);
       }
@@ -65,9 +66,35 @@ export async function createApp(options: AppOptions) {
 
   const userImage = <T extends User>(user: T): T => ({ ...user, avatar: media.image(user.avatar) });
   const videoImages = <T extends VideoSummary>(video: T): T => ({ ...video, cover: media.image(video.cover), owner: userImage(video.owner) });
-  const commentImages = (comment: Comment): Comment => ({ ...comment, user: userImage(comment.user), replies: comment.replies.map(commentImages) });
+  const commentImages = ({ emotes, ...comment }: Comment): Comment => {
+    const images = Object.entries(emotes ?? {}).flatMap(([token, url]) => {
+      const source = media.image(url);
+      return source ? [[token, source] as const] : [];
+    });
+    return {
+      ...comment, user: userImage(comment.user), replies: comment.replies.map(commentImages),
+      ...(images.length ? { emotes: Object.fromEntries(images) } : {}),
+    };
+  };
   const dynamicImages = (post: VideoDynamic): VideoDynamic => ({ ...post, author: userImage(post.author), video: videoImages(post.video) });
   const requireLogin = async () => { if (!(await auth.state()).authenticated) throw fail('LOGIN_REQUIRED', '登录 B 站后即可使用此功能。', 401); };
+  const requireWatchLaterAccount = async (mid: unknown) => {
+    const state = await auth.state();
+    if (!state.authenticated || !state.user) throw fail('LOGIN_REQUIRED', '登录 B 站后即可使用稍后再看。', 401);
+    if (mid !== state.user.mid) throw fail('ACCOUNT_CHANGED', 'B 站账号已切换，请重新打开稍后再看。', 409);
+    return state.user.mid;
+  };
+  const requireCommentAccount = async (mid: unknown) => {
+    const state = await auth.state();
+    if (!state.authenticated || !state.user) throw fail('LOGIN_REQUIRED', '登录 B 站后即可参与评论。', 401);
+    if (mid !== state.user.mid) throw fail('ACCOUNT_CHANGED', 'B 站账号已切换，请刷新页面。', 409);
+    return state.user.mid;
+  };
+  const findCommentUsers = async (q: unknown) => {
+    await requireLogin();
+    if (typeof q !== 'string' || q.length > 80 || /[\u0000-\u001f\u007f]/.test(q)) throw fail('INVALID_MENTION', '@ 用户搜索词无效。');
+    return { items: (await gateway.commentMentionUsers(q.trim())).map(userImage) };
+  };
 
   app.get('/health', async () => ({ ok: true, service: 'bilight' }));
   app.get('/api/auth/state', async () => { const state = await auth.state(); return { ...state, ...(state.user ? { user: userImage(state.user) } : {}) }; });
@@ -112,6 +139,30 @@ export async function createApp(options: AppOptions) {
     if (request.query.source && request.query.source !== 'bilibili') throw fail('INVALID_SOURCE', '历史记录已统一到 B 站，请刷新页面。');
     const result = await gateway.history(cursor, Math.min(20, number(request.query.limit, 20)));
     return { ...result, items: result.items.map(videoImages) };
+  });
+  app.get<{ Querystring: { page?: string; accountMid?: string } }>('/api/watch-later', async request => {
+    const mid = await requireWatchLaterAccount(number(request.query.accountMid, 0));
+    const result = await gateway.watchLater(request.query.page === undefined ? 1 : number(request.query.page, 0), mid);
+    await requireWatchLaterAccount(mid);
+    return { ...result, items: result.items.map(videoImages) };
+  });
+  app.get<{ Querystring: { accountMid?: string; refresh?: string } }>('/api/watch-later/membership', async request => {
+    const mid = await requireWatchLaterAccount(number(request.query.accountMid, 0));
+    const result = await gateway.watchLaterMembership(mid, request.query.refresh === '1');
+    await requireWatchLaterAccount(mid);
+    return result;
+  });
+  app.put<{ Params: { aid: string }; Body: { accountMid: number; saved: boolean } }>('/api/watch-later/:aid', async request => {
+    const mid = await requireWatchLaterAccount(request.body?.accountMid);
+    const result = await gateway.setWatchLater(number(request.params.aid, 0), request.body.saved, mid);
+    await requireWatchLaterAccount(mid);
+    return result;
+  });
+  app.delete<{ Body: { accountMid: number; aids: number[] } }>('/api/watch-later', async request => {
+    const mid = await requireWatchLaterAccount(request.body?.accountMid);
+    const result = await gateway.removeWatchLater(request.body.aids, mid);
+    await requireWatchLaterAccount(mid);
+    return result;
   });
   app.post<{ Body: WatchProgress }>('/api/history', async request => {
     const sequence = ++historySequence;
@@ -209,9 +260,49 @@ export async function createApp(options: AppOptions) {
     return { ...result, items: result.items.map(commentImages) };
   });
 
+  app.get<{ Params: { bvid: string }; Querystring: { q?: string } }>('/api/videos/:bvid/comments/mention-users', async request => {
+    bvidOf(request.params.bvid);
+    return findCommentUsers(request.query.q ?? '');
+  });
+
+  app.post<{ Params: { bvid: string }; Body: CommentSubmission }>('/api/videos/:bvid/comments', async request => {
+    await requireCommentAccount(request.body?.accountMid);
+    return commentImages(await gateway.postVideoComment(bvidOf(request.params.bvid), request.body));
+  });
+
+  app.post<{ Params: { bvid: string; id: string }; Body: { liked: boolean; accountMid: number } }>('/api/videos/:bvid/comments/:id/like', async request => {
+    const mid = await requireCommentAccount(request.body?.accountMid);
+    return gateway.setVideoCommentLike(bvidOf(request.params.bvid), request.params.id, request.body?.liked, mid);
+  });
+
   app.get<{ Params: { bvid: string; root: string }; Querystring: { page?: string } }>('/api/videos/:bvid/comments/:root/replies', async request => {
     const detail = await gateway.video(bvidOf(request.params.bvid));
     const result = await gateway.commentReplies(detail.aid, request.params.root, number(request.query.page));
+    return { ...result, items: result.items.map(commentImages) };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { page?: string; cursor?: string } }>('/api/dynamics/:id/comments', async request => {
+    const result = await gateway.dynamicComments(request.params.id, Math.min(1000, number(request.query.page)), text(request.query.cursor, 4096) || undefined);
+    return { ...result, items: result.items.map(commentImages) };
+  });
+
+  app.get<{ Params: { id: string }; Querystring: { q?: string } }>('/api/dynamics/:id/comments/mention-users', async request => {
+    if (!/^[1-9]\d{0,31}$/.test(request.params.id)) throw fail('INVALID_DYNAMIC', '动态编号无效。');
+    return findCommentUsers(request.query.q ?? '');
+  });
+
+  app.post<{ Params: { id: string }; Body: CommentSubmission }>('/api/dynamics/:id/comments', async request => {
+    await requireCommentAccount(request.body?.accountMid);
+    return commentImages(await gateway.postDynamicComment(request.params.id, request.body));
+  });
+
+  app.post<{ Params: { id: string; commentId: string }; Body: { liked: boolean; accountMid: number } }>('/api/dynamics/:id/comments/:commentId/like', async request => {
+    const mid = await requireCommentAccount(request.body?.accountMid);
+    return gateway.setDynamicCommentLike(request.params.id, request.params.commentId, request.body?.liked, mid);
+  });
+
+  app.get<{ Params: { id: string; root: string }; Querystring: { page?: string } }>('/api/dynamics/:id/comments/:root/replies', async request => {
+    const result = await gateway.dynamicCommentReplies(request.params.id, request.params.root, number(request.query.page));
     return { ...result, items: result.items.map(commentImages) };
   });
 

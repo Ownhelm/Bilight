@@ -43,17 +43,26 @@ class PlaybackEndStateTest {
                 })[AppModel::class.java]
                 model=owner.playback(Route.Watch("BV12qnt6VEM1"))
             }
-            var ended=false; val deadline=android.os.SystemClock.elapsedRealtime()+10000
-            while (!ended && android.os.SystemClock.elapsedRealtime()<deadline) {
-                instrumentation.runOnMainSync { ended=model.player.playbackState==Player.STATE_ENDED }; if (!ended) Thread.sleep(25)
+            fun awaitEnd() {
+                var ended=false; val deadline=android.os.SystemClock.elapsedRealtime()+10000
+                while (!ended && android.os.SystemClock.elapsedRealtime()<deadline) {
+                    instrumentation.runOnMainSync { ended=model.player.playbackState==Player.STATE_ENDED }; if (!ended) Thread.sleep(25)
+                }
+                assertTrue("The short native video did not reach its real end",ended)
             }
-            assertTrue("The short native video did not reach its real end",ended)
+            awaitEnd()
             instrumentation.runOnMainSync {
                 assertFalse(model.hasFrame)
                 assertFalse("The finished video incorrectly kept showing loading",model.buffering)
                 model.toggle()
                 assertTrue("Replaying an ended video required a second tap",model.player.playWhenReady)
                 assertEquals(0L,model.player.currentPosition)
+            }
+            awaitEnd()
+            instrumentation.runOnMainSync {
+                model.seek(250)
+                assertEquals(250L,model.player.currentPosition)
+                assertFalse("Seeking back from the end must not start playback",model.player.playWhenReady)
             }
         } finally { instrumentation.runOnMainSync { owner.releasePlayback(model); store.clear() }; file.delete() }
     }

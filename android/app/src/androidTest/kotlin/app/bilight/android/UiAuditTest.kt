@@ -2,9 +2,11 @@
 package app.bilight.android
 
 import androidx.activity.ComponentActivity
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.*
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
@@ -28,6 +30,7 @@ import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import java.io.File
+import java.util.concurrent.CountDownLatch
 
 /** Opt-in only: exercise production screens with local fixtures, never the connected phone/account. */
 class UiAuditTest {
@@ -75,6 +78,185 @@ class UiAuditTest {
             }
             rule.waitUntil(5000) { !model.restoring }
             rule.setContent { CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density,scale)) { MainApp(model) } }
+            if (arguments.getString("dynamicCommentsOnly")=="true") {
+                fixtures.dynamicCommentAudit=true
+                open(Route.Dynamic(fixtures.posts().first().copy(commentId=null,commentType=0)))
+                rule.waitUntil(5000) { rule.onAllNodesWithTag("video-comment-open").fetchSemanticsNodes().isNotEmpty() }
+                rule.onNodeWithTag("video-comment-open").assertIsEnabled().performClick()
+                rule.onNodeWithTag("video-comment-text").assertIsDisplayed()
+                rule.onNodeWithContentDescription("关闭评论窗口").performTouchInput { click(percentOffset(0.5f,0.15f)) }
+                rule.onNodeWithTag("video-comment-text").assertDoesNotExist()
+                rule.onNode(hasScrollAction()).performScrollToNode(hasTestTag("comment-expand-301"))
+                rule.onNodeWithTag("comment-expand-301").performClick()
+                rule.waitUntil(5000) { rule.onAllNodesWithTag("video-comment-reply-302").fetchSemanticsNodes().isNotEmpty() }
+                rule.onNodeWithTag("video-comment-like-302").assertIsEnabled()
+                rule.onNodeWithTag("video-comment-reply-302").assertIsEnabled().performClick()
+                rule.onNodeWithText("回复 ${fixtures.creators[2].name}").assertIsDisplayed()
+                rule.onNodeWithTag("video-comment-text").assertIsDisplayed()
+                rule.onNodeWithText("取消").performClick()
+                rule.onNodeWithTag("video-comment-text").assertDoesNotExist()
+                assertFalse(fixtures.requests.any { it.contains("/x/player/") })
+                return
+            }
+            if (arguments.getString("darkFollowingOnly") == "true") {
+                val previousDark = model.darkAppearance
+                val heldRead = CountDownLatch(1)
+                val darkBars = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT)
+                fun darkCapture(name: String) {
+                    rule.onNodeWithTag("following-header-divider").assertDoesNotExist()
+                    capture(name)
+                    val bitmap = android.graphics.BitmapFactory.decodeFile(File(folder, "$name.png").absolutePath)
+                    try {
+                        val surface = android.graphics.Color.rgb(21, 22, 28)
+                        assertEquals("The following surface must stay dark in $name", surface, bitmap.getPixel(bitmap.width / 8, bitmap.height / 2))
+                    } finally { bitmap.recycle() }
+                }
+                try {
+                    rule.runOnIdle {
+                        if (!model.darkAppearance) model.toggleAppearance()
+                        rule.activity.enableEdgeToEdge(statusBarStyle = darkBars, navigationBarStyle = darkBars)
+                        model.enterFollowing()
+                    }
+                    rule.waitUntil(5000) { model.feedLoaded && !model.feedBusy }
+                    rule.onNodeWithText("暂无关注动态").assertIsDisplayed()
+                    darkCapture("01-empty")
+
+                    fixtures.feedReadGate = heldRead
+                    fixtures.blocked.add("/x/polymer/web-dynamic/v1/feed/all")
+                    rule.runOnIdle { model.enterFollowing() }
+                    rule.onNodeWithContentDescription("正在刷新关注动态").assertIsDisplayed()
+                    darkCapture("02-refresh")
+                    heldRead.countDown()
+                    rule.waitUntil(5000) { model.feedError != null && !model.feedBusy }
+                    rule.onNodeWithText("重试").assertIsDisplayed()
+                    darkCapture("03-error")
+
+                    rule.runOnIdle { model.following.add(fixtures.posts().first()) }
+                    rule.onNodeWithTag("following-header-divider").assertExists()
+                    rule.runOnIdle { model.update(null) }
+                    rule.onNodeWithText("登录后查看关注动态").assertIsDisplayed()
+                    darkCapture("04-signed-out")
+                } finally {
+                    heldRead.countDown()
+                    fixtures.feedReadGate = null
+                    rule.runOnIdle { if (model.darkAppearance != previousDark) model.toggleAppearance() }
+                }
+                return
+            }
+            if (arguments.getString("creatorWatchLaterOnly") == "true") {
+                val creator = fixtures.creators.first()
+                val video = fixtures.videos.first { it.owner.mid == creator.mid }
+                val tag = "watch-later-${video.bvid}"
+                val button = rule.onNodeWithTag(tag)
+                fun state(saved: Boolean) {
+                    rule.waitUntil(5000) { model.watchLater.saved(video) == saved && rule.onAllNodesWithTag(tag).fetchSemanticsNodes().isNotEmpty() }
+                    button.assertIsDisplayed().assert(SemanticsMatcher.expectValue(
+                        SemanticsProperties.StateDescription, if (saved) "已加入" else "未加入",
+                    ))
+                }
+                val homepage = Route.Creator(creator)
+                open(homepage)
+                state(false)
+                button.performClick()
+                state(true)
+                rule.runOnIdle { assertEquals(homepage, model.routes.last()) }
+
+                click("合集和列表")
+                click("旅行影像：在路上的每一个故事")
+                state(true)
+                button.performClick()
+                state(false)
+                rule.runOnIdle {
+                    val group = model.routes.last() as Route.Catalog
+                    assertFalse(group.collection.series)
+                    model.back()
+                }
+
+                click("创作笔记与摄影基础")
+                state(false)
+                button.performClick()
+                state(true)
+                rule.runOnIdle { assertTrue((model.routes.last() as Route.Catalog).collection.series) }
+                open(Route.WatchLater)
+                rule.waitUntil(5000) { model.watchLater.items.any { it.aid == video.aid } }
+                rule.onNodeWithText(video.title).assertIsDisplayed()
+                assertEquals(2, fixtures.requests.count { it == "POST /x/v2/history/toview/add" })
+                assertEquals(1, fixtures.requests.count { it == "POST /x/v2/history/toview/del" })
+                return
+            }
+            if (arguments.getString("watchLaterNoticeOnly") == "true") {
+                val video = fixtures.videos.first()
+                val tag = "watch-later-${video.bvid}"
+                open(Route.Watch(video.bvid))
+                val button = rule.onNodeWithTag(tag)
+                rule.waitUntil(5000) { model.watchLater.saved(video) == false }
+                fun toggle() {
+                    if (rule.onAllNodesWithTag(tag).fetchSemanticsNodes().isEmpty()) {
+                        rule.onNodeWithContentDescription("视频画面").performClick()
+                    }
+                    button.assertIsDisplayed().assertIsEnabled().performClick()
+                }
+                fun notice(text: String) {
+                    rule.waitUntil(3000) { rule.onAllNodesWithText(text).fetchSemanticsNodes().isNotEmpty() }
+                    rule.onNodeWithText(text).assertIsDisplayed()
+                }
+                toggle()
+                rule.waitUntil(5000) { model.watchLater.saved(video) == true && !model.watchLater.pending(video) }
+                notice("已添加到稍后再看")
+                capture("watch-later-added")
+                toggle()
+                rule.waitUntil(5000) { model.watchLater.saved(video) == false && !model.watchLater.pending(video) }
+                notice("已从稍后再看移除")
+                capture("watch-later-removed")
+                rule.waitUntil(5000) { rule.onAllNodesWithTag("watch-later-notification").fetchSemanticsNodes().isEmpty() }
+                assertEquals(1, fixtures.requests.count { it == "POST /x/v2/history/toview/add" })
+                assertEquals(1, fixtures.requests.count { it == "POST /x/v2/history/toview/del" })
+                open(Route.WatchLater)
+                rule.waitUntil(5000) { model.watchLater.loaded && !model.watchLater.loading }
+                rule.onNodeWithContentDescription("移出稍后再看").assertIsDisplayed().assertHasClickAction()
+                capture("watch-later-list")
+                return
+            }
+            if (arguments.getString("watchLaterOnly") == "true") {
+                val video = fixtures.videos.first()
+                rule.runOnIdle { model.keyword = video.title.take(6); model.search() }
+                rule.waitUntil(5000) { !model.searchBusy && model.watchLater.saved(video) == false }
+                val button = rule.onNodeWithTag("watch-later-${video.bvid}")
+                button.assertIsDisplayed().performClick()
+                rule.waitUntil(5000) { model.watchLater.saved(video) == true }
+                rule.onNodeWithText("已添加到稍后再看").assertIsDisplayed()
+                rule.runOnIdle { assertTrue("The cover action must not open playback", model.routes.isEmpty()); model.showAccount = true }
+                val favorites = rule.onNodeWithText("我的收藏").getUnclippedBoundsInRoot()
+                val watchLater = rule.onNodeWithText("稍后再看").getUnclippedBoundsInRoot()
+                val downloads = rule.onNodeWithText("我的下载").getUnclippedBoundsInRoot()
+                assertTrue(favorites.top < watchLater.top && watchLater.top < downloads.top)
+                click("稍后再看")
+                rule.waitUntil(5000) { model.watchLater.items.firstOrNull()?.aid == video.aid && !model.watchLater.loading }
+                assertEquals(Route.Watch(video.bvid, progress = 31, cid = 30002), model.watchLater.items.first().route)
+                rule.onAllNodesWithContentDescription("移出稍后再看").onFirst().performClick()
+                rule.waitUntil(5000) { model.watchLater.saved(video) == false }
+                rule.onNodeWithText("撤销").performClick()
+                rule.waitUntil(5000) { model.watchLater.saved(video) == true }
+                capture("watch-later-list")
+                val repost = fixtures.posts().first { it.original?.video?.aid == video.aid }
+                open(Route.Dynamic(repost))
+                button.assertIsDisplayed().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "已加入"))
+                capture("watch-later-repost")
+                assertEquals(2, fixtures.requests.count { it == "POST /x/v2/history/toview/add" })
+                assertEquals(1, fixtures.requests.count { it == "POST /x/v2/history/toview/del" })
+                open(Route.WatchLater)
+                rule.waitUntil(5000) { model.watchLater.items.size == 2 && !model.watchLater.loading }
+                click("管理")
+                click(video.title)
+                click(fixtures.videos.last().title)
+                click("移除")
+                rule.onNode(hasText("移除") and hasAnyAncestor(isDialog())).performClick()
+                rule.waitUntil(5000) { model.watchLater.items.isEmpty() && !model.watchLater.writing }
+                rule.onNodeWithText("暂无稍后再看的视频").assertIsDisplayed()
+                val removal = fixtures.requests.indexOf("POST /x/v2/history/toview/v2/dels")
+                assertTrue(removal >= 0 && fixtures.requests.lastIndexOf("GET /x/v2/history/toview/web") > removal)
+                return
+            }
             if (arguments.getString("searchFilterOnly") == "true") {
                 val wasEnabled = model.searchTitleOnly
                 try {
@@ -123,7 +305,27 @@ class UiAuditTest {
                 fixtures.empty=false; fixtures.blocked.add("/x/web-interface/wbi/search/type"); rule.runOnIdle { model.search() }; rule.waitUntil(5000) { !model.searchBusy }; capture("05-search-error")
                 fixtures.blocked.clear()
             }
-            rule.runOnIdle { model.searched=false; model.keyword=""; model.tab=1 }
+            val tabRole = SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab)
+            val searchTab = rule.onNode(hasText("搜索") and tabRole)
+            val followingTab = rule.onNode(hasText("关注") and tabRole)
+            searchTab.performClick()
+            rule.onNodeWithText("搜你所想，看你所选").assertIsDisplayed()
+            rule.runOnIdle {
+                assertEquals("", model.keyword)
+                assertFalse(model.searchUsers)
+                assertNull(model.searchError)
+                model.keyword = "旅行"
+                model.search()
+            }
+            rule.waitUntil(5000) { !model.searchBusy }
+            rule.onNodeWithText("UP 主").assertIsDisplayed()
+            followingTab.performClick()
+            rule.onNodeWithText("我的关注").assertIsDisplayed()
+            searchTab.performClick()
+            rule.onNodeWithText("搜你所想，看你所选").assertIsDisplayed()
+            rule.runOnIdle { assertEquals("", model.keyword) }
+            if (arguments.getString("searchNavigationOnly") == "true") return
+            followingTab.performClick()
             rule.waitUntil(5000) { model.feedLoaded && !model.feedBusy }
             val posts=fixtures.posts()
             rule.runOnIdle { model.following.add(posts[0]) }; capture("06-feed-photo-collapsed")

@@ -1,4 +1,93 @@
 {
+  "/x/v2/history/toview/web": {
+    "count": 3,
+    "list": [
+      {
+        "aid": 117489837016867,
+        "bvid": "BV12qnt6VEM1",
+        "title": "人性、欲望与奇观，自驾拉斯维加斯，现实夜之城什么样？",
+        "duration": 1542,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV12qnt6VEM1.jpg",
+        "owner": {
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "cid": 42989062102,
+        "stat": {
+          "view": 4427267,
+          "like": 178495,
+          "coin": 65515,
+          "favorite": 49647,
+          "reply": 3989,
+          "share": 5853
+        },
+        "progress": 0,
+        "add_at": 1792922400
+      },
+      {
+        "aid": 117053428075107,
+        "bvid": "BV1rRut6rEGS",
+        "title": "在洛杉矶喝200%糖蜜雪冰城，吃全球最古早麦当劳，有不胖的风险吗",
+        "duration": 1745,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1rRut6rEGS.jpg",
+        "owner": {
+          "mid": 383578614,
+          "name": "超Carry的柴西",
+          "uname": "超Carry的柴西",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-383578614.jpg",
+          "sign": "国内旅行徒步/互联网脚替",
+          "fans": 2640503,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "cid": 40682719112,
+        "stat": {
+          "view": 8313534,
+          "like": 275805,
+          "coin": 98772,
+          "favorite": 85313,
+          "reply": 5053,
+          "share": 10088
+        },
+        "progress": 0,
+        "add_at": 1792918800
+      },
+      {
+        "aid": 115881958973309,
+        "bvid": "BV1qCrYB4Ekb",
+        "title": "人均20万去了趟南极！但…… ｜南极【上】",
+        "duration": 1806,
+        "pic": "https://i0.hdslb.com/bilight-demo/demo-public-cover-BV1qCrYB4Ekb.jpg",
+        "owner": {
+          "mid": 37029661,
+          "name": "小鹿Lawrence",
+          "uname": "小鹿Lawrence",
+          "face": "https://i0.hdslb.com/bilight-demo/demo-public-avatar-37029661.jpg",
+          "sign": "独立导演 / 摄影师 / 配音演员",
+          "fans": 2300473,
+          "attribute": 2,
+          "mtime": 1792922400
+        },
+        "cid": 35711617240,
+        "stat": {
+          "view": 2450108,
+          "like": 114576,
+          "coin": 86439,
+          "favorite": 39092,
+          "reply": 2976,
+          "share": 17065
+        },
+        "progress": 0,
+        "add_at": 1792915200
+      }
+    ]
+  },
   "/x/web-interface/wbi/view": {
     "bvid": "BV12qnt6VEM1",
     "aid": 117489837016867,

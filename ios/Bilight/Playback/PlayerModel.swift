@@ -14,6 +14,18 @@ final class PlaybackPreferences {
         get { DanmakuArea(rawValue: defaults.double(forKey: "bilight.playback.danmakuArea")) ?? .full }
         set { defaults.set(newValue.rawValue, forKey: "bilight.playback.danmakuArea") }
     }
+    static let danmakuOpacityOptions: [CGFloat] = [0.5, 0.75, 1]
+    var danmakuOpacity: CGFloat {
+        get {
+            let value = CGFloat(defaults.double(forKey: "bilight.playback.danmakuOpacity"))
+            return Self.danmakuOpacityOptions.contains(value) ? value : 1
+        }
+        set {
+            if Self.danmakuOpacityOptions.contains(newValue) {
+                defaults.set(Double(newValue), forKey: "bilight.playback.danmakuOpacity")
+            }
+        }
+    }
     var subtitlesEnabled: Bool {
         get { defaults.object(forKey: "bilight.playback.subtitlesEnabled") as? Bool ?? true }
         set { defaults.set(newValue, forKey: "bilight.playback.subtitlesEnabled") }
@@ -57,6 +69,9 @@ final class PlaybackPreferences {
     @Published var danmakuArea: DanmakuArea = .full {
         didSet { preferences.danmakuArea = danmakuArea }
     }
+    @Published var danmakuOpacity: CGFloat = 1 {
+        didSet { preferences.danmakuOpacity = danmakuOpacity }
+    }
     @Published var danmakuItems: [Danmaku] = []
     @Published var danmakuRevision = UUID()
     @Published var danmakuError: String?
@@ -97,6 +112,7 @@ final class PlaybackPreferences {
         self.subtitleConfiguration = subtitleConfiguration
         danmakuEnabled = preferences.danmakuEnabled
         danmakuArea = preferences.danmakuArea
+        danmakuOpacity = preferences.danmakuOpacity
         danmakuFontSize = preferences.fontSize
         rate = preferences.rate
         player.defaultRate = rate

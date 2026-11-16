@@ -3,6 +3,7 @@ import { ArrowLeft, Stack } from '@phosphor-icons/react';
 import type { CollectionKind, CollectionPage, CreatorCollection, CreatorSummary, Page } from '../shared/types';
 import { Empty, Failure, Loading, Pagination, VideoGrid } from './components';
 import { useBrowsingResource } from './browsing';
+import { WatchLaterButton } from './WatchLater';
 
 export function CreatorCollections({ mid, page, refresh, onRetry, onPage }: { mid: string; page: number; refresh: number; onRetry: () => void; onPage: (page: number) => void }) {
   const { data, error, loading } = useBrowsingResource<Page<CreatorCollection>>(`/api/creators/${encodeURIComponent(mid)}/collections?page=${page}`, refresh);
@@ -17,6 +18,6 @@ export function CreatorCollectionVideos({ mid, kind, id, page, profile, refresh,
   const { data, error, loading } = useBrowsingResource<CollectionPage>(`/api/creators/${encodeURIComponent(mid)}/collections/${kind}/${encodeURIComponent(id)}?page=${page}`, refresh);
   const videos = data?.items.map(video => profile && !video.owner.name ? { ...video, owner: profile } : video);
   return <section className="collection-detail"><Link className="back-link" to={`/creator/${mid}?tab=collections`}><ArrowLeft size={15} />返回合集和列表</Link>
-    {loading ? <Loading text="正在读取列表视频" /> : error ? <Failure error={error} retry={onRetry} /> : data && <><div className="collection-title"><span className="collection-kind">{kind === 'season' ? '合集' : '视频列表'}</span><h2>{data.collection.title}</h2><span>{data.collection.count} 个视频</span></div>{data.collection.description && <p className="collection-description">{data.collection.description}</p>}<p className="collection-order">按列表顺序展示，手动选择播放。</p>{videos?.length ? <VideoGrid videos={videos} /> : <Empty title="这个分组暂时没有可播放的视频" />}<Pagination page={page} hasMore={data.hasMore} onChange={onPage} /></>}
+    {loading ? <Loading text="正在读取列表视频" /> : error ? <Failure error={error} retry={onRetry} /> : data && <><div className="collection-title"><span className="collection-kind">{kind === 'season' ? '合集' : '视频列表'}</span><h2>{data.collection.title}</h2><span>{data.collection.count} 个视频</span></div>{data.collection.description && <p className="collection-description">{data.collection.description}</p>}<p className="collection-order">按列表顺序展示，手动选择播放。</p>{videos?.length ? <VideoGrid videos={videos} renderCoverAction={video => <WatchLaterButton aid={video.aid} />} /> : <Empty title="这个分组暂时没有可播放的视频" />}<Pagination page={page} hasMore={data.hasMore} onChange={onPage} /></>}
   </section>;
 }

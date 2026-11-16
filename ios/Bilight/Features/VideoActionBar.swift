@@ -96,7 +96,7 @@ struct VideoActionBar: View {
     private var likeControl: some View {
         actionIcon(.like, count: support.statistics?.likes, title: "点赞", selected: support.state?.liked == true)
             .overlay {
-                LikePressTarget(enabled: enabled, label: "点赞，\(support.statistics.map { countLabel($0.likes) } ?? "数量暂不可用")", onTap: like, onTriple: { write(.triple) }, onCharge: setCharging, canHold: canTriple)
+                LikePressTarget(enabled: enabled, label: "点赞，\(support.statistics.map { String($0.likes) } ?? "数量暂不可用")", onTap: like, onTriple: { write(.triple) }, onCharge: setCharging, canHold: canTriple)
             }
     }
     private var coinControl: some View {
@@ -130,10 +130,10 @@ struct VideoActionBar: View {
                             .rotationEffect(.degrees(-90)).frame(width: 34 * iconSize / 22, height: 34 * iconSize / 22)
                     }
                 }
-            Text(count.map(countLabel) ?? "—").font(.system(size: countSize)).foregroundStyle(selected ? Color.biliPink : Color.biliMuted)
+            Text(count.map { String($0) } ?? "—").font(.system(size: countSize)).foregroundStyle(selected ? Color.biliPink : Color.biliMuted)
                 .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
         }.frame(minWidth: 44, maxWidth: .infinity, minHeight: max(44, actionHeight)).contentShape(Rectangle())
-            .accessibilityElement(children: .ignore).accessibilityLabel("\(title)，\(count.map(countLabel) ?? "数量暂不可用")")
+            .accessibilityElement(children: .ignore).accessibilityLabel("\(title)，\(count.map { String($0) } ?? "数量暂不可用")")
     }
     private func like() {
         guard network.available else { return }
@@ -249,7 +249,7 @@ struct VideoShareSheet: View {
     private var content: some View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 4) {
-                Button { UIPasteboard.general.url = url; onClose(); onCopied() } label: { option("复制链接", icon: "link") }
+                Button { UIPasteboard.general.string = "\(title)\n\(url.absoluteString)"; onClose(); onCopied() } label: { option("复制链接", icon: "link") }
                 Button(action: onSystemShare) { option("系统分享", icon: "square.and.arrow.up") }
             }.padding(.horizontal, 24).padding(.top, 20).padding(.bottom, 16)
             Rectangle().fill(colorScheme == .dark ? Color.biliBackground : Color(white: 0.965)).frame(height: 6)
@@ -368,7 +368,11 @@ private struct FavoriteActionSheet: View {
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) { Button("取消") { dismiss() } }
                     ToolbarItem(placement: .confirmationAction) {
-                        Button("确定") { Task { if await support.write(client: app.client, bvid: bvid, action: .favorite(selected.sorted())) { dismiss() } } }
+                        Button("确定") {
+                            let folders = selected.sorted()
+                            dismiss()
+                            Task { _ = await support.write(client: app.client, bvid: bvid, action: .favorite(folders)) }
+                        }
                             .disabled(busy || !changed || support.busy)
                     }
                 }.task { await load() }

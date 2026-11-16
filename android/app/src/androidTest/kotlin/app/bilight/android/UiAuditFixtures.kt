@@ -5,10 +5,13 @@ import app.bilight.android.core.*
 import okhttp3.*
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.ResponseBody.Companion.toResponseBody
+import okio.Buffer
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 /** Offline public snapshots and an isolated account; every API write is intercepted in memory. */
 internal class UiAuditFixtures(private val context: Context) {
@@ -19,8 +22,11 @@ internal class UiAuditFixtures(private val context: Context) {
     val videos=snapshot.rows("videos").map { r -> Video(r.getString("bvid"),r.getLong("aid"),r.getString("title"),image(r.getString("cover")),r.getLong("duration"),r.getLong("publishedAt"),creators.first { it.mid==r.getLong("ownerMid") },r.obj("statistics").optLong("view"),1920,1080) }
     val requests=CopyOnWriteArrayList<String>()
     val blocked=mutableSetOf<String>()
+    @Volatile var feedReadGate: CountDownLatch? = null
+    val watchLater=CopyOnWriteArrayList<Long>(listOf(videos.last().aid))
     var empty=false
     var portrait=false
+    var dynamicCommentAudit=false
     private val clip=File(root,"fixture.mp4").also { if (!it.exists()) encodedFixture(it,false) }.readBytes()
     private fun image(path: String)="https://i0.hdslb.com/ui-audit/${path.substringAfterLast('/')}"
     fun user(value: User)=JSONObject().put("mid",value.mid).put("name",value.name).put("uname",value.name).put("face",value.avatar).put("sign","用影像记录生活，分享认真观察后的故事。").put("attribute",2)
@@ -39,6 +45,7 @@ internal class UiAuditFixtures(private val context: Context) {
     }
     private fun api(request: Request): JSONObject {
         val path=request.url.encodedPath; requests+=request.method+" "+path
+        if (path == "/x/polymer/web-dynamic/v1/feed/all") check(feedReadGate?.await(8, TimeUnit.SECONDS) != false)
         if (path in blocked) return JSONObject().put("code",-352).put("message","暂时无法读取，请稍后重试")
         val list=if(empty) emptyList() else videos
         val data: JSONObject=when(path) {
@@ -49,10 +56,21 @@ internal class UiAuditFixtures(private val context: Context) {
             "/x/relation/relations" -> JSONObject().apply { creators.forEach { put(it.mid.toString(),JSONObject().put("attribute",2)) } }
             "/x/relation/followings" -> JSONObject().put("total",if(empty) 0 else creators.size).put("list",JSONArray(if(empty) emptyList<JSONObject>() else creators.map(::user)))
             "/x/polymer/web-dynamic/v1/feed/all" -> JSONObject().put("has_more",0).put("offset","").put("items",JSONArray())
+            "/x/polymer/web-dynamic/v1/detail" -> {
+                if (!dynamicCommentAudit) return JSONObject().put("code", -404).put("message", "离线测试仅提供动态快照")
+                val post=posts().first()
+                check(request.url.queryParameter("id")==post.id)
+                JSONObject().put("item",JSONObject().put("id_str",post.id).put("type","DYNAMIC_TYPE_WORD")
+                    .put("basic",JSONObject().put("comment_id_str","1057955152016703512").put("comment_type",17))
+                    .put("modules",JSONObject().put("module_author",user(post.author))
+                        .put("module_dynamic",JSONObject().put("desc",JSONObject().put("text","动态评论入口测试")))))
+            }
             "/x/space/wbi/acc/info" -> user(creators.firstOrNull { it.mid.toString()==request.url.queryParameter("mid") } ?: creators[0])
             "/x/space/wbi/arc/search" -> JSONObject().put("list",JSONObject().put("vlist",JSONArray(list.map(::video)))).put("page",JSONObject().put("count",list.size))
             "/x/polymer/web-space/seasons_series_list" -> JSONObject().put("items_lists",JSONObject().put("seasons_list",JSONArray().put(JSONObject().put("meta",JSONObject().put("season_id",201).put("mid",creators[0].mid).put("name","旅行影像：在路上的每一个故事").put("cover",videos[0].cover).put("total",8)))).put("series_list",JSONArray().put(JSONObject().put("meta",JSONObject().put("series_id",202).put("mid",creators[0].mid).put("name","创作笔记与摄影基础").put("cover",videos[1].cover).put("total",12)))).put("page",JSONObject().put("total",2).put("page_size",12)))
             "/x/polymer/web-space/seasons_archives_list" -> JSONObject().put("meta",JSONObject().put("season_id",201).put("mid",creators[0].mid)).put("archives",JSONArray(list.map(::video))).put("page",JSONObject().put("total",list.size).put("page_size",30))
+            "/x/series/series" -> JSONObject().put("meta",JSONObject().put("series_id",202).put("mid",creators[0].mid).put("name","创作笔记与摄影基础"))
+            "/x/series/archives" -> JSONObject().put("archives",JSONArray(list.filter { it.owner.mid==creators[0].mid }.map(::video))).put("page",JSONObject().put("total",list.count { it.owner.mid==creators[0].mid }).put("size",30))
             "/x/v3/fav/folder/created/list", "/x/v3/fav/folder/collected/list", "/x/v3/fav/folder/created/list-all" -> JSONObject().put("count",if(empty) 0 else 2).put("has_more",false).put("list",JSONArray(if(empty) emptyList<JSONObject>() else listOf(folder(),folder(102))))
             "/x/v3/fav/resource/list" -> folder().let { JSONObject().put("info",it).put("has_more",false).put("medias",JSONArray(list.map(::video))) }
             "/x/web-interface/history/cursor" -> JSONObject().put("list",JSONArray(list.take(4).mapIndexed { i,v -> JSONObject().put("title",v.title).put("cover",v.cover).put("author_mid",v.owner.mid).put("author_name",v.owner.name).put("author_face",v.owner.avatar).put("duration",v.duration).put("view_at",1793000000-i*3600).put("progress",if(i==1) -1 else 41).put("history",JSONObject().put("business","archive").put("bvid",v.bvid).put("oid",v.aid).put("cid",30001+i).put("page",1)) })).put("cursor",JSONObject().put("max",0).put("view_at",0))
@@ -63,7 +81,46 @@ internal class UiAuditFixtures(private val context: Context) {
             "/x/player/wbi/playurl" -> JSONObject().put("quality",80).put("timelength",120000).put("durl",JSONArray().put(JSONObject().put("url","https://audit.bilivideo.com/fixture.mp4")))
             "/x/player/wbi/v2" -> JSONObject().put("subtitle",JSONObject().put("subtitles",JSONArray().put(JSONObject().put("id",1).put("lan","zh-CN").put("lan_doc","中文（自动生成）").put("subtitle_url","https://i0.hdslb.com/ui-audit/subtitle.json"))))
             "/x/web-interface/archive/relation" -> JSONObject().put("like",false).put("coin",0).put("favorite",true)
-            "/x/v2/reply/wbi/main" -> JSONObject().put("cursor",JSONObject().put("is_end",true).put("all_count",2)).put("replies",JSONArray((1..2).map { JSONObject().put("rpid_str","$it").put("member",user(creators[it])).put("content",JSONObject().put("message",if(it==1) "很喜欢这样的节奏。留一点时间认真看完，比一直刷更舒服。" else "画面、声音和故事都很棒，期待下一次更新！")).put("like",128*it) }))
+            "/x/v2/reply/wbi/main" -> if (dynamicCommentAudit) {
+                check(request.url.queryParameter("type")=="17" && request.url.queryParameter("oid")=="1057955152016703512")
+                JSONObject().put("cursor",JSONObject().put("is_end",true).put("all_count",1)).put("replies",JSONArray().put(
+                    JSONObject().put("rpid_str","301").put("rcount",1).put("member",user(creators[1]))
+                        .put("content",JSONObject().put("message","动态主评论"))))
+            } else JSONObject().put("cursor",JSONObject().put("is_end",true).put("all_count",2)).put("replies",JSONArray((1..2).map { JSONObject().put("rpid_str","$it").put("member",user(creators[it])).put("content",JSONObject().put("message",if(it==1) "很喜欢这样的节奏。留一点时间认真看完，比一直刷更舒服。" else "画面、声音和故事都很棒，期待下一次更新！")).put("like",128*it) }))
+            "/x/v2/reply/reply" -> {
+                check(dynamicCommentAudit && request.url.queryParameter("oid")=="1057955152016703512" && request.url.queryParameter("type")=="17" && request.url.queryParameter("root")=="301")
+                JSONObject().put("root",JSONObject().put("rpid_str","301")).put("page",JSONObject().put("num",1).put("size",20).put("count",1))
+                    .put("replies",JSONArray().put(JSONObject().put("rpid_str","302").put("root_str","301").put("member",user(creators[2]))
+                        .put("content",JSONObject().put("message","动态楼中楼回复"))))
+            }
+            "/x/v2/history/toview/web" -> {
+                val page = request.url.queryParameter("pn")!!.toInt()
+                val size = request.url.queryParameter("ps")!!.toInt()
+                val rows = watchLater.drop((page - 1) * size).take(size).map { aid ->
+                    video(videos.first { it.aid == aid }).put("cid", 30002).put("progress", 31)
+                }
+                JSONObject().put("count", watchLater.size).put("list", JSONArray(rows))
+            }
+            "/x/v2/history/toview/add", "/x/v2/history/toview/del", "/x/v2/history/toview/v2/dels" -> {
+                val fields = if (path.endsWith("/v2/dels")) {
+                    val form = request.body as MultipartBody
+                    check(form.type == MultipartBody.FORM)
+                    form.parts.associate { part ->
+                        val name = part.headers?.get("Content-Disposition")!!.substringAfter("name=\"").substringBefore('"')
+                        name to Buffer().apply { part.body.writeTo(this) }.readUtf8()
+                    }
+                } else {
+                    val form = request.body as FormBody
+                    (0 until form.size).associate { form.name(it) to form.value(it) }
+                }
+                check(fields["csrf"] == "isolated-fixture")
+                when {
+                    path.endsWith("/add") -> fields.getValue("aid").toLong().let { if (it !in watchLater) watchLater.add(0, it) }
+                    path.endsWith("/del") -> watchLater.remove(fields.getValue("aid").toLong())
+                    else -> watchLater.removeAll(fields.getValue("resources").split(',').map(String::toLong).toSet())
+                }
+                JSONObject()
+            }
             "/x/v2/history/report" -> JSONObject()
             else -> return JSONObject().put("code",-404).put("message","隔离测试未配置此请求")
         }

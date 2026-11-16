@@ -8,6 +8,9 @@ export const account = { mid: 910000, name: 'Bilight 演示', avatar: '/demo-ass
 export const videos = content.videos.map(video => ({ ...video, owner: people.find(person => person.mid === video.ownerMid), views: video.statistics.view }));
 export const collections = content.collections;
 export const history = videos.slice(0, 4).map((video, i) => ({ video, cid: video.parts[0].cid, page: 1, part: video.parts[0].part, progress: Math.min(video.duration, [41, 123, 65, 218][i]), viewedAt: stamp - i * 3600, completed: false }));
+export const watchLater = videos.slice(0, 3).map((video, i) => ({
+  ...video, cid: video.parts[0].cid, progress: 0, addedAt: stamp - i * 3600, unavailable: false,
+}));
 export const page = items => ({ items, hasMore: false });
 const imageURL = path => `https://i0.hdslb.com/bilight-demo/${path.split('/').at(-1)}`;
 const rawUser = user => ({ mid: user.mid, name: user.name, uname: user.name, face: imageURL(user.avatar), sign: user.description ?? '', fans: user.fans ?? 0, attribute: 2, mtime: stamp });
@@ -33,6 +36,7 @@ export const nativeFixtures = {
   '/x/space/wbi/arc/search': { list: { vlist: videos.filter(x => x.owner.mid === people[0].mid).map(rawVideo) }, page: { count: videos.filter(x => x.owner.mid === people[0].mid).length } },
   '/x/polymer/web-space/seasons_series_list': directory(people[0].mid),
   '/x/web-interface/history/cursor': { list: history.map(record => ({ title: record.video.title, cover: imageURL(record.video.cover), author_mid: record.video.owner.mid, author_name: record.video.owner.name, author_face: imageURL(record.video.owner.avatar), duration: record.video.duration, progress: record.progress, view_at: record.viewedAt, history: { business: 'archive', bvid: record.video.bvid, oid: record.video.aid, cid: record.cid, page: 1, part: record.part } })), cursor: { max: 0, view_at: 0, business: '' } },
+  '/x/v2/history/toview/web': { count: watchLater.length, list: watchLater.map(item => ({ ...rawVideo(item), add_at: item.addedAt })) },
   _preview: { creators: Object.fromEntries(people.map(user => [user.mid, rawUser(user)])), videos: Object.fromEntries(videos.map(video => [video.bvid, detail(video)])), directories: Object.fromEntries(people.map(user => [user.mid, directory(user.mid)])) },
 };
 nativeFixtures['/x/web-interface/view'] = nativeFixtures['/x/web-interface/wbi/view'];

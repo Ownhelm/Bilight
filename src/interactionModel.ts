@@ -6,6 +6,7 @@ export function optimisticEngagement(state: VideoEngagement | null, action: 'lik
   else if (action === 'triple') { pending.liked = true; pending.coins = Math.max(1, pending.coins); pending.favorited = true; }
   else if (action.type === 'like') pending.liked = action.liked;
   else if (action.type === 'coin') { pending.coins = Math.max(pending.coins, action.coins); pending.liked ||= Boolean(action.selectLike); }
+  else if (action.type === 'favorite') pending.favorited = action.folderIds.length > 0;
   return pending;
 }
 

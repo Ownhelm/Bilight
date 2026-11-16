@@ -192,9 +192,10 @@ actor BiliHTTP {
     }
     func request(
         _ path: String, query: [String: String] = [:], form: [String: String]? = nil, json: JSON? = nil, wbi: Bool = false,
-        referer: String = "https://www.bilibili.com/"
+        referer: String = "https://www.bilibili.com/", expectedVersion: UUID? = nil, multipart: Bool = false
     ) async throws -> JSON {
-        let envelope = try await envelope(path, query: query, form: form, json: json, wbi: wbi, referer: referer)
+        let envelope = try await envelope(path, query: query, form: form, json: json, wbi: wbi, referer: referer,
+            expectedVersion: expectedVersion, multipart: multipart)
         let code = int(envelope["code"])
         guard code == 0 else {
             let text = clean(envelope["message"] ?? envelope["msg"])
@@ -241,10 +242,14 @@ actor BiliHTTP {
         else { throw BiliFailure(code: "DANMAKU_UNAVAILABLE", message: "弹幕暂时无法读取，请重试。") }
         return data
     }
-    private func envelope(_ path: String, query: [String: String], form: [String: String]?, json: JSON? = nil, wbi: Bool, referer: String)
+    private func envelope(
+        _ path: String, query: [String: String], form: [String: String]?, json: JSON? = nil, wbi: Bool, referer: String,
+        expectedVersion: UUID? = nil, multipart: Bool = false
+    )
         async throws -> JSON
     {
-        let version = generation
+        let version = expectedVersion ?? generation
+        try check(version)
         guard
             var components = URLComponents(
                 string: path.hasPrefix("https://") ? path : "https://api.bilibili.com\(path)")
@@ -268,12 +273,25 @@ actor BiliHTTP {
         }.joined(separator: "; ")
         if !header.isEmpty { request.setValue(header, forHTTPHeaderField: "Cookie") }
         if let form {
-            request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            request.httpBody = form.keys.sorted().map { "\(Self.encode($0))=\(Self.encode(form[$0]!))" }.joined(
-                separator: "&"
-            ).data(using: .utf8)
+            if multipart {
+                let boundary = UUID().uuidString
+                request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+                var body = Data()
+                for (name, value) in form.sorted(by: { $0.key < $1.key }) {
+                    guard name.range(of: "^[a-z_]+$", options: .regularExpression) != nil else { throw BiliFailure.invalid }
+                    body.append(Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(name)\"\r\n\r\n\(value)\r\n".utf8))
+                }
+                body.append(Data("--\(boundary)--\r\n".utf8))
+                request.httpBody = body
+            } else {
+                request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+                request.httpBody = form.keys.sorted().map { "\(Self.encode($0))=\(Self.encode(form[$0]!))" }.joined(
+                    separator: "&"
+                ).data(using: .utf8)
+            }
         }
         if let json { request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: json) }
+        try check(version); try Task.checkCancellation()
         let (data, response) = try await session.data(for: request)
         try Task.checkCancellation()
         try check(version)
