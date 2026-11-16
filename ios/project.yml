@@ -22,8 +22,8 @@ targets:
       properties:
         CADisableMinimumFrameDurationOnPhone: true
         CFBundleDisplayName: Bilight
-        CFBundleShortVersionString: '2.0.0'
-        CFBundleVersion: '14'
+        CFBundleShortVersionString: '0.2.0'
+        CFBundleVersion: '15'
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]

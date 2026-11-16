@@ -1,4 +1,4 @@
-# Bilight 2.0.0 · 评论互动、稍后再看与播放器升级
+# Bilight 0.2.0 · 评论互动、稍后再看与播放器升级
 
 ## 1. 视频和动态都能参与讨论
 
@@ -18,4 +18,4 @@ iPhone、Android 和网页端都可发评论、回复楼中楼、点赞和 @ 用
 
 ## 5. 下载与安装
 
-Android 使用 `Bilight-v2.0.0-android.apk`（构建号 16，Android 8.0 及以上），沿用上一版签名。iPhone 使用 `Bilight-v2.0.0-iOS-unsigned.ipa`（构建号 14），需自行签名后安装。电脑端可使用 `Bilight-v2.0.0-source.zip`，按 README 本地运行。附件校验值见 `SHA256SUMS.txt`。
+Android 使用 `Bilight-v0.2.0-android.apk`（构建号 17，Android 8.0 及以上），沿用上一版签名。iPhone 使用 `Bilight-v0.2.0-iOS-unsigned.ipa`（构建号 15），需自行签名后安装。电脑端可使用 `Bilight-v0.2.0-source.zip`，按 README 本地运行。附件校验值见 `SHA256SUMS.txt`。

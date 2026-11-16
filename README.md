@@ -23,7 +23,7 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 ## 界面预览
 
-以下为 Bilight 2.0.0 的界面，使用演示账号与公开内容。
+以下为 Bilight 0.2.0 的界面，使用演示账号与公开内容。
 
 ### 手机端
 
@@ -85,7 +85,7 @@ Bilight 的起点很简单：**我想继续看 B 站，但想由自己决定看�
 
 目前支持普通 UP 主视频，不包含直播和番剧。画质和内容访问仍受账号会员权限、地区及平台限制；网页端若被浏览器拦截自动播放，点击播放即可。
 
-本版改动见 [v2.0.0 更新说明](docs/release-v2.0.0.md)。
+本版改动见 [v0.2.0 更新说明](docs/release-v0.2.0.md)。
 
 ## 快速开始
 
@@ -118,11 +118,11 @@ docker compose up -d --build
 
 手机端使用 App 内官方登录页，**安装后可以独立使用，不需要电脑或 Docker 保持运行。**
 
-可从[发行版](https://github.com/Ownhelm/Bilight/releases/tag/v2.0.0)下载完整源码包和 [iPhone 未签名 IPA](https://github.com/Ownhelm/Bilight/releases/download/v2.0.0/Bilight-v2.0.0-iOS-unsigned.ipa)。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
+可从[发行版](https://github.com/Ownhelm/Bilight/releases/tag/v0.2.0)下载完整源码包和 [iPhone 未签名 IPA](https://github.com/Ownhelm/Bilight/releases/download/v0.2.0/Bilight-v0.2.0-iOS-unsigned.ipa)。iPhone 需要自行构建或为 IPA 签名后安装，暂未提供 App Store 或 TestFlight 版本。受 iOS 分发限制，使用免费 Apple ID 签名安装的 App 通常每 7 天需要重新签名并安装一次。详细步骤见 [iPhone 安装与使用](ios/README.md)。
 
 ### Android：安装 APK
 
-支持 Android 8.0 及以上。下载 [Android APK](https://github.com/Ownhelm/Bilight/releases/download/v2.0.0/Bilight-v2.0.0-android.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
+支持 Android 8.0 及以上。下载 [Android APK](https://github.com/Ownhelm/Bilight/releases/download/v0.2.0/Bilight-v0.2.0-android.apk)，打开文件并按系统提示允许此次安装。App 直接连接 B 站，登录后可以独立使用，无需电脑、Docker、root 或 USB 调试。
 
 APK 使用项目开发签名；从同一发布来源更新时可覆盖安装，建议先导出重要的离线文件。
 
