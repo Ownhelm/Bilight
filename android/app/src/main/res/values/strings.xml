@@ -1,5 +1,0 @@
-<resources>
-    <string name="app_name">Bilight</string>
-    <string name="media_seek_back_10">后退 10 秒</string>
-    <string name="media_seek_forward_10">前进 10 秒</string>
-</resources>
